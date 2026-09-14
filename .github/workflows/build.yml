@@ -63,11 +63,6 @@ jobs:
           releaseName: "PHOENIX DUB v${{ env.PKG_VERSION }}"
           releaseBody: |
             Автосборка из main (commit ${{ github.sha }}).
-
-            Скачайте установщик под свою ОС ниже. Дальше приложение
-            обновляется само — проверяет новую версию при старте.
-
-            Для QC звука нужен ffmpeg в PATH.
           releaseDraft: false
           prerelease: false
           uploadUpdaterJson: true
