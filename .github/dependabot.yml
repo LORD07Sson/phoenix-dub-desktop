@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Rust-зависимости десктоп-клиента (src-tauri/Cargo.toml)
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "rust"]
+
+  # Python-зависимости старого клиента (архив, но ffmpeg/keyring/requests
+  # там ещё установлены реальными людьми — уязвимости в них тоже стоит знать)
+  - package-ecosystem: "pip"
+    directory: "/legacy_python_client"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "python", "legacy"]
+
+  # Сам workflow (actions/checkout, tauri-action и т.д.)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "ci"]

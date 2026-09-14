@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHOENIX DUB Desktop</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ===================== Экран входа ===================== -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div class="auth-flame">🔥</div>
+    <h1>Вход в студию</h1>
+    <p>Напишите боту в Telegram команду <b>/desktop</b> — он пришлёт одноразовый
+      6-значный код. Введите его сюда.</p>
+    <input id="code-input" class="code-input" inputmode="numeric" maxlength="6" placeholder="000000" autofocus>
+    <button id="submit-code" class="btn primary" style="width:100%; justify-content:center;">Войти</button>
+    <div id="auth-error" class="auth-error"></div>
+  </div>
+</div>
+
+<!-- ===================== Основной экран ===================== -->
+<div id="app-screen" hidden>
+  <div class="titlebar">
+    <div class="titlebar-left">
+      <div class="logo"></div>
+      <b>PHOENIX DUB Desktop</b>
+      <span id="whoami"></span>
+    </div>
+    <div class="titlebar-right">
+      <button id="theme-toggle" class="icon-btn" title="Светлая/тёмная тема">🌓</button>
+      <button id="open-settings" class="icon-btn" title="Настройки">⚙️</button>
+      <button id="open-qc" class="btn">🎧 QC звука</button>
+      <button id="refresh-btn" class="btn">↻ Обновить</button>
+      <button id="logout-btn" class="btn ghost">Выйти</button>
+    </div>
+  </div>
+
+  <div class="tabstrip" id="tabstrip">
+    <button class="tab-btn active" data-tab="overview">📊 Обзор</button>
+    <button class="tab-btn" data-tab="list">📋 Список</button>
+    <button class="tab-btn" data-tab="profile">👤 Я</button>
+  </div>
+
+  <!-- ===== Обзор ===== -->
+  <div class="tab-panel active" data-panel="overview">
+    <div class="scroll-panel" id="overview-panel">
+      <div id="overview-body"></div>
+    </div>
+  </div>
+
+  <!-- ===== Список ===== -->
+  <div class="tab-panel" data-panel="list">
+    <div class="toolbar">
+      <input id="search-input" type="search" placeholder="Поиск по номеру, названию, исполнителю…  (Ctrl+F)">
+      <select id="status-filter">
+        <option value="">Все статусы</option>
+        <option value="draft">Черновик</option>
+        <option value="working">В работе</option>
+        <option value="review">На проверке</option>
+        <option value="revision">Требует исправления</option>
+        <option value="completed">Завершено</option>
+        <option value="cancelled">Отменено</option>
+      </select>
+      <select id="priority-filter">
+        <option value="">Все приоритеты</option>
+        <option value="low">Низкий</option>
+        <option value="normal">Обычный</option>
+        <option value="high">Высокий</option>
+        <option value="urgent">Срочный</option>
+      </select>
+    </div>
+
+    <div class="quick-filters" id="quick-filters">
+      <button class="qf-chip" data-qf="mine">👤 Мои</button>
+      <button class="qf-chip" data-qf="overdue">⏰ Просрочено</button>
+      <button class="qf-chip" data-qf="unassigned">🫥 Без исполнителя</button>
+    </div>
+
+    <div class="content">
+      <table>
+        <thead>
+          <tr>
+            <th class="col-check"><input type="checkbox" id="select-all"></th>
+            <th data-sort="public_id" class="sorted asc">Номер</th>
+            <th data-sort="title">Название</th>
+            <th data-sort="status">Статус</th>
+            <th data-sort="priority">Приоритет</th>
+            <th data-sort="deadline">Срок</th>
+            <th>Исполнители</th>
+          </tr>
+        </thead>
+        <tbody id="reports-body"></tbody>
+      </table>
+      <div id="skeleton" class="skeleton-wrap" hidden>
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+      </div>
+      <div id="empty-state" class="empty-state" hidden>
+        <div style="font-size:34px; margin-bottom:8px;">🗂️</div>
+        Ничего не найдено — попробуйте другой фильтр.
+      </div>
+
+      <div id="bulk-bar" class="bulk-bar" hidden>
+        <b id="bulk-count">0</b> выбрано
+        <div class="spacer"></div>
+        <button id="bulk-status" class="btn">Сменить статус</button>
+        <button id="bulk-assign" class="btn">Назначить</button>
+        <button id="bulk-clear" class="btn ghost">Снять выделение</button>
+      </div>
+    </div>
+
+    <div class="statusbar" id="statusbar">Отчётов: 0 · клик по строке — открыть карточку, чекбоксы — массовые операции · Ctrl+Shift+P — показать/скрыть окно из любого места</div>
+  </div>
+
+  <!-- ===== Я ===== -->
+  <div class="tab-panel" data-panel="profile">
+    <div class="scroll-panel" id="profile-panel">
+      <div id="profile-body"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-root"></div>
+
+<!-- ===================== Шаблоны модалок (наполняются JS) ===================== -->
+<template id="tpl-overlay">
+  <div class="overlay">
+    <div class="sheet"></div>
+  </div>
+</template>
+<template id="tpl-overlay-wide">
+  <div class="overlay">
+    <div class="sheet sheet-wide"></div>
+  </div>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>

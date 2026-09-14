@@ -1,0 +1,73 @@
+name: Build desktop client (Tauri)
+
+on:
+  # Раньше собирали под все 3 ОС на каждый push — GitHub Actions даёт
+  # ограниченный бесплатный пакет минут на приватных репо в месяц, а
+  # macOS/Windows-раннеры съедают его в 10x/2x быстрее обычного (см.
+  # CHANGELOG v0.4.1 — упёрлись в лимит после серии пушей за день).
+  # Теперь автосборка идёт только когда меняется VERSION — то есть
+  # реально готовим релиз, а не на любую правку CI/доков/README.
+  # Собрать вне этого — вручную, кнопкой "Run workflow" (workflow_dispatch).
+  push:
+    branches: [main]
+    paths: ["VERSION"]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    # Только Windows — раньше собирали под 3 ОС параллельно, но
+    # одновременные джобы регулярно ловили гонку при создании релиза
+    # (tauri-action issue: несколько джобов одновременно бьют GitHub
+    # release API "create release", один получает 403). Один джоб —
+    # гонки просто неоткуда взяться. macOS/Linux можно вернуть в матрицу
+    # позже, если понадобится — просто раскомментировать.
+    permissions:
+      contents: write
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Версия релиза из VERSION
+        shell: bash
+        run: echo "PKG_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+
+      # VERSION — единственный источник версии; tauri.conf.json/Cargo.toml
+      # подставляются отсюда прямо перед сборкой, чтобы номер в самих
+      # именах файлов установщиков никогда не расходился с тегом релиза
+      # (однажды уже разъехалось — v0.3.0 собрал файлы "...0.2.0...").
+      - name: Подставить версию в tauri.conf.json/Cargo.toml
+        shell: bash
+        run: |
+          set -e
+          node -e "
+            const fs = require('fs');
+            const p = 'src-tauri/tauri.conf.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+            c.version = '${{ env.PKG_VERSION }}';
+            fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
+          "
+          sed -i.bak -E 's/^version = \"[0-9.]+\"/version = \"${{ env.PKG_VERSION }}\"/' src-tauri/Cargo.toml
+          rm -f src-tauri/Cargo.toml.bak
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: .
+          tagName: v${{ env.PKG_VERSION }}
+          releaseName: "PHOENIX DUB v${{ env.PKG_VERSION }}"
+          releaseBody: |
+            Автосборка из main (commit ${{ github.sha }}).
+
+            Скачайте установщик под свою ОС ниже. Дальше приложение
+            обновляется само — проверяет новую версию при старте.
+
+            Для QC звука нужен ffmpeg в PATH.
+          releaseDraft: false
+          prerelease: false
+          uploadUpdaterJson: true

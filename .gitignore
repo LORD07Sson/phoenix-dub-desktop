@@ -1,0 +1,18 @@
+# Rust/Tauri build output — пересобирается CI на каждый push
+# (.github/workflows/build.yml), незачем таскать в истории git.
+/src-tauri/target/
+/src-tauri/gen/
+
+# Старый PySide6-клиент (см. legacy_python_client/README.md) —
+# его собственные build-артефакты по тем же причинам не нужны в git.
+legacy_python_client/venv/
+legacy_python_client/__pycache__/
+legacy_python_client/*.pyc
+legacy_python_client/build/
+legacy_python_client/*.spec
+legacy_python_client/releases/*/phoenix-dub-desktop
+legacy_python_client/releases/*/phoenix-dub-desktop.exe
+legacy_python_client/releases/*/phoenix-dub-desktop.app
+
+node_modules/
+*.log
