@@ -31,8 +31,13 @@ jobs:
     # уже идущий запуск (cancel-in-progress: false) — обрываться
     # посреди публикации релиза хуже, чем просто выстроиться в очередь
     # и подождать; см. тот же приём в MHSanaei/3x-ui release.yml.
+    # Общая группа с build.yml: push, меняющий VERSION, запускает оба
+    # workflow сразу, и оба публикуют релизы через vpk в один и тот же
+    # репозиторий. Не отменяем уже идущий запуск — обрываться посреди
+    # публикации хуже, чем выстроиться в очередь и подождать; см. тот же
+    # приём в MHSanaei/3x-ui release.yml.
     concurrency:
-      group: alpha-release
+      group: velopack-publish
       cancel-in-progress: false
 
     steps:
@@ -63,7 +68,9 @@ jobs:
           echo "SHORT_SHA=$short_sha" >> "$GITHUB_ENV"
           echo "PKG_VERSION=$(cat VERSION)-alpha.${{ github.run_number }}+$short_sha" >> "$GITHUB_ENV"
 
-      - name: Подставить версию в tauri.conf.json/Cargo.toml/settings.js
+      # APP_VERSION в интерфейсе подставляет Vite из PKG_VERSION (см.
+      # vite.config.js) — sed по src/app/settings.js больше не нужен.
+      - name: Подставить версию в tauri.conf.json/Cargo.toml
         shell: bash
         run: |
           set -e
@@ -76,16 +83,16 @@ jobs:
           "
           sed -i.bak -E 's/^version = \"[0-9.]+\"/version = \"${{ env.PKG_VERSION }}\"/' src-tauri/Cargo.toml
           rm -f src-tauri/Cargo.toml.bak
-          sed -i.bak -E 's/const APP_VERSION = \"[0-9.]+\"/const APP_VERSION = \"${{ env.PKG_VERSION }}\"/' src/app/settings.js
-          rm -f src/app/settings.js.bak
 
       # Фронтенд теперь собирается Vite (src/ -> dist/) — обязательно
       # ПОСЛЕ подстановки версии выше, см. build.yml за тем же самым.
-      - name: npm ci && vite build
+      - name: npm ci, lint && vite build
         shell: bash
         run: |
           npm ci
+          npm run lint
           npm run build
+          npm run verify
 
       # Тот же закреплённый ffmpeg.exe, что и в build.yml — держать в
       # синхроне руками при обновлении URL/SHA256 там.

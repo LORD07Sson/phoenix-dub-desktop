@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "lint": "eslint .",
+    "verify": "node scripts/verify-modules.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",
@@ -13,7 +15,12 @@
     "solid-js": "^1.9.9"
   },
   "devDependencies": {
+    "eslint": "^10.10.0",
+    "jsdom": "^26.1.0",
     "vite": "^7.1.9",
     "vite-plugin-solid": "^2.11.9"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }
