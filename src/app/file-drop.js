@@ -26,8 +26,18 @@ import { runQcAnalysis, QC_EXTENSIONS } from "./qc.js";
 let activeReportId = null;
 export function setDropTarget(publicId) { activeReportId = publicId; }
 
-const ALLOWED_EXT = /\.(wav|mp3|flac|m4a|ogg|oga|mp4|mov|mkv|avi|png|jpe?g|webp|pdf|docx?|pptx?|zip)$/i;
-const QC_EXT_RE = new RegExp(`\\.(${QC_EXTENSIONS.join("|")})$`, "i");
+// Всё, что можно приложить к отчёту = то, что понимает QC (аудио/видео)
+// плюс документы и картинки. Раньше это был отдельный литерал-регэксп,
+// и он разъехался с QC_EXTENSIONS: .aac прогонялся через QC, но на
+// открытой карточке отчёта отклонялся как «формат не поддерживается».
+// Тот же список продублирован в Rust (ALLOWED_UPLOAD_EXT в main.rs) —
+// держать в синхроне руками, JS-проверку легко обойти, Rust-нельзя.
+export const ATTACH_EXTENSIONS = [
+  ...QC_EXTENSIONS, "oga", "avi", "png", "jpg", "jpeg", "webp", "pdf", "doc", "docx", "ppt", "pptx", "zip",
+];
+const extRe = list => new RegExp(`\\.(${list.join("|")})$`, "i");
+const ALLOWED_EXT = extRe(ATTACH_EXTENSIONS);
+const QC_EXT_RE = extRe(QC_EXTENSIONS);
 
 function baseName(path) {
   return path.split(/[\\/]/).pop() || path;

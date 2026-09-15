@@ -6,18 +6,19 @@
 // «Тайтлы» — доступно любому админу (сервер и так перепроверяет
 // _require_admin на каждый вызов), отдельного gate на кнопку не нужно.
 
-import { API_BASE, apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
-import { state } from "./state.js";
+import { apiGet, apiPost, openSheet, toast, dialogSkeletonHtml, mediaUrl } from "./api.js";
 import { esc } from "./utils.js";
 
 function imgProxy(url) {
-  if (!url) return "";
-  return `${API_BASE}/img_proxy?url=${encodeURIComponent(url)}&init_data=${encodeURIComponent(state.token)}`;
+  return url ? mediaUrl("/img_proxy", { url }) : "";
 }
 
 // Экспортируются — те же кэши переиспользует редактор пайплайна в
 // report-detail.js (тот же список ролей/исполнителей, дважды его
 // заводить незачем).
+// Кэши живут до следующего «Обновить» (clearDirectoryCache зовёт
+// refreshAll в tabs.js) — иначе только что заведённый коллега не
+// появлялся в списках назначения до перезапуска приложения.
 let META_ROLES_CACHE = null;
 export async function loadRoles() {
   if (META_ROLES_CACHE) return META_ROLES_CACHE;
@@ -30,6 +31,11 @@ export async function loadAssignable() {
   if (ASSIGNABLE_CACHE) return ASSIGNABLE_CACHE;
   try { ASSIGNABLE_CACHE = (await apiGet("/assignable-users")).users || []; } catch (_) { ASSIGNABLE_CACHE = []; }
   return ASSIGNABLE_CACHE;
+}
+
+export function clearDirectoryCache() {
+  META_ROLES_CACHE = null;
+  ASSIGNABLE_CACHE = null;
 }
 
 export function userOptionsHtml(users, selectedTelegramId) {
@@ -206,8 +212,9 @@ async function openTitleAdminDetail(titleId, onClose) {
       return;
     }
 
-    const posterHtml = d.poster_url
-      ? `<img src="${imgProxy(d.poster_url)}" alt="" style="width:80px; height:110px; object-fit:cover; border-radius:8px;">`
+    const posterSrc = imgProxy(d.poster_url);
+    const posterHtml = posterSrc
+      ? `<img src="${posterSrc}" alt="" style="width:80px; height:110px; object-fit:cover; border-radius:8px;">`
       : `<div style="width:80px; height:110px; border-radius:8px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:28px;">🎬</div>`;
 
     const crewRows = (d.crew || []).map(c => `
@@ -296,14 +303,19 @@ async function openTitleAdminDetail(titleId, onClose) {
         const candidates = res.candidates || [];
         box.innerHTML = candidates.length ? candidates.map(c => `
           <div class="mini-row">
-            ${c.poster_url ? `<img src="${imgProxy(c.poster_url)}" alt="" style="width:34px; height:46px; object-fit:cover; border-radius:4px;">` : ""}
+            ${imgProxy(c.poster_url) ? `<img src="${imgProxy(c.poster_url)}" alt="" style="width:34px; height:46px; object-fit:cover; border-radius:4px;">` : ""}
             <span class="name">${esc(c.name)} <span class="meta" style="color:var(--ink-dim); font-size:11px;">(${esc(c.source)})</span></span>
-            <button class="btn" data-confirm-candidate="${c.source}:${c.source_id}" data-poster="${esc(c.poster_url || "")}">Подтвердить</button>
+            <button class="btn" data-confirm-candidate data-source="${esc(c.source)}" data-source-id="${esc(c.source_id)}" data-poster="${esc(c.poster_url || "")}">Подтвердить</button>
           </div>
         `).join("") : `<div class="no-assignee">Ничего не найдено</div>`;
         box.querySelectorAll("[data-confirm-candidate]").forEach(btn => {
           btn.addEventListener("click", async () => {
-            const [source, sourceId] = btn.dataset.confirmCandidate.split(":");
+            // Раньше source и source_id склеивались через ":" в один
+            // атрибут БЕЗ экранирования (единственное место в проекте,
+            // где чужие данные шли в HTML-атрибут напрямую) и потом
+            // разбирались split(":") — ломалось на любом id с
+            // двоеточием. Теперь два отдельных экранированных атрибута.
+            const { source, sourceId } = btn.dataset;
             btn.disabled = true;
             try {
               await apiPost(`/titles/${titleId}/meta/confirm`, { source, source_id: sourceId, poster_url: btn.dataset.poster || null });
@@ -325,7 +337,11 @@ async function openTitleAdminDetail(titleId, onClose) {
     });
     sheet.querySelector("#crew-add").addEventListener("click", async () => {
       const role = sheet.querySelector("#crew-role-new").value;
-      const telegram_id = sheet.querySelector("#crew-user-new").value || null;
+      // Number, а не строка из value: в остальных вызовах API
+      // telegram_id уходит числом, и расхождение типов на сервере —
+      // лишний повод для «молча не сработало».
+      const rawUser = sheet.querySelector("#crew-user-new").value;
+      const telegram_id = rawUser ? Number(rawUser) : null;
       if (!role) { toast("Выберите роль.", "error"); return; }
       try {
         await apiPost(`/titles/${titleId}/crew`, { role, telegram_id });
@@ -337,7 +353,7 @@ async function openTitleAdminDetail(titleId, onClose) {
     sheet.querySelectorAll("[data-char-voice]").forEach(sel => {
       sel.addEventListener("change", async () => {
         try {
-          await apiPost(`/titles/${titleId}/characters/${sel.dataset.charVoice}/voice`, { telegram_id: sel.value || null });
+          await apiPost(`/titles/${titleId}/characters/${sel.dataset.charVoice}/voice`, { telegram_id: sel.value ? Number(sel.value) : null });
           toast("Актёр озвучки обновлён.");
         } catch (e) { toast(`Не удалось назначить: ${e.message}`, "error"); }
       });

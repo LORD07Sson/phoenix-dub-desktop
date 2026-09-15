@@ -5,6 +5,18 @@
 // а этот файл сам написан в CommonJS (module.exports).
 module.exports = [
   {
+    // Плоский конфиг ESLint 9 линтует ВСЕ .js в дереве, а не только
+    // описанные ниже — без этого `npm run lint` после сборки падал на
+    // сгенерированных ассетах в src-tauri/target/ и на собранном dist/.
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "src-tauri/target/**",
+      "src-tauri/gen/**",
+      "legacy_python_client/**",
+    ],
+  },
+  {
     // src/app/*.js(x) — наш код, ES-модули (import/export). src/vendor/
     // больше нет — vendored-копии npm-пакетов Tauri заменены реальными
     // зависимостями (см. package.json), их резолвит и бандлит Vite.
@@ -32,6 +44,8 @@ module.exports = [
         MutationObserver: "readonly",
         CustomEvent: "readonly",
         AbortController: "readonly",
+        // Подставляется Vite на этапе сборки (define в vite.config.js).
+        __APP_VERSION__: "readonly",
       },
     },
     rules: {

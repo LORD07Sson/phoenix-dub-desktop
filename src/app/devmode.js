@@ -63,11 +63,15 @@ export function devPanelHtml(d) {
   `;
 }
 
-export function wireDevPanel(root, telegramId, onSaved) {
+export function wireDevPanel(root, telegramId, onSaved, currentRole) {
   loadMetaRoles().then(roles => {
     const sel = root.querySelector("#dev-role-select");
     if (!sel) return;
-    sel.innerHTML = `<option value="">— без роли —</option>` + roles.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+    // Текущая роль человека должна быть выбрана: раньше список
+    // заполнялся без selected, открывался на «— без роли —», и
+    // «Сохранить роль», нажатое не глядя, стирало роль в пустую.
+    sel.innerHTML = `<option value="">— без роли —</option>` + roles.map(r =>
+      `<option value="${esc(r)}" ${r === currentRole ? "selected" : ""}>${esc(r)}</option>`).join("");
   });
 
   const roleBtn = root.querySelector("#dev-role-save");

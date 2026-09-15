@@ -1,7 +1,7 @@
 // Переключение вкладок + первичная/повторная загрузка данных активной.
 
 import { state } from "./state.js";
-import { apiGet } from "./api.js";
+import { apiGet, toast } from "./api.js";
 import { $, $all } from "./utils.js";
 import { loadOverview } from "./Overview.jsx";
 import { loadReports } from "./reports.js";
@@ -9,12 +9,31 @@ import { loadBoard } from "./board.js";
 import { loadTitlesTab } from "./titles.js";
 import { loadFeed } from "./feed.js";
 import { loadProfile } from "./profile.js";
+import { clearDirectoryCache } from "./titles-admin.js";
+
+// Загрузчики возвращают false, если данные взять не удалось (сеть/сервер)
+// — см. loadActiveTab ниже.
+const LOADERS = {
+  overview: loadOverview,
+  list: loadReports,
+  board: loadBoard,
+  titles: loadTitlesTab,
+  feed: loadFeed,
+  profile: loadProfile,
+};
+
+// Контейнеры вкладок — чистятся при выходе из аккаунта, чтобы данные
+// предыдущего пользователя не остались висеть в DOM.
+const TAB_BODIES = ["#overview-body", "#board-body", "#titles-body", "#feed-body", "#profile-body", "#reports-body"];
 
 export function switchTab(name) {
   state.activeTab = name;
   $all(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
   $all(".tab-panel").forEach(p => p.classList.toggle("active", p.dataset.panel === name));
-  loadActiveTab();
+  // Переключение вкладки — не await: ловим падение сами, чтобы
+  // неожиданная ошибка рендера не уходила в консоль необработанным
+  // reject'ом.
+  loadActiveTab().catch(e => toast(`Не удалось открыть вкладку: ${e.message}`, "error"));
 }
 $all(".tab-btn").forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 
@@ -23,17 +42,30 @@ $all(".tab-btn").forEach(b => b.addEventListener("click", () => switchTab(b.data
 // loadReports() и т.п., а не после того, как они реально отработали,
 // поэтому кнопка выглядела снятой с паузы за секунды до того, как
 // данные на самом деле пришли).
-export function loadActiveTab(force) {
+//
+// Вкладка помечается загруженной только после УСПЕШНОЙ загрузки:
+// раньше пометка ставилась до запроса, и вкладка, единожды упавшая по
+// сети, навсегда оставалась с текстом «Не удалось загрузить» — при
+// возврате на неё повторного запроса уже не было.
+export async function loadActiveTab(force) {
   const name = state.activeTab;
-  if (!force && state.loadedTabs.has(name)) return Promise.resolve();
-  state.loadedTabs.add(name);
-  if (name === "overview") return loadOverview();
-  if (name === "list") return loadReports();
-  if (name === "board") return loadBoard();
-  if (name === "titles") return loadTitlesTab();
-  if (name === "feed") return loadFeed();
-  if (name === "profile") return loadProfile();
-  return Promise.resolve();
+  if (!force && state.loadedTabs.has(name)) return;
+  const loader = LOADERS[name];
+  if (!loader) return;
+  const ok = await loader();
+  if (ok !== false) state.loadedTabs.add(name);
+  else state.loadedTabs.delete(name);
+}
+
+export function clearTabDom() {
+  for (const sel of TAB_BODIES) {
+    const el = $(sel);
+    if (el) el.innerHTML = "";
+  }
+  const bulk = $("#bulk-bar");
+  if (bulk) bulk.hidden = true;
+  const statusbar = $("#statusbar");
+  if (statusbar) statusbar.textContent = "";
 }
 
 let refreshInFlight = false;
@@ -50,6 +82,7 @@ export async function refreshAll() {
   const originalText = btn.textContent;
   btn.textContent = "⏳ Обновляю…";
   try {
+    clearDirectoryCache();
     await loadUsers();
     await loadActiveTab(true);
   } finally {

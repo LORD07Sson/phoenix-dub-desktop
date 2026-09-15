@@ -4,15 +4,36 @@
 //! паузы ищутся порогом громкости, как и в прежней реализации.
 //!
 //! Декодирование — через `ffmpeg`. Раньше требовался ffmpeg в PATH — теперь
-//! сначала пробуем версию, лежащую рядом с самим приложением (кладётся в
-//! ту же папку, что и .exe, через bundle.resources в tauri.conf.json —
-//! CI качает её один раз при сборке, см. build.yml), и только если её нет,
-//! откатываемся на системный PATH. Так у пользователя ничего не нужно
-//! ставить отдельно, но у кого-то PATH тоже сработает как раньше.
+//! сначала пробуем версию, лежащую рядом с самим приложением, и только
+//! если её нет, откатываемся на системный PATH. Так у пользователя ничего
+//! не нужно ставить отдельно, но у кого-то PATH тоже сработает как раньше.
+//! Рядом с .exe ffmpeg кладёт не bundle.resources (bundle в
+//! tauri.conf.json выключен — пакует Velopack, а не tauri-bundler), а
+//! шаг `vpk pack` в CI: он копирует и сам бинарник, и ffmpeg.exe в одну
+//! директорию pack_dir/ (см. build.yml).
 
 use serde::Serialize;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
+
+/// Приложение собрано как GUI (windows_subsystem = "windows"), но у
+/// запускаемого из него процесса своя консоль — и Windows показывает её
+/// отдельным чёрным окном, мигающим поверх интерфейса на каждый запуск
+/// ffmpeg. CREATE_NO_WINDOW это отключает.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn ffmpeg_command(exe: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(exe);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
 
 #[derive(Serialize, Clone)]
 pub struct QcFinding {
@@ -57,7 +78,7 @@ fn bundled_ffmpeg_path() -> Option<PathBuf> {
 /// сказать об этом и откатиться на PATH, чем один раз молча упасть на
 /// декодировании реального файла с непонятной ошибкой.
 fn ffmpeg_supported(exe: &std::path::Path) -> bool {
-    Command::new(exe)
+    ffmpeg_command(exe)
         .arg("-version")
         .output()
         .map(|o| o.status.success())
@@ -66,7 +87,14 @@ fn ffmpeg_supported(exe: &std::path::Path) -> bool {
 
 /// Резолвит, каким ffmpeg пользоваться: сначала bundled рядом с .exe
 /// (если он реально запускается), иначе — просто "ffmpeg" из PATH.
-fn resolve_ffmpeg() -> String {
+/// Результат кэшируется на процесс: проверка `-version` — это ещё один
+/// запуск процесса, делать его перед КАЖДЫМ анализом файла незачем.
+fn resolve_ffmpeg() -> &'static str {
+    static RESOLVED: OnceLock<String> = OnceLock::new();
+    RESOLVED.get_or_init(resolve_ffmpeg_uncached).as_str()
+}
+
+fn resolve_ffmpeg_uncached() -> String {
     if let Some(bundled) = bundled_ffmpeg_path() {
         if ffmpeg_supported(&bundled) {
             return bundled.to_string_lossy().into_owned();
@@ -228,7 +256,7 @@ fn amplitude_to_dbfs(a: f64) -> f64 {
 /// читая результат из stdout — временных файлов не создаём.
 fn decode_pcm(path: &str) -> Result<Vec<i16>, String> {
     let ffmpeg = resolve_ffmpeg();
-    let output = Command::new(&ffmpeg)
+    let output = ffmpeg_command(ffmpeg)
         .args([
             "-v", "error",
             "-i", path,

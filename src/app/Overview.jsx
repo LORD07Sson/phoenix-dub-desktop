@@ -14,6 +14,10 @@ import { render } from "solid-js/web";
 import { For, Show, onMount } from "solid-js";
 import { apiGet, openSheet, dialogSkeletonHtml } from "./api.js";
 import { $, esc, initials, STATUS_COLOR_VAR } from "./utils.js";
+// esc() нужен только в строковых шаблонах (openMonthlyTopSheet ниже,
+// donutHtml в charts.js). В JSX его быть не должно: Solid экранирует
+// текстовые узлы сам, и esc() поверх этого даёт двойное экранирование —
+// имя «Иванов & Co» рендерилось как «Иванов &amp; Co».
 import { donutHtml, donutLegendHtml, playDonutIntro } from "./charts.js";
 import { avatarHtml, loadAvatars } from "./profile.js";
 
@@ -107,8 +111,8 @@ function Overview(props) {
               {(p, i) => (
                 <div class="mini-row">
                   <span class="rank">{i() + 1}</span>
-                  <span class="avatar-bubble" style={{ "margin-left": "0" }}>{esc(initials(p.name))}</span>
-                  <span class="name">{esc(p.name)}</span>
+                  <span class="avatar-bubble" style={{ "margin-left": "0" }}>{initials(p.name)}</span>
+                  <span class="name">{p.name}</span>
                   <span class="val">{p.assigned} назначено{p.overdue ? ` · ⏰${p.overdue}` : ""}</span>
                 </div>
               )}
@@ -132,7 +136,7 @@ function Overview(props) {
             <For each={d.birthdays}>
               {b => (
                 <div class="mini-row">
-                  <span class="name">🎂 {esc(b.name)}</span>
+                  <span class="name">🎂 {b.name}</span>
                   <span class="val">{b.day}.{String(b.month).padStart(2, "0")}</span>
                 </div>
               )}
@@ -196,7 +200,7 @@ export async function loadOverview() {
     [d, trend] = await Promise.all([apiGet("/overview"), apiGet("/trend").catch(() => null)]);
   } catch (e) {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить обзор: ${esc(e.message)}</div>`;
-    return;
+    return false;
   }
   root.innerHTML = "";
   disposePrev = render(() => <Overview data={d} trend={trend} />, root);

@@ -5,12 +5,12 @@
 // и /api/user/{id} (совместимая форма ответа — общая разметка на двоих).
 
 import { state } from "./state.js";
-import { API_BASE, apiGet, apiPost, apiDelete, openSheet, toast, dialogSkeletonHtml } from "./api.js";
+import { apiGet, apiPost, apiDelete, openSheet, toast, dialogSkeletonHtml, mediaUrl } from "./api.js";
 import { $, esc, MONTHS_RU, STATUS_COLOR_VAR, BADGE_RARITY_ORDER, pluralColleagues, showContextMenu } from "./utils.js";
 import { donutHtml, donutLegendHtml, playDonutIntro } from "./charts.js";
 import { devModeActive, devPanelHtml, wireDevPanel } from "./devmode.js";
 import { openReportDetail } from "./report-detail.js";
-import { invoke, sendNotification } from "./tauri.js";
+import { openExternal, sendNotification } from "./tauri.js";
 
 export function avatarHtml(telegramId, name, size) {
   const initial = esc((name || "?").trim().charAt(0).toUpperCase() || "?");
@@ -29,7 +29,9 @@ export function loadAvatars(root) {
     const img = new Image();
     img.onload = () => { el.innerHTML = ""; el.appendChild(img); };
     img.onerror = () => {};
-    img.src = `${API_BASE}/avatar/${tid}?init_data=${encodeURIComponent(state.token)}`;
+    const src = mediaUrl(`/avatar/${encodeURIComponent(tid)}`);
+    if (!src) return; // без токена запрашивать нечего
+    img.src = src;
   });
 }
 
@@ -44,7 +46,9 @@ function loadProfileBanner(el, telegramId) {
     el.style.backgroundPosition = "center";
   };
   img.onerror = () => {};
-  img.src = `${API_BASE}/banner/${telegramId}?init_data=${encodeURIComponent(state.token)}`;
+  const src = mediaUrl(`/banner/${encodeURIComponent(telegramId)}`);
+  if (!src) return;
+  img.src = src;
 }
 
 // Кольцо аватара по стажу в команде — те же пороги, что в мини-аппе.
@@ -247,7 +251,7 @@ export async function loadProfile() {
     me = await apiGet("/me");
   } catch (e) {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить профиль: ${esc(e.message)}</div>`;
-    return;
+    return false;
   }
   state.isDeveloper = !!me.is_developer; // используется для показа переключателя dev-режима в Настройках
 
@@ -302,7 +306,7 @@ export async function loadProfile() {
   root.querySelector("#goal-card").addEventListener("click", () => monthlyGoalDialog(me.monthly_goal));
   root.querySelector("#btn-edit-profile").addEventListener("click", () => editProfileDialog(me));
   root.querySelector("#activity-card").addEventListener("click", () => openMyActivitySheet());
-  if (devModeActive()) wireDevPanel(root, me.telegram_id, () => loadProfile());
+  if (devModeActive()) wireDevPanel(root, me.telegram_id, () => loadProfile(), me.role);
   notifyGoalReachedIfNeeded(me, goalSet, goalOver, goalDone);
 }
 
@@ -462,7 +466,7 @@ async function openTeamSheet() {
 // студии, не браузер, встраивать чужой веб-клиент Telegram сюда незачем.
 async function openTelegramProfile(username) {
   try {
-    await invoke("plugin:shell|open", { path: `https://t.me/${username}` });
+    await openExternal(`https://t.me/${encodeURIComponent(username)}`);
   } catch (e) {
     toast(`Не удалось открыть Telegram: ${e}`, "error");
   }
@@ -498,5 +502,5 @@ async function openUserProfile(telegramId) {
   sheet.querySelectorAll("[data-open-report]").forEach(row => {
     row.addEventListener("click", () => openReportDetail(row.dataset.openReport));
   });
-  if (devModeActive()) wireDevPanel(sheet, telegramId, async () => { await openUserProfile(telegramId); overlay.remove(); });
+  if (devModeActive()) wireDevPanel(sheet, telegramId, async () => { await openUserProfile(telegramId); overlay.remove(); }, d.role);
 }

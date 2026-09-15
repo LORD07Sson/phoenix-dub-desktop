@@ -3,13 +3,15 @@
 // voteCardHtml/castVote/openTitleDetailPublic (miniapp/static/index.html).
 
 import { state } from "./state.js";
-import { API_BASE, apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
+import { apiGet, apiPost, openSheet, toast, dialogSkeletonHtml, mediaUrl } from "./api.js";
 import { $, esc } from "./utils.js";
 import { openSeasonsAdminSheet } from "./titles-admin.js";
 
+// Сборка URL с токеном — одна на всё приложение (api.js): раньше в
+// четырёх файлах лежала своя копия, и все четыре подставляли в строку
+// "null", когда токена ещё нет.
 function imgProxy(url) {
-  if (!url) return "";
-  return `${API_BASE}/img_proxy?url=${encodeURIComponent(url)}&init_data=${encodeURIComponent(state.token)}`;
+  return url ? mediaUrl("/img_proxy", { url }) : "";
 }
 
 const TD_ICONS = {
@@ -61,8 +63,12 @@ function voteBentoHtml(titles, top) {
 
   if (!top) return `<div class="bento">${statsHtml}</div>`;
 
-  const poster = top.poster_url
-    ? `<img class="vote-hero-poster" src="${imgProxy(top.poster_url)}" alt="" data-open-title-detail="${top.id}">`
+  // Проверяем СОБРАННЫЙ адрес, а не только наличие poster_url: без
+  // токена mediaUrl() вернёт пустую строку, а <img src=""> — это
+  // запрос самой страницы и битая картинка вместо заглушки.
+  const posterSrc = imgProxy(top.poster_url);
+  const poster = posterSrc
+    ? `<img class="vote-hero-poster" src="${posterSrc}" alt="" data-open-title-detail="${top.id}">`
     : `<div class="vote-hero-poster vote-poster-ph" data-open-title-detail="${top.id}">🎬</div>`;
 
   const heroHtml = `
@@ -84,8 +90,9 @@ function voteBentoHtml(titles, top) {
 }
 
 function voteCardHtml(t) {
-  const poster = t.poster_url
-    ? `<img class="vote-poster" src="${imgProxy(t.poster_url)}" alt="" loading="lazy">`
+  const posterSrc = imgProxy(t.poster_url);
+  const poster = posterSrc
+    ? `<img class="vote-poster" src="${posterSrc}" alt="" loading="lazy">`
     : `<div class="vote-poster vote-poster-ph">🎬</div>`;
   const voteCls = t.my_vote === 1 ? " voted-like" : (t.my_vote === -1 ? " voted-dislike" : "");
 
@@ -103,24 +110,43 @@ function voteCardHtml(t) {
 }
 
 async function castVote(titleId, choice, btn) {
-  const card = btn.closest(".vote-card") || btn.closest(".vote-hero");
-  const likeBtn = card.querySelector('[data-vote-choice="1"]');
-  const dislikeBtn = card.querySelector('[data-vote-choice="-1"]');
+  // Пара кнопок 👍/👎 живёт в двух разных обёртках: .vote-actions (карточка
+  // сезона и герой-блок) и .td-vote-cta (шторка тайтла). Раньше тут был
+  // closest(".vote-card") || closest(".vote-hero") — в шторке ни того, ни
+  // другого предка нет, card был null, и клик по «Нравится» падал
+  // TypeError ещё до запроса: голосовать из детальной карточки было
+  // нельзя вообще, причём молча.
+  const group = btn.closest(".vote-actions, .td-vote-cta");
+  if (!group) return;
+  const pendingHost = btn.closest(".vote-card") || group;
+  const likeBtn = group.querySelector('[data-vote-choice="1"]');
+  const dislikeBtn = group.querySelector('[data-vote-choice="-1"]');
   const already = btn.classList.contains(choice === 1 ? "on-like" : "on-dislike");
   const vote = already ? 0 : choice;
 
-  card.classList.add("vote-pending");
+  pendingHost.classList.add("vote-pending");
   try {
     const r = await apiPost(`/public/titles/${titleId}/vote`, { vote });
     likeBtn.classList.toggle("on-like", r.my_vote === 1);
     dislikeBtn.classList.toggle("on-dislike", r.my_vote === -1);
-    likeBtn.querySelector("span").textContent = r.likes;
-    dislikeBtn.querySelector("span").textContent = r.dislikes;
+    // В шторке у кнопок текстовые подписи («👍 Нравится») без <span> со
+    // счётчиком — числа там показывают отдельные .td-stat-pill.
+    setCount(likeBtn.querySelector("span"), r.likes);
+    setCount(dislikeBtn.querySelector("span"), r.dislikes);
+    const sheet = btn.closest(".sheet");
+    if (sheet) {
+      setCount(sheet.querySelector(".td-stat-pill.like"), `👍 ${r.likes}`);
+      setCount(sheet.querySelector(".td-stat-pill.dislike"), `👎 ${r.dislikes}`);
+    }
   } catch (e) {
     toast(e.message, "error");
   } finally {
-    card.classList.remove("vote-pending");
+    pendingHost.classList.remove("vote-pending");
   }
+}
+
+function setCount(el, value) {
+  if (el) el.textContent = value;
 }
 
 function wireVoteButtons(root) {
@@ -146,7 +172,7 @@ async function openTitleDetail(titleId) {
     return;
   }
   const det = d.details && Array.isArray(d.details) ? null : d.details;
-  const poster = d.poster_url ? imgProxy(d.poster_url) : "";
+  const poster = imgProxy(d.poster_url);
   const posterHtml = poster ? `<img class="td-poster" src="${poster}" alt="">` : `<div class="td-poster">🎬</div>`;
   const bgHtml = poster ? `<div class="td-bg" style="background-image:url(${poster})"></div>` : "";
 
@@ -187,8 +213,9 @@ export async function loadTitlesTab() {
     d = await apiGet("/public/seasons");
   } catch (e) {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить сезоны: ${esc(e.message)}</div>`;
-    return;
+    return false;
   }
+  d.seasons = d.seasons || [];
   if (!d.seasons.length) {
     root.innerHTML = `<div class="empty-state"><div style="font-size:34px; margin-bottom:8px;">📅</div>Эфир-сезонов пока нет.</div>`;
     return;
@@ -198,6 +225,11 @@ export async function loadTitlesTab() {
   }
   renderTitlesForSeason(d.seasons);
 }
+
+// Номер последнего запрошенного сезона: ответ на предыдущий запрос
+// может прийти позже, чем на текущий (кликнули «Лето» → «Осень»), и
+// раньше он молча затирал уже отрисованную сетку чужими тайтлами.
+let titlesRequestSeq = 0;
 
 function renderTitlesForSeason(seasons) {
   const root = $("#titles-body");
@@ -220,9 +252,11 @@ function renderTitlesForSeason(seasons) {
     openSeasonsAdminSheet(() => loadTitlesTab());
   });
 
-  apiGet(`/public/seasons/${state.titleSeasonId}/titles`).then(d => {
+  const seq = ++titlesRequestSeq;
+  const seasonId = state.titleSeasonId;
+  apiGet(`/public/seasons/${seasonId}/titles`).then(d => {
     const wrap = $("#titles-grid");
-    if (!wrap) return; // успели переключить сезон/вкладку, пока грузилось
+    if (!wrap || seq !== titlesRequestSeq) return; // успели переключить сезон/вкладку, пока грузилось
     if (!d.titles.length) {
       wrap.innerHTML = `<div class="empty-state"><div style="font-size:34px; margin-bottom:8px;">🎬</div>Тайтлов в этом сезоне пока нет.</div>`;
       return;
@@ -233,6 +267,6 @@ function renderTitlesForSeason(seasons) {
     wireVoteButtons(wrap);
   }).catch(e => {
     const wrap = $("#titles-grid");
-    if (wrap) wrap.innerHTML = `<div class="bento-empty">Не удалось загрузить тайтлы: ${esc(e.message)}</div>`;
+    if (wrap && seq === titlesRequestSeq) wrap.innerHTML = `<div class="bento-empty">Не удалось загрузить тайтлы: ${esc(e.message)}</div>`;
   });
 }

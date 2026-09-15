@@ -2,13 +2,20 @@
 
 import { invoke, listen } from "./tauri.js";
 import { state } from "./state.js";
-import { apiGet, openSheet, toast } from "./api.js";
+import { apiGet, openSheet, toast, dismissSheet } from "./api.js";
 import { $, esc } from "./utils.js";
 import { applyTheme } from "./theme.js";
 import { isDevModeOn, setDevModeOn } from "./devmode.js";
 import { openAdminPanel } from "./admin.js";
 
-const APP_VERSION = "0.5.0"; // подставляется автоматически из VERSION при сборке в CI (build.yml)
+// Версию подставляет Vite на этапе сборки (define: __APP_VERSION__ в
+// vite.config.js — читает файл VERSION, а в CI ещё и переменную
+// PKG_VERSION, куда альфа-сборка кладёт "0.6.0-alpha.N+sha").
+// Раньше здесь лежал литерал, который CI правил себе sed'ом по
+// исходнику, — и в git он годами расходился и с VERSION, и с
+// Cargo.toml: у собранного локально клиента в Настройках показывалась
+// версия, которой нигде больше нет.
+const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
 // Альфа-сборки несут короткий коммит как SemVer build-metadata —
 // "0.5.8-alpha.90+78ab7a92" (см. build-alpha.yml) — само сравнение
@@ -144,7 +151,7 @@ async function openSettings() {
     }
   });
   overlay.querySelector("#s-open-admin").addEventListener("click", openAdminPanel);
-  overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  overlay.querySelector("[data-close]").addEventListener("click", () => dismissSheet(overlay));
 }
 $("#open-settings").addEventListener("click", openSettings);
 
@@ -181,7 +188,11 @@ function confirmUpdateSheet(update) {
     `);
     overlay.querySelector("[data-no]").addEventListener("click", () => { overlay.remove(); resolve(false); });
     overlay.querySelector("[data-yes]").addEventListener("click", () => { overlay.remove(); resolve(true); });
-    overlay.addEventListener("click", e => { if (e.target === overlay) resolve(false); });
+    // Закрытие клавишей Escape или кликом по фону — тоже ответ «позже».
+    // Раньше Escape просто удалял оверлей из DOM, промис не резолвился
+    // никогда, и checkForUpdates() оставался висеть на await до конца
+    // жизни процесса.
+    overlay.addEventListener("sheet-dismissed", () => resolve(false));
   });
 }
 

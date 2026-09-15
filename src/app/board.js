@@ -42,7 +42,7 @@ function boardCardHtml(r, status) {
   const accent = `var(${STATUS_COLOR_VAR[status] || "--s-draft"})`;
   const prColor = `var(${PRIORITY_COLOR_VAR[r.priority] || "--ink-soft"})`;
   return `
-    <div class="board-card" data-open="${esc(r.public_id)}" data-id="${esc(r.public_id)}" style="border-left: 3px solid ${accent};">
+    <div class="board-card" data-open="${esc(r.public_id)}" data-id="${esc(r.public_id)}" data-status="${esc(status)}" style="border-left: 3px solid ${accent};">
       <div class="id">${esc(r.public_id)}</div>
       <div class="ttl">${esc(r.title)}</div>
       ${r.priority ? `<div class="pr" style="color:${prColor};">${r.priority === "urgent" ? "⚡ " : ""}${esc(PRIORITY_LABELS[r.priority] || r.priority)}</div>` : ""}
@@ -115,7 +115,9 @@ function wireCardDrag(card) {
       if (overCol) overCol.classList.remove("drag-over");
 
       const targetStatus = overCol && overCol.dataset.status;
-      if (!targetStatus) return;
+      // Бросили обратно в ту же колонку — это не перенос, дёргать
+      // сервер (и перезагружать всю доску) незачем.
+      if (!targetStatus || targetStatus === card.dataset.status) return;
       try {
         const res = await apiPost(`/report/${encodeURIComponent(card.dataset.id)}/status`, { status: targetStatus });
         if (res.changed) { toast("Статус изменён."); await loadBoard(); }
@@ -185,8 +187,13 @@ function wireBoardScroll(boardEl) {
   boardEl.addEventListener("pointercancel", endPan);
 }
 
+// :not([data-wired]) — после «Показать ещё» сюда приходит контейнер
+// колонки целиком, вместе с уже привязанными карточками: без фильтра
+// каждая догрузка вешала им ВТОРОЙ обработчик клика и второй драг, и
+// клик по старой карточке открывал карточку отчёта дважды.
 function wireBoardCards(root) {
-  root.querySelectorAll(".board-card[data-open]").forEach(el => {
+  root.querySelectorAll(".board-card[data-open]:not([data-wired])").forEach(el => {
+    el.dataset.wired = "1";
     el.addEventListener("click", () => {
       // .dragging навешивается в wireCardDrag только когда движение
       // реально превысило порог — тот же признак «это был драг, не
@@ -207,7 +214,7 @@ export async function loadBoard() {
     d = await apiGet("/board");
   } catch (e) {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить доску: ${esc(e.message)}</div>`;
-    return;
+    return false;
   }
   root.innerHTML = `
     <div class="board">

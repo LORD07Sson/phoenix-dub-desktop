@@ -1,8 +1,11 @@
 [package]
 name = "phoenix-dub-desktop"
-version = "0.4.2"
+version = "0.6.0"
 description = "PHOENIX DUB Desktop — клиент студии дубляжа"
 edition = "2021"
+# `[T]::as_chunks` в audio_qc.rs стабилизирован в 1.88 — на более
+# старом тулчейне сборка падает с невнятной ошибкой про нестабильную фичу.
+rust-version = "1.88"
 
 # Без этой фичи tauri сам решает, что грузить, по debug/release-сборке —
 # а точнее НЕ решает: без custom-protocol он всегда пытается открыть
@@ -36,12 +39,12 @@ serde_json = "1"
 # патчи вместо полного скачивания каждый раз. См. main.rs.
 velopack = "1.2.0"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
-# Загрузка файла, перетащенного из проводника (upload_report_file в
-# main.rs) — multipart POST на свой API напрямую из Rust, минуя
-# JS/fetch: тогда не нужен tauri-plugin-fs с его capability-скоупом на
-# ЛЮБОЙ путь на диске (drag&drop роняет путь произвольного файла
-# пользователя, не только из appdata/temp) — команда сама читает файл
-# std::fs::read по пришедшему пути и сама шлёт его на сервер.
+# Загрузка файла, перетащенного из проводника, и скачивание вложений
+# (upload_report_file/download_report_file в main.rs) — HTTP на свой API
+# напрямую из Rust, минуя JS/fetch: не нужен tauri-plugin-fs, а токен
+# уходит заголовком, а не в строке URL. Путь на диске команда берёт не
+# на веру: читать можно только то, что пользователь сам перетащил в
+# окно (см. DroppedFiles в main.rs).
 # rustls вместо native-tls — не тащит системный OpenSSL на сборку.
 reqwest = { version = "0.12", default-features = false, features = ["multipart", "json", "rustls-tls"] }
 

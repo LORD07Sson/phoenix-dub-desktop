@@ -11,13 +11,18 @@ import { apiGet } from "./api.js";
 import { state } from "./state.js";
 
 const POLL_INTERVAL_MS = 60_000;
-const LAST_SEEN_KEY = "phoenix_feed_last_seen";
 
+// Ключ на пользователя, а не один на машину: компьютер в студии общий,
+// и точка отсечения предыдущего вошедшего не имеет отношения к
+// следующему.
+function lastSeenKey() {
+  return `phoenix_feed_last_seen_${state.telegramId || "anon"}`;
+}
 function getLastSeen() {
-  try { return localStorage.getItem(LAST_SEEN_KEY) || ""; } catch (_) { return ""; }
+  try { return localStorage.getItem(lastSeenKey()) || ""; } catch (_) { return ""; }
 }
 function setLastSeen(ts) {
-  try { localStorage.setItem(LAST_SEEN_KEY, ts); } catch (_) { /* приватный режим — не критично, просто без запоминания */ }
+  try { localStorage.setItem(lastSeenKey(), ts); } catch (_) { /* приватный режим — не критично, просто без запоминания */ }
 }
 
 function renderBadge(count) {
@@ -41,6 +46,11 @@ function renderBadge(count) {
 // сдвигается на самое свежее событие из только что загруженного списка.
 export function markFeedSeen(latestTimestamp) {
   if (latestTimestamp) setLastSeen(latestTimestamp);
+  renderBadge(0);
+}
+
+// Выход из аккаунта — снять чужой счётчик с иконки.
+export function resetFeedBadge() {
   renderBadge(0);
 }
 

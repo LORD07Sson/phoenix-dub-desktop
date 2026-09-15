@@ -68,6 +68,7 @@ async function loadAndShow(anchor, telegramId) {
     }
   }
   if (currentId !== telegramId) return; // за время запроса курсор уже увели на другого
+  if (!anchor.isConnected) return; // список успели перерисовать — привязываться не к чему
   renderPopover(anchor, data);
 }
 

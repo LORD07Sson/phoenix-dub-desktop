@@ -2,8 +2,9 @@
 // серверная AI-проверка звука. Открывается из Списка/Доски/Ленты/
 // профиля коллеги.
 
-import { API_BASE, apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
+import { apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
 import { state } from "./state.js";
+import { invoke, saveDialog } from "./tauri.js";
 import { esc, initials, STATUS_DOT_CLASS, isOverdue } from "./utils.js";
 import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
 import { loadRoles, loadAssignable, userOptionsHtml } from "./titles-admin.js";
@@ -107,7 +108,7 @@ export async function openReportDetail(publicId) {
       ${files.files.length ? `
       <div class="detail-section">
         <h3>Файлы (${files.files.length})</h3>
-        <div id="files-list">${files.files.map(f => fileHtml(f, publicId)).join("")}</div>
+        <div id="files-list">${files.files.map(fileHtml).join("")}</div>
       </div>` : ""}
 
       <div class="detail-section">
@@ -140,9 +141,9 @@ export async function openReportDetail(publicId) {
 
     const sheet = overlay.querySelector(".sheet");
     sheet.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => overlay.remove()));
-    sheet.querySelector("#chip-status").addEventListener("click", () => changeStatusDialog([publicId], render));
+    sheet.querySelector("#chip-status").addEventListener("click", () => changeStatusDialog([publicId], render, detail.status));
     sheet.querySelector("#chip-assign").addEventListener("click", () => assignDialog([publicId], render));
-    sheet.querySelector("#chip-priority").addEventListener("click", () => priorityDialog(publicId, render));
+    sheet.querySelector("#chip-priority").addEventListener("click", () => priorityDialog(publicId, render, detail.priority));
     sheet.querySelector("#chip-deadline").addEventListener("click", () => deadlineDialog(publicId, detail.deadline, render));
 
     sheet.querySelectorAll(".checklist-item").forEach(el => {
@@ -166,7 +167,7 @@ export async function openReportDetail(publicId) {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
         try {
-          const res = await apiPost(`/report/${publicId}/unassign`, { telegram_id: btn.dataset.unassign });
+          const res = await apiPost(`/report/${publicId}/unassign`, { telegram_id: Number(btn.dataset.unassign) });
           if (res.changed) { toast("Исполнитель снят."); await render(); }
           else btn.disabled = false;
         } catch (e) { toast(`Не удалось снять исполнителя: ${e.message}`, "error"); btn.disabled = false; }
@@ -222,7 +223,7 @@ export async function openReportDetail(publicId) {
       const userSel = sheet.querySelector("#pipeline-user-pick");
       const role = roleSel.value;
       if (!role) { toast("Выберите роль.", "error"); return; }
-      const telegram_id = userSel.value || null;
+      const telegram_id = userSel.value ? Number(userSel.value) : null;
       const name = telegram_id ? userSel.options[userSel.selectedIndex].textContent : null;
       pipelineDraft.push({ role, telegram_id, name });
       roleSel.value = "";
@@ -250,7 +251,8 @@ export async function openReportDetail(publicId) {
       const userSel = sheet.querySelector("#pipeline-next-user");
       advanceBtn.disabled = true;
       try {
-        const res = await apiPost(`/report/${publicId}/pipeline/advance`, { telegram_id: userSel ? (userSel.value || null) : null });
+        const nextUser = userSel && userSel.value ? Number(userSel.value) : null;
+        const res = await apiPost(`/report/${publicId}/pipeline/advance`, { telegram_id: nextUser });
         if (res.advanced) { toast(`Передано: ${res.role}.`); await render(); }
         else { toast(res.detail || "Не удалось передать.", "error"); advanceBtn.disabled = false; }
       } catch (e) { toast(`Не удалось передать этап: ${e.message}`, "error"); advanceBtn.disabled = false; }
@@ -272,6 +274,27 @@ export async function openReportDetail(publicId) {
         await apiPost(`/report/${publicId}/notes`, { text });
         await render();
       } catch (e) { toast(`Не удалось добавить заметку: ${e.message}`, "error"); }
+    });
+    sheet.querySelectorAll("[data-download-file]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const fileId = btn.dataset.downloadFile;
+        const savePath = await saveDialog({ defaultPath: btn.dataset.fileName || undefined });
+        if (!savePath) return;
+        btn.disabled = true;
+        try {
+          await invoke("download_report_file", {
+            reportId: publicId,
+            fileId,
+            initData: state.token || "",
+            savePath,
+          });
+          toast("Файл сохранён.");
+        } catch (e) {
+          toast(`Не удалось скачать: ${e}`, "error");
+        } finally {
+          btn.disabled = false;
+        }
+      });
     });
     sheet.querySelectorAll("[data-qc-file]").forEach(btn => {
       btn.addEventListener("click", async () => {
@@ -332,13 +355,22 @@ function pipelineChainHtml(pipeline, assignable) {
   return chain + advanceRow;
 }
 
-function fileHtml(f, publicId) {
-  const isAudio = /audio|wav|mp3|flac|m4a|ogg/i.test(f.file_type || f.file_name || "");
-  const downloadUrl = `${API_BASE}/report/${encodeURIComponent(publicId)}/files/${f.id}/download?init_data=${encodeURIComponent(state.token || "")}`;
+// Скачивание — кнопка, а не <a href>. Ссылка с target="_blank" внутри
+// webview вообще ничего не открывает (окно создавать некому), а токен
+// в ней уезжал в query-строку — то есть в логи сервера. Теперь файл
+// тянет Rust-команда download_report_file (токен заголовком), путь
+// выбирает нативный диалог сохранения.
+// Тип проверяем и по file_type, и по имени: file_type у файла,
+// присланного документом, приходит "document" — и mp3 внутри него
+// раньше оставался без кнопки AI-проверки, потому что || до имени
+// просто не доходил.
+function fileHtml(f) {
+  const audioRe = /audio|\.(wav|mp3|flac|m4a|aac|ogg)$/i;
+  const isAudio = audioRe.test(f.file_type || "") || audioRe.test(f.file_name || "");
   return `<div class="file-item">
     <div>${esc(FILE_ICONS[f.file_type] || "📎")} ${esc(f.file_name || f.file_type)} <span class="meta">${esc(f.file_size_label || "")}</span></div>
     ${isAudio ? `<button class="btn" style="padding:4px 10px; font-size:12px;" data-qc-file="${f.id}">🤖 AI-проверка</button>` : ""}
-    <a class="icon-btn" href="${downloadUrl}" target="_blank" rel="noopener" title="Скачать">⬇️</a>
+    <button class="icon-btn" data-download-file="${f.id}" data-file-name="${esc(f.file_name || "")}" title="Скачать">⬇️</button>
     <div id="qc-result-${f.id}" style="width:100%;"></div>
   </div>`;
 }
@@ -380,7 +412,20 @@ async function openReportLogSheet(publicId, kind) {
     `;
     sheet.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => overlay.remove()));
     const moreBtn = sheet.querySelector("#log-more");
-    if (moreBtn) moreBtn.addEventListener("click", () => { moreBtn.disabled = true; loadMore(); });
+    // try/catch прямо тут: раньше ошибка второй и следующих страниц
+    // никем не ловилась (try ниже охватывает только первый вызов) —
+    // кнопка навсегда оставалась disabled, а reject уходил в консоль.
+    if (moreBtn) moreBtn.addEventListener("click", async () => {
+      moreBtn.disabled = true;
+      moreBtn.textContent = "Загрузка…";
+      try {
+        await loadMore();
+      } catch (e) {
+        toast(`Не удалось загрузить ещё: ${e.message}`, "error");
+        moreBtn.disabled = false;
+        moreBtn.textContent = "Показать ещё";
+      }
+    });
   }
 
   try {

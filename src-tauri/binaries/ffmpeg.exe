@@ -1,1 +1,4 @@
-# placeholder — CI подменяет настоящим ffmpeg.exe перед сборкой (см. build.yml), см. src-tauri/binaries/.gitignore
+# placeholder — CI подменяет настоящим ffmpeg.exe перед сборкой (шаг
+# "Скачать и проверить статичный ffmpeg.exe" в .github/workflows/build.yml).
+# Настоящий бинарник в git не хранится: он ~80 МБ и его версия закреплена
+# URL + SHA256 в самом workflow.

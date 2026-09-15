@@ -40,14 +40,25 @@ function openPalette() {
   function renderList() {
     list.innerHTML = items.map((it, i) => `
       <div class="cmdk-item${i === selected ? " sel" : ""}" data-i="${i}">
-        <span class="cmdk-ic">${it.icon}</span>
+        <span class="cmdk-ic">${esc(it.icon)}</span>
         <span class="cmdk-label">${esc(it.label)}</span>
         ${it.sub ? `<span class="cmdk-sub">${esc(it.sub)}</span>` : ""}
       </div>
     `).join("") || `<div class="cmdk-empty">Ничего не найдено</div>`;
     list.querySelectorAll(".cmdk-item").forEach(el => {
-      el.addEventListener("mouseenter", () => { selected = parseInt(el.dataset.i, 10); renderList(); });
+      // Подсветка — переключением класса, а не renderList(): раньше
+      // каждый проезд мышью по пункту пересобирал весь список через
+      // innerHTML (вместе с перевешиванием обработчиков) — на каждый
+      // mouseenter, включая те, что порождал сам же пересбор.
+      el.addEventListener("mouseenter", () => highlight(parseInt(el.dataset.i, 10)));
       el.addEventListener("click", () => activate(parseInt(el.dataset.i, 10)));
+    });
+  }
+
+  function highlight(i) {
+    selected = i;
+    list.querySelectorAll(".cmdk-item").forEach(el => {
+      el.classList.toggle("sel", Number(el.dataset.i) === selected);
     });
   }
 
@@ -93,12 +104,10 @@ function openPalette() {
   input.addEventListener("keydown", e => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      selected = Math.min(selected + 1, items.length - 1);
-      renderList();
+      highlight(Math.min(selected + 1, items.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      selected = Math.max(selected - 1, 0);
-      renderList();
+      highlight(Math.max(selected - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
       activate(selected);
