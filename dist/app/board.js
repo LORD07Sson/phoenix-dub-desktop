@@ -68,7 +68,17 @@ function wireCardDrag(card) {
     let ghost = null;
     let overCol = null;
 
+    // Захват указателя на самой карточке — без него в реальном
+    // WebView2 pointermove/pointerup, навешанные на window, иногда не
+    // доставляются, если курсор хоть на миг ушёл не над тем элементом
+    // (тот же класс проблем, что раньше был у нативного HTML5 drag&drop,
+    // см. комментарий над файлом). setPointerCapture жёстко привязывает
+    // все последующие события этого pointerId к card, независимо от
+    // того, что реально под курсором.
+    card.setPointerCapture(downEvent.pointerId);
+
     function onMove(e) {
+      if (e.pointerId !== downEvent.pointerId) return;
       if (!started) {
         if (Math.hypot(e.clientX - startX, e.clientY - startY) < DRAG_THRESHOLD_PX) return;
         started = true;
@@ -91,10 +101,12 @@ function wireCardDrag(card) {
       }
     }
 
-    async function onUp() {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
+    async function onUp(e) {
+      if (e.pointerId !== downEvent.pointerId) return;
+      card.removeEventListener("pointermove", onMove);
+      card.removeEventListener("pointerup", onUp);
+      card.removeEventListener("pointercancel", onUp);
+      if (card.hasPointerCapture(downEvent.pointerId)) card.releasePointerCapture(downEvent.pointerId);
       if (!started) return; // обычный клик — открыть карточку откроет собственный click-обработчик
       lastDragEndAt.set(card, Date.now());
       card.classList.remove("dragging");
@@ -113,9 +125,9 @@ function wireCardDrag(card) {
       }
     }
 
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+    card.addEventListener("pointermove", onMove);
+    card.addEventListener("pointerup", onUp);
+    card.addEventListener("pointercancel", onUp);
   });
 }
 
@@ -137,23 +149,35 @@ function wireBoardScroll(boardEl) {
   }, { passive: false });
 
   let panning = false;
+  let panPointerId = null;
   let startX = 0;
   let startScroll = 0;
   boardEl.addEventListener("pointerdown", e => {
     if (e.button !== 0 || e.target.closest(".board-card")) return;
     panning = true;
+    panPointerId = e.pointerId;
     startX = e.clientX;
     startScroll = boardEl.scrollLeft;
     boardEl.classList.add("panning");
+    // Захват указателя на самой доске — без него в реальном WebView2
+    // pointermove/pointerup (были на window) иногда не доставлялись
+    // надёжно, если курсор хоть на миг ушёл не над тем элементом (тот
+    // же класс проблем, что раньше был у нативного HTML5 drag&drop,
+    // см. комментарий над файлом).
+    boardEl.setPointerCapture(e.pointerId);
   });
-  window.addEventListener("pointermove", e => {
-    if (!panning) return;
+  boardEl.addEventListener("pointermove", e => {
+    if (!panning || e.pointerId !== panPointerId) return;
     boardEl.scrollLeft = startScroll - (e.clientX - startX);
   });
-  window.addEventListener("pointerup", () => {
+  function endPan(e) {
+    if (e.pointerId !== panPointerId) return;
     panning = false;
     boardEl.classList.remove("panning");
-  });
+    if (boardEl.hasPointerCapture(panPointerId)) boardEl.releasePointerCapture(panPointerId);
+  }
+  boardEl.addEventListener("pointerup", endPan);
+  boardEl.addEventListener("pointercancel", endPan);
 }
 
 function wireBoardCards(root) {
