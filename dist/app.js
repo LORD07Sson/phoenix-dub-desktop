@@ -242,6 +242,8 @@ function loadActiveTab(force) {
   state.loadedTabs.add(name);
   if (name === "overview") loadOverview();
   else if (name === "list") loadReports();
+  else if (name === "board") loadBoard();
+  else if (name === "titles") loadTitlesTab();
   else if (name === "feed") loadFeed();
   else if (name === "profile") loadProfile();
 }
@@ -788,6 +790,13 @@ async function openSettings() {
   let autostartOn = false;
   try { autostartOn = await invoke("is_autostart"); } catch (_) {}
 
+  // Переключатель dev-режима виден только реальным разработчикам студии
+  // (state.isDeveloper — из /api/me, is_developer сервер сам проверяет
+  // по OWNER_IDS на каждый /api/dev/* запрос, фронту тут не доверяют).
+  if (state.isDeveloper == null) {
+    try { state.isDeveloper = !!(await apiGet("/me")).is_developer; } catch (_) { state.isDeveloper = false; }
+  }
+
   const overlay = openSheet(`
     <h2>Настройки</h2>
     <div class="row" style="align-items:center; justify-content:space-between;">
@@ -801,6 +810,11 @@ async function openSettings() {
         <option value="light">Светлая</option>
       </select>
     </div>
+    ${state.isDeveloper ? `
+    <div class="row dev-pill-toggle" style="align-items:center; justify-content:space-between;">
+      <span>🛠 Режим разработчика</span>
+      <input type="checkbox" id="s-dev-mode" ${isDevModeOn() ? "checked" : ""}>
+    </div>` : ""}
     <div class="row" style="align-items:center; justify-content:space-between;">
       <span>Версия ${esc(APP_VERSION)}</span>
       <button class="btn" id="s-check-update" style="padding:5px 12px; font-size:12.5px;">Проверить обновления</button>
@@ -808,6 +822,7 @@ async function openSettings() {
     <p style="color:var(--ink-soft); font-size:12.5px;">
       Ctrl+Shift+P — показать/скрыть окно из любого места, даже когда оно свёрнуто в трей.<br>
       Крестик у окна сворачивает в трей — опрос новых назначений продолжает идти в фоне.
+      ${state.isDeveloper ? "<br>Режим разработчика открывает правку чужих ролей/профиля/даты вступления/наград — на карточке коллеги (клик по тизеру команды)." : ""}
     </p>
     <div class="sheet-actions"><button class="btn primary" data-close>Готово</button></div>
   `);
@@ -821,6 +836,8 @@ async function openSettings() {
       e.target.checked = !e.target.checked;
     }
   });
+  const devToggle = overlay.querySelector("#s-dev-mode");
+  if (devToggle) devToggle.addEventListener("change", e => setDevModeOn(e.target.checked));
   overlay.querySelector("#s-check-update").addEventListener("click", () => checkForUpdates(false));
   overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
 }
@@ -1088,6 +1105,20 @@ function loadAvatars(root) {
   });
 }
 
+// Своя картинка баннера профиля (/api/banner/{id}) — 204, если её нет
+// (пресет/пусто), тогда молча остаёмся на градиенте из CSS.
+function loadProfileBanner(el, telegramId) {
+  if (!el || !telegramId) return;
+  const img = new Image();
+  img.onload = () => {
+    el.style.backgroundImage = `url(${img.src})`;
+    el.style.backgroundSize = "cover";
+    el.style.backgroundPosition = "center";
+  };
+  img.onerror = () => {};
+  img.src = `${API_BASE}/banner/${telegramId}?init_data=${encodeURIComponent(state.token)}`;
+}
+
 // Кольцо аватара по стажу в команде — те же пороги, что в мини-аппе.
 function tenureTier(days) {
   if (days == null) return null;
@@ -1180,6 +1211,265 @@ function loadStructureHtml(me) {
   `;
 }
 
+// ---------- Режим разработчика (/api/dev/*, только для owner) ----------
+// Тумблер хранится в localStorage, как и в мини-аппе — чисто
+// косметическое переключение, что показать (панель правки на карточке).
+// Авторизацию на КАЖДОЕ действие сервер всё равно проверяет заново по
+// OWNER_IDS (_require_owner) — фронту тут доверять нельзя.
+
+const DEV_MODE_KEY = "phoenix-dev-mode";
+function isDevModeOn() {
+  try { return localStorage.getItem(DEV_MODE_KEY) === "1"; } catch (_) { return false; }
+}
+function setDevModeOn(on) {
+  try { localStorage.setItem(DEV_MODE_KEY, on ? "1" : "0"); } catch (_) {}
+}
+function devModeActive() { return !!state.isDeveloper && isDevModeOn(); }
+
+let META_ROLES = null;
+async function loadMetaRoles() {
+  if (META_ROLES) return META_ROLES;
+  try { META_ROLES = (await apiGet("/meta")).roles || []; } catch (_) { META_ROLES = []; }
+  return META_ROLES;
+}
+
+function devPanelHtml(d) {
+  return `
+    <div class="sec-title" style="margin-top:16px;">🛠 Служебные данные</div>
+    <div class="dev-bento">
+      <div class="dev-bcell wide">
+        <div class="h">Идентификаторы</div>
+        <div class="ro-line"><span>telegram_id</span><b>${d.telegram_id}</b></div>
+        <div class="ro-line"><span>internal id</span><b>${d.internal_id != null ? d.internal_id : "—"}</b></div>
+        <div class="ro-line"><span>в базе с</span><b style="font-family:inherit; font-weight:400;">${esc(d.created_at || "—")}</b></div>
+      </div>
+      <div class="dev-bcell wide">
+        <div class="h">Роль</div>
+        <select id="dev-role-select" class="field-input"><option value="">— загрузка…</option></select>
+        <button id="dev-role-save" class="dev-save-btn">Сохранить роль</button>
+      </div>
+      <div class="dev-bcell wide">
+        <div class="h">Статус и о себе</div>
+        <input type="text" id="dev-status-input" class="field-input" maxlength="80" placeholder="Короткий статус" value="${esc(d.status_text || "")}">
+        <textarea id="dev-bio-input" class="field-textarea" maxlength="300" placeholder="О себе">${esc(d.bio || "")}</textarea>
+        <button id="dev-profile-save" class="dev-save-btn">Сохранить профиль</button>
+      </div>
+      <div class="dev-bcell">
+        <div class="h">Дата вступления</div>
+        <input type="date" id="dev-joined-input" class="field-input" value="${esc((d.created_at || "").slice(0, 10))}">
+        <button id="dev-joined-save" class="dev-save-btn">Сохранить</button>
+      </div>
+      <div class="dev-bcell">
+        <div class="h">Выдать награду</div>
+        <div class="dev-badge-row">
+          <input type="text" id="dev-badge-icon" class="field-input" placeholder="🐉" maxlength="8">
+          <input type="text" id="dev-badge-label" class="field-input" placeholder="Название" maxlength="60">
+        </div>
+        <button id="dev-badge-grant" class="dev-save-btn">Выдать</button>
+      </div>
+    </div>
+  `;
+}
+
+function wireDevPanel(root, telegramId, onSaved) {
+  loadMetaRoles().then(roles => {
+    const sel = root.querySelector("#dev-role-select");
+    if (!sel) return;
+    sel.innerHTML = `<option value="">— без роли —</option>` + roles.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+  });
+
+  const roleBtn = root.querySelector("#dev-role-save");
+  if (roleBtn) roleBtn.addEventListener("click", async () => {
+    const role = root.querySelector("#dev-role-select").value;
+    roleBtn.disabled = true;
+    try {
+      await apiPost(`/dev/user/${telegramId}/role`, { role });
+      toast("Роль обновлена.");
+      if (onSaved) await onSaved();
+    } catch (e) { toast(`Не удалось сохранить роль: ${e.message}`, "error"); }
+    finally { roleBtn.disabled = false; }
+  });
+
+  const profileBtn = root.querySelector("#dev-profile-save");
+  if (profileBtn) profileBtn.addEventListener("click", async () => {
+    const status_text = root.querySelector("#dev-status-input").value;
+    const bio = root.querySelector("#dev-bio-input").value;
+    profileBtn.disabled = true;
+    try {
+      await apiPost(`/dev/user/${telegramId}/profile`, { status_text, bio });
+      toast("Профиль обновлён.");
+      if (onSaved) await onSaved();
+    } catch (e) { toast(`Не удалось сохранить профиль: ${e.message}`, "error"); }
+    finally { profileBtn.disabled = false; }
+  });
+
+  const joinedBtn = root.querySelector("#dev-joined-save");
+  if (joinedBtn) joinedBtn.addEventListener("click", async () => {
+    const date = root.querySelector("#dev-joined-input").value;
+    if (!date) { toast("Укажите дату.", "error"); return; }
+    joinedBtn.disabled = true;
+    try {
+      await apiPost(`/dev/user/${telegramId}/joined`, { date });
+      toast("Дата вступления обновлена.");
+      if (onSaved) await onSaved();
+    } catch (e) { toast(`Не удалось сохранить дату: ${e.message}`, "error"); }
+    finally { joinedBtn.disabled = false; }
+  });
+
+  const badgeBtn = root.querySelector("#dev-badge-grant");
+  if (badgeBtn) badgeBtn.addEventListener("click", async () => {
+    const icon = root.querySelector("#dev-badge-icon").value || "🏅";
+    const label = root.querySelector("#dev-badge-label").value.trim();
+    if (!label) { toast("Нужно название награды.", "error"); return; }
+    badgeBtn.disabled = true;
+    try {
+      await apiPost(`/dev/user/${telegramId}/badge`, { icon, label });
+      toast("Награда выдана.");
+      if (onSaved) await onSaved();
+    } catch (e) { toast(`Не удалось выдать награду: ${e.message}`, "error"); }
+    finally { badgeBtn.disabled = false; }
+  });
+}
+
+// ---------- Команда / чужой профиль ----------
+
+async function openTeamSheet() {
+  const overlay = openSheet(dialogSkeletonHtml(6), "wide");
+  overlay.querySelector(".sheet").innerHTML = `<h2>Команда</h2>` + dialogSkeletonHtml(6);
+  let d;
+  try {
+    d = await apiGet("/team");
+  } catch (e) {
+    overlay.querySelector(".sheet").innerHTML = `<h2>Команда</h2><div class="bento-empty">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+    overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+    return;
+  }
+  const rows = (d.users || []).map(u => `
+    <div class="team-row" data-open-user="${u.telegram_id}">
+      ${avatarHtml(u.telegram_id, u.name, "sm")}
+      <span class="online-dot${u.online ? "" : " off"}"></span>
+      <div class="nm"><div class="n">${esc(u.name)}${u.is_owner ? ` <span class="dev-pill">DEV</span>` : ""}</div><div class="r">${esc(u.role || "без роли")}</div></div>
+      <div class="stat">${u.assigned} сейчас · ${u.completed_total} закрыто</div>
+    </div>
+  `).join("");
+  overlay.querySelector(".sheet").innerHTML = `
+    <h2>Команда · ${d.users.length}</h2>
+    <div class="team-list">${rows || `<div class="bento-empty">Пока никого нет.</div>`}</div>
+    <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
+  `;
+  const sheet = overlay.querySelector(".sheet");
+  loadAvatars(sheet);
+  sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  sheet.querySelectorAll("[data-open-user]").forEach(row => {
+    row.addEventListener("click", () => openUserProfile(parseInt(row.dataset.openUser, 10)));
+  });
+}
+
+async function openUserProfile(telegramId) {
+  const overlay = openSheet(dialogSkeletonHtml(6), "wide");
+  let d;
+  try {
+    d = await apiGet(`/user/${telegramId}`);
+  } catch (e) {
+    overlay.querySelector(".sheet").innerHTML = `<div class="bento-empty">Не удалось загрузить профиль: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+    overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+    return;
+  }
+  d.telegram_id = telegramId;
+  const reportsHtml = (d.reports && d.reports.length) ? `
+    <div class="sec-title" style="margin-top:16px;">📋 Текущие отчёты</div>
+    <div class="mini-list">
+      ${d.reports.map(r => `<div class="mini-row" data-open-report="${esc(r.public_id)}" style="cursor:pointer;"><span class="name">${esc(r.public_id)} · ${esc(r.title)}</span><span class="val">${esc(r.status_label)}</span></div>`).join("")}
+    </div>` : "";
+
+  const sheet = overlay.querySelector(".sheet");
+  sheet.innerHTML = `
+    ${profileHeaderHtml(d)}
+    <div class="bento">${badgesBentoHtml(d, 0)}</div>
+    ${reportsHtml}
+    ${devModeActive() ? devPanelHtml(d) : ""}
+    <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
+  `;
+  wireProfileCommon(sheet, telegramId);
+  sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  sheet.querySelectorAll("[data-open-report]").forEach(row => {
+    row.addEventListener("click", () => openReportDetail(row.dataset.openReport));
+  });
+  if (devModeActive()) wireDevPanel(sheet, telegramId, async () => { await openUserProfile(telegramId); overlay.remove(); });
+}
+
+// Шапка + тизер команды + цитата статуса + био + метастрока + «Структура
+// загрузки» — общая часть между своей «Я» и карточкой коллеги (тот же
+// приём, что и в мини-аппе: /api/me и /api/user/{id} отдают совместимую
+// форму, поэтому и разметка одна на двоих).
+function profileHeaderHtml(d) {
+  const tier = tenureTier(d.member_since_days);
+  const rMeta = roleMeta(d.role);
+  const roleLabel = d.role ? esc(d.role) : "Участник PHOENIX";
+
+  let joinedLine = "";
+  if (d.created_at) {
+    const jd = new Date(d.created_at.replace(" ", "T") + "Z");
+    if (!isNaN(jd.getTime())) {
+      joinedLine = ` · в команде с ${jd.getUTCDate()} ${MONTHS_RU[jd.getUTCMonth() + 1]}. ${jd.getUTCFullYear()}`;
+    }
+  }
+
+  return `
+    <div class="profile-banner-wrap" data-role="profile-banner"></div>
+    <div class="profile-head-card">
+      <span class="avatar-ring${tier ? " tier-" + tier : ""}">${avatarHtml(d.telegram_id, d.display_name || d.name, "xl")}</span>
+      <div class="nm-row">
+        <span class="nm">${esc(d.display_name || d.name)}</span>
+        ${d.is_developer || d.is_owner ? `<span class="dev-pill">DEV</span>` : ""}
+        ${rankTagHtml(d.studio_rank)}
+      </div>
+      ${d.username ? `<div class="un">@${esc(d.username)}</div>` : ""}
+      ${d.internal_id != null ? `<div class="id-row"><span class="id-chip">#${d.internal_id}</span>${joinedLine}${d.is_online ? ` · <span style="color:var(--s-done); font-weight:600;">в сети</span>` : ""}</div>` : ""}
+      <span class="role-tag" style="--tag-c:${rMeta.c}">${rMeta.ic} ${roleLabel}</span>
+    </div>
+
+    ${teamTeaserHtml(d)}
+    ${d.status_text ? `<div class="status-quote">💬 ${esc(d.status_text)}</div>` : ""}
+    ${d.bio ? `<div class="profile-bio">${esc(d.bio)}</div>` : ""}
+
+    <div class="bc-meta-line">📋 ${d.assigned} на нём сейчас${d.overdue ? ` · <span class="warn">⏰ ${d.overdue} просрочено</span>` : ""}${d.avg_days != null ? ` · ⏱ в среднем ${d.avg_days.toFixed ? d.avg_days.toFixed(1) : d.avg_days} дн.` : ""}</div>
+
+    ${loadStructureHtml(d)}
+  `;
+}
+
+// Достижения — общий бенто-блок, тоже переиспользуется для «Я» и чужого профиля.
+function badgesBentoHtml(d, delayMs) {
+  const unlocked = (d.badges || []).slice().sort((a, b) => (BADGE_RARITY_ORDER[a.rarity] ?? 9) - (BADGE_RARITY_ORDER[b.rarity] ?? 9));
+  return `
+    <div class="bcell wide" style="animation-delay:${delayMs}ms;">
+      <h3>Достижения</h3>
+      <div class="badge-grid">
+        ${unlocked.map(b => `
+          <div class="badge-item ${b.unlocked ? "unlocked" : ""}" title="${esc(b.label)}${!b.unlocked && b.target ? ` — ${b.current}/${b.target}` : ""}">
+            <div>${esc(b.icon)}</div>
+            <span class="lbl">${esc(b.label)}</span>
+          </div>
+        `).join("")}
+      </div>
+    </div>`;
+}
+
+function wireProfileCommon(root, telegramId) {
+  loadAvatars(root);
+  loadProfileBanner(root.querySelector('[data-role="profile-banner"]'), telegramId);
+  playDonutIntro(root);
+  root.querySelectorAll(".role-bar-fill").forEach(el => {
+    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.width = el.dataset.pct + "%"; }));
+  });
+  root.querySelectorAll(".goal-ring-fill").forEach(el => {
+    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.strokeDashoffset = el.dataset.targetOffset; }));
+  });
+  const teaser = root.querySelector("#team-teaser");
+  if (teaser) teaser.addEventListener("click", openTeamSheet);
+}
+
 async function loadProfile() {
   const root = $("#profile-body");
   root.innerHTML = `<div class="skeleton-wrap"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>`;
@@ -1190,19 +1480,7 @@ async function loadProfile() {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить профиль: ${esc(e.message)}</div>`;
     return;
   }
-
-  const unlockedBadges = (me.badges || []).slice().sort((a, b) => (BADGE_RARITY_ORDER[a.rarity] ?? 9) - (BADGE_RARITY_ORDER[b.rarity] ?? 9));
-  const tier = tenureTier(me.member_since_days);
-  const rMeta = roleMeta(me.role);
-  const roleLabel = me.role ? esc(me.role) : "Участник PHOENIX";
-
-  let joinedLine = "";
-  if (me.created_at) {
-    const jd = new Date(me.created_at.replace(" ", "T") + "Z");
-    if (!isNaN(jd.getTime())) {
-      joinedLine = ` · в команде с ${jd.getUTCDate()} ${MONTHS_RU[jd.getUTCMonth() + 1]}. ${jd.getUTCFullYear()}`;
-    }
-  }
+  state.isDeveloper = !!me.is_developer; // используется для показа переключателя dev-режима в Настройках
 
   const goalSet = me.monthly_goal != null && me.monthly_goal > 0;
   const goalDone = me.completed_month || 0;
@@ -1224,27 +1502,7 @@ async function loadProfile() {
   `;
 
   root.innerHTML = `
-    <div class="profile-banner-wrap"></div>
-    <div class="profile-head-card">
-      <span class="avatar-ring${tier ? " tier-" + tier : ""}">${avatarHtml(me.telegram_id, me.display_name || me.name, "xl")}</span>
-      <div class="nm-row">
-        <span class="nm">${esc(me.display_name || me.name)}</span>
-        ${me.is_developer ? `<span class="dev-pill">DEV</span>` : ""}
-        ${rankTagHtml(me.studio_rank)}
-      </div>
-      ${me.username ? `<div class="un">@${esc(me.username)}</div>` : ""}
-      ${me.internal_id != null ? `<div class="id-row"><span class="id-chip">#${me.internal_id}</span>${joinedLine}${me.is_online ? ` · <span style="color:var(--s-done); font-weight:600;">в сети</span>` : ""}</div>` : ""}
-      <span class="role-tag" style="--tag-c:${rMeta.c}">${rMeta.ic} ${roleLabel}</span>
-    </div>
-
-    ${teamTeaserHtml(me)}
-    ${me.status_text ? `<div class="status-quote">💬 ${esc(me.status_text)}</div>` : ""}
-    ${me.bio ? `<div class="profile-bio">${esc(me.bio)}</div>` : ""}
-
-    <div class="bc-meta-line">📋 ${me.assigned} на нём сейчас${me.overdue ? ` · <span class="warn">⏰ ${me.overdue} просрочено</span>` : ""}${me.avg_days != null ? ` · ⏱ в среднем ${me.avg_days.toFixed ? me.avg_days.toFixed(1) : me.avg_days} дн.` : ""}</div>
-
-    ${loadStructureHtml(me)}
-
+    ${profileHeaderHtml(me)}
     <div class="bento">
       ${goalCardHtml}
       <div class="bcell" style="animation-delay:60ms;">
@@ -1257,28 +1515,13 @@ async function loadProfile() {
         <div class="big-num">${me.on_time_pct != null ? me.on_time_pct + "%" : "—"}</div>
         <div class="sub">${me.avg_days != null ? `в среднем ${me.avg_days.toFixed(1)} дн. на отчёт` : ""}</div>
       </div>
-      <div class="bcell wide" style="animation-delay:140ms;">
-        <h3>Достижения</h3>
-        <div class="badge-grid">
-          ${unlockedBadges.map(b => `
-            <div class="badge-item ${b.unlocked ? "unlocked" : ""}" title="${esc(b.label)}${!b.unlocked && b.target ? ` — ${b.current}/${b.target}` : ""}">
-              <div>${esc(b.icon)}</div>
-              <span class="lbl">${esc(b.label)}</span>
-            </div>
-          `).join("")}
-        </div>
-      </div>
+      ${badgesBentoHtml(me, 140)}
     </div>
+    ${devModeActive() ? devPanelHtml(me) : ""}
   `;
-  loadAvatars(root);
-  playDonutIntro(root);
-  root.querySelectorAll(".role-bar-fill").forEach(el => {
-    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.width = el.dataset.pct + "%"; }));
-  });
-  root.querySelectorAll(".goal-ring-fill").forEach(el => {
-    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.strokeDashoffset = el.dataset.targetOffset; }));
-  });
+  wireProfileCommon(root, me.telegram_id);
   root.querySelector("#goal-card").addEventListener("click", () => monthlyGoalDialog(me.monthly_goal));
+  if (devModeActive()) wireDevPanel(root, me.telegram_id, () => loadProfile());
 }
 
 function monthlyGoalDialog(current) {
@@ -1310,6 +1553,314 @@ function pluralColleagues(n) {
   if (mod10 === 1 && mod100 !== 11) return "коллега";
   if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return "коллеги";
   return "коллег";
+}
+
+// ---------- Доска (канбан по статусам, /api/board) ----------
+// Список статусов и их порядок приходят прямо в ответе /api/board
+// (d.statuses) — не дублируем их отдельной константой на клиенте.
+
+function boardCardHtml(r) {
+  const overdue = isOverdue(r);
+  return `
+    <div class="board-card" data-open="${esc(r.public_id)}">
+      <div class="id">${esc(r.public_id)}</div>
+      <div class="ttl">${esc(r.title)}</div>
+      <div class="foot">
+        ${assigneesHtml(r.assignees)}
+        <span class="deadline ${overdue ? "overdue" : ""}">${overdue ? "⏰ " : ""}${esc(r.deadline || "—")}</span>
+      </div>
+    </div>`;
+}
+
+function wireBoardCards(root) {
+  root.querySelectorAll(".board-card[data-open]").forEach(el => {
+    el.addEventListener("click", () => openReportDetail(el.dataset.open));
+  });
+}
+
+async function loadBoard() {
+  const root = $("#board-body");
+  root.innerHTML = dialogSkeletonHtml(4);
+  let d;
+  try {
+    d = await apiGet("/board");
+  } catch (e) {
+    root.innerHTML = `<div class="bento-empty">Не удалось загрузить доску: ${esc(e.message)}</div>`;
+    return;
+  }
+  root.innerHTML = `
+    <div class="board">
+      ${d.statuses.map(col => `
+        <div class="board-col" data-status="${esc(col.status)}">
+          <div class="board-col-head">
+            <span class="lb"><span class="dot ${STATUS_DOT_CLASS[col.status] || "draft"}"></span>${esc(col.label)}</span>
+            <span class="cnt">${col.total}</span>
+          </div>
+          <div class="board-cards" data-count="${col.reports.length}">
+            ${col.reports.length ? col.reports.map(boardCardHtml).join("") : `<div class="board-col-empty">пусто</div>`}
+          </div>
+          ${col.has_more ? `<button class="btn ghost board-col-more" data-loadmore="${esc(col.status)}">Показать ещё (${col.total - col.reports.length})</button>` : ""}
+        </div>
+      `).join("")}
+    </div>
+  `;
+  wireBoardCards(root);
+  root.querySelectorAll("[data-loadmore]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const status = btn.dataset.loadmore;
+      const colEl = root.querySelector(`.board-col[data-status="${status}"]`);
+      const cardsEl = colEl.querySelector(".board-cards");
+      const offset = parseInt(cardsEl.dataset.count, 10) || 0;
+      btn.disabled = true;
+      btn.textContent = "Загрузка…";
+      try {
+        const res = await apiGet(`/board/column/${status}`, { offset, limit: 60 });
+        cardsEl.querySelector(".board-col-empty")?.remove();
+        cardsEl.insertAdjacentHTML("beforeend", res.reports.map(boardCardHtml).join(""));
+        cardsEl.dataset.count = offset + res.reports.length;
+        wireBoardCards(cardsEl);
+        if (res.has_more) {
+          btn.disabled = false;
+          btn.textContent = `Показать ещё (${res.total - offset - res.reports.length})`;
+        } else {
+          btn.remove();
+        }
+      } catch (e) {
+        toast(`Не удалось догрузить колонку: ${e.message}`, "error");
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+// ---------- Тайтлы (голосование, /api/public/*) ----------
+// Портировано из мини-аппа: loadVote/renderVoteTitles/voteBentoHtml/
+// voteCardHtml/castVote/openTitleDetailPublic (miniapp/static/index.html).
+
+function imgProxy(url) {
+  if (!url) return "";
+  return `${API_BASE}/img_proxy?url=${encodeURIComponent(url)}&init_data=${encodeURIComponent(state.token)}`;
+}
+
+const TD_ICONS = {
+  episodes: '<span class="td-ic square"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"></rect><path d="M10 9.3v5.4l4.6-2.7z" fill="currentColor" stroke="none"></path></svg></span>',
+  schedule: '<span class="td-ic square"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"></rect><path d="M3.5 9.5h17M8 2.5v4M16 2.5v4M7.2 13.2h3.4M7.2 16.8h6.6"></path></svg></span>',
+  source: '<span class="td-ic round"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="7.2"></circle><circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none"></circle></svg></span>',
+  crew: '<span class="td-ic round"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.7" cy="9" r="2.5"></circle><path d="M3.8 17.8c0-2.7 2.1-4.4 4.9-4.4s4.9 1.7 4.9 4.4"></path><circle cx="16.2" cy="8.3" r="2"></circle><path d="M14.9 12.1c2 .2 3.6 1.6 3.6 3.8"></path></svg></span>',
+};
+
+function titleDetailMetaRowsHtml(det) {
+  if (!det) return "";
+  const rows = [];
+
+  const epParts = [];
+  if (det.episodes_aired != null && det.episodes_total) epParts.push(`${det.episodes_aired} из ${det.episodes_total} эп.`);
+  else if (det.episodes_total) epParts.push(`${det.episodes_total} эп.`);
+  if (det.duration_min) epParts.push(`по ~${det.duration_min} мин.`);
+  if (epParts.length) rows.push(`<div class="td-meta-row">${TD_ICONS.episodes}<span>${esc(epParts.join(" "))}</span></div>`);
+
+  const statusParts = [det.kind_label, det.status_label].filter(Boolean);
+  if (statusParts.length) rows.push(`<div class="td-meta-row">${TD_ICONS.schedule}<span>${esc(statusParts.join(", "))}</span></div>`);
+
+  if (det.source_label) rows.push(`<div class="td-meta-row">${TD_ICONS.source}<span>Первоисточник ${esc(det.source_label)}</span></div>`);
+
+  const crewParts = [det.studio, det.author, det.director].filter(Boolean);
+  if (crewParts.length) rows.push(`<div class="td-meta-row">${TD_ICONS.crew}<span>${esc(crewParts.join(" · "))}</span></div>`);
+
+  return rows.join("");
+}
+
+function voteActivity(t) { return t.likes + t.dislikes; }
+
+// Лидер сезона — только если реально есть за что бороться (хоть один
+// голос с перевесом), иначе на свежем сезоне без голосов "лидером"
+// стал бы случайный первый по порядку тайтл.
+function voteSeasonTop(titles) {
+  const ranked = titles.filter(t => t.likes > t.dislikes)
+    .sort((a, b) => (b.likes - b.dislikes) - (a.likes - a.dislikes));
+  return ranked[0] || null;
+}
+
+function voteBentoHtml(titles, top) {
+  const totalVotes = titles.reduce((s, t) => s + voteActivity(t), 0);
+
+  const statsHtml = `
+    <div class="bcell"><h3>Тайтлов в сезоне</h3><div class="big-num">${titles.length}</div></div>
+    <div class="bcell"><h3>Голосов подано</h3><div class="big-num">${totalVotes}</div></div>
+  `;
+
+  if (!top) return `<div class="bento">${statsHtml}</div>`;
+
+  const poster = top.poster_url
+    ? `<img class="vote-hero-poster" src="${imgProxy(top.poster_url)}" alt="" data-open-title-detail="${top.id}">`
+    : `<div class="vote-hero-poster vote-poster-ph" data-open-title-detail="${top.id}">🎬</div>`;
+
+  const heroHtml = `
+    <div class="bcell wide vote-hero">
+      ${poster}
+      <div class="vote-hero-body">
+        <div data-open-title-detail="${top.id}" style="cursor:pointer;">
+          <span class="vote-hero-tag">🏆 Топ сезона</span>
+          <div class="vote-hero-name">${esc(top.name)}</div>
+        </div>
+        <div class="vote-actions">
+          <button class="vote-btn${top.my_vote === 1 ? " on-like" : ""}" data-vote-title="${top.id}" data-vote-choice="1">👍 <span>${top.likes}</span></button>
+          <button class="vote-btn${top.my_vote === -1 ? " on-dislike" : ""}" data-vote-title="${top.id}" data-vote-choice="-1">👎 <span>${top.dislikes}</span></button>
+        </div>
+      </div>
+    </div>`;
+
+  return `<div class="bento">${statsHtml}${heroHtml}</div>`;
+}
+
+function voteCardHtml(t) {
+  const poster = t.poster_url
+    ? `<img class="vote-poster" src="${imgProxy(t.poster_url)}" alt="" loading="lazy">`
+    : `<div class="vote-poster vote-poster-ph">🎬</div>`;
+  const voteCls = t.my_vote === 1 ? " voted-like" : (t.my_vote === -1 ? " voted-dislike" : "");
+
+  return `
+    <div class="vote-card${voteCls}">
+      <div class="vote-card-tap" data-open-title-detail="${t.id}">
+        ${poster}
+        <div class="vote-name">${esc(t.name)}</div>
+      </div>
+      <div class="vote-actions">
+        <button class="vote-btn${t.my_vote === 1 ? " on-like" : ""}" data-vote-title="${t.id}" data-vote-choice="1">👍 <span>${t.likes}</span></button>
+        <button class="vote-btn${t.my_vote === -1 ? " on-dislike" : ""}" data-vote-title="${t.id}" data-vote-choice="-1">👎 <span>${t.dislikes}</span></button>
+      </div>
+    </div>`;
+}
+
+async function castVote(titleId, choice, btn) {
+  const card = btn.closest(".vote-card") || btn.closest(".vote-hero");
+  const likeBtn = card.querySelector('[data-vote-choice="1"]');
+  const dislikeBtn = card.querySelector('[data-vote-choice="-1"]');
+  const already = btn.classList.contains(choice === 1 ? "on-like" : "on-dislike");
+  const vote = already ? 0 : choice;
+
+  card.classList.add("vote-pending");
+  try {
+    const r = await apiPost(`/public/titles/${titleId}/vote`, { vote });
+    likeBtn.classList.toggle("on-like", r.my_vote === 1);
+    dislikeBtn.classList.toggle("on-dislike", r.my_vote === -1);
+    likeBtn.querySelector("span").textContent = r.likes;
+    dislikeBtn.querySelector("span").textContent = r.dislikes;
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    card.classList.remove("vote-pending");
+  }
+}
+
+function wireVoteButtons(root) {
+  root.querySelectorAll("[data-vote-title]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      castVote(parseInt(btn.dataset.voteTitle, 10), parseInt(btn.dataset.voteChoice, 10), btn);
+    });
+  });
+  root.querySelectorAll("[data-open-title-detail]").forEach(el => {
+    el.addEventListener("click", () => openTitleDetail(parseInt(el.dataset.openTitleDetail, 10)));
+  });
+}
+
+async function openTitleDetail(titleId) {
+  const overlay = openSheet(dialogSkeletonHtml(4));
+  let d;
+  try {
+    d = await apiGet(`/public/titles/${titleId}`);
+  } catch (e) {
+    overlay.querySelector(".sheet").innerHTML = `<div style="color:var(--s-stop);">Не удалось загрузить тайтл: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+    overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+    return;
+  }
+  const det = d.details && Array.isArray(d.details) ? null : d.details;
+  const poster = d.poster_url ? imgProxy(d.poster_url) : "";
+  const posterHtml = poster ? `<img class="td-poster" src="${poster}" alt="">` : `<div class="td-poster">🎬</div>`;
+  const bgHtml = poster ? `<div class="td-bg" style="background-image:url(${poster})"></div>` : "";
+
+  overlay.querySelector(".sheet").innerHTML = `
+    <div class="td-hero">
+      ${bgHtml}
+      <div class="td-poster-wrap">${posterHtml}</div>
+    </div>
+    <div class="td-body">
+      <div class="td-name">${esc(d.name)}</div>
+      ${det && det.name_original ? `<div class="td-name-original">${esc(det.name_original)}</div>` : ""}
+      ${d.season_name ? `<div class="td-chip">${esc(d.season_name)}</div>` : ""}
+      <div class="td-stat-row">
+        <span class="td-stat-pill like">👍 ${d.likes}</span>
+        <span class="td-stat-pill dislike">👎 ${d.dislikes}</span>
+      </div>
+      <div class="td-vote-cta">
+        <button class="${d.my_vote === 1 ? "on-like" : ""}" data-vote-title="${d.id}" data-vote-choice="1">👍 Нравится</button>
+        <button class="${d.my_vote === -1 ? "on-dislike" : ""}" data-vote-title="${d.id}" data-vote-choice="-1">👎 Не то</button>
+      </div>
+      ${det ? `
+      <div class="td-meta">${titleDetailMetaRowsHtml(det)}</div>
+      ${det.genres && det.genres.length ? `<div class="td-genre-row">${det.genres.map(g => `<span class="td-genre-chip">${esc(g)}</span>`).join("")}</div>` : ""}
+      ${det.description ? `<div class="td-desc">${esc(det.description)}</div>` : ""}
+      ` : ""}
+    </div>
+    <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
+  `;
+  overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  wireVoteButtons(overlay);
+}
+
+state.titleSeasonId = null;
+
+async function loadTitlesTab() {
+  const root = $("#titles-body");
+  root.innerHTML = dialogSkeletonHtml(3);
+  let d;
+  try {
+    d = await apiGet("/public/seasons");
+  } catch (e) {
+    root.innerHTML = `<div class="bento-empty">Не удалось загрузить сезоны: ${esc(e.message)}</div>`;
+    return;
+  }
+  if (!d.seasons.length) {
+    root.innerHTML = `<div class="empty-state"><div style="font-size:34px; margin-bottom:8px;">📅</div>Эфир-сезонов пока нет.</div>`;
+    return;
+  }
+  if (state.titleSeasonId == null || !d.seasons.some(s => s.id === state.titleSeasonId)) {
+    state.titleSeasonId = d.seasons[0].id;
+  }
+  renderTitlesForSeason(d.seasons);
+}
+
+function renderTitlesForSeason(seasons) {
+  const root = $("#titles-body");
+  root.innerHTML = `
+    <div class="chip-row">
+      ${seasons.map(s => `<button class="qchip${s.id === state.titleSeasonId ? " on" : ""}" data-season="${s.id}">${esc(s.name)}</button>`).join("")}
+    </div>
+    <div id="titles-grid">${dialogSkeletonHtml(3)}</div>
+  `;
+  root.querySelectorAll("[data-season]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.titleSeasonId = parseInt(btn.dataset.season, 10);
+      renderTitlesForSeason(seasons);
+    });
+  });
+
+  apiGet(`/public/seasons/${state.titleSeasonId}/titles`).then(d => {
+    const wrap = $("#titles-grid");
+    if (!wrap) return; // успели переключить сезон/вкладку, пока грузилось
+    if (!d.titles.length) {
+      wrap.innerHTML = `<div class="empty-state"><div style="font-size:34px; margin-bottom:8px;">🎬</div>Тайтлов в этом сезоне пока нет.</div>`;
+      return;
+    }
+    const top = voteSeasonTop(d.titles);
+    const gridTitles = top ? d.titles.filter(t => t.id !== top.id) : d.titles;
+    wrap.innerHTML = voteBentoHtml(d.titles, top) + `<div class="vote-grid">${gridTitles.map(voteCardHtml).join("")}</div>`;
+    wireVoteButtons(wrap);
+  }).catch(e => {
+    const wrap = $("#titles-grid");
+    if (wrap) wrap.innerHTML = `<div class="bento-empty">Не удалось загрузить тайтлы: ${esc(e.message)}</div>`;
+  });
 }
 
 // ---------- Лента (история изменений по отчётам + админ-лог) ----------

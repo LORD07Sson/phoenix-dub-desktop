@@ -54,6 +54,8 @@
   <div class="tabstrip" id="tabstrip">
     <button class="tab-btn active" data-tab="overview">📊 Обзор</button>
     <button class="tab-btn" data-tab="list">📋 Список</button>
+    <button class="tab-btn" data-tab="board">🗂 Доска</button>
+    <button class="tab-btn" data-tab="titles">🗳️ Тайтлы</button>
     <button class="tab-btn" data-tab="feed">🕘 Лента</button>
     <button class="tab-btn" data-tab="profile">👤 Я</button>
   </div>
@@ -130,6 +132,20 @@
     </div>
 
     <div class="statusbar" id="statusbar">Отчётов: 0 · клик по строке — открыть карточку, чекбоксы — массовые операции · Ctrl+Shift+P — показать/скрыть окно из любого места</div>
+  </div>
+
+  <!-- ===== Доска ===== -->
+  <div class="tab-panel" data-panel="board">
+    <div class="scroll-panel" id="board-panel">
+      <div id="board-body"></div>
+    </div>
+  </div>
+
+  <!-- ===== Тайтлы ===== -->
+  <div class="tab-panel" data-panel="titles">
+    <div class="scroll-panel" id="titles-panel">
+      <div id="titles-body"></div>
+    </div>
   </div>
 
   <!-- ===== Лента ===== -->
