@@ -8,7 +8,9 @@
     "lint": "eslint .",
     "verify": "node scripts/verify-modules.mjs",
     "test:board": "node scripts/board-gestures-test.mjs",
-    "test:profile": "node scripts/profile-qc-test.mjs"
+    "test:profile": "node scripts/profile-qc-test.mjs",
+    "test:notes": "node scripts/notes-timecodes-test.mjs",
+    "test": "npm run verify && npm run test:board && npm run test:profile && npm run test:notes"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",

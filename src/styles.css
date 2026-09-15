@@ -1121,6 +1121,35 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 
 .big-num.muted { color: var(--ink-dim); }
 
+/* ---------- Заметки с тайм-кодом ---------- */
+
+/* Время — отдельной меткой перед текстом, а не частью строки: правки в
+   дубляже почти всегда привязаны ко времени, и глаз должен цеплять его
+   первым. Хранится оно префиксом «[4:12] » в самом тексте заметки
+   (см. parseNoteTime в utils.js) — отдельного поля в API нет. */
+.note-body { display: flex; align-items: baseline; gap: 8px; }
+.note-time {
+  flex: none; font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 11.5px; font-variant-numeric: tabular-nums;
+  padding: 1px 7px; border-radius: 99px;
+  background: var(--accent-soft); color: var(--fire);
+}
+.note-item.timed { border-left: 2px solid var(--accent-soft); border-radius: 0; padding-left: 8px; }
+
+.note-add-row .note-time-input {
+  flex: none; width: 74px; text-align: center;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.note-add-row { align-items: flex-start; }
+
+/* Переключатель порядка живёт в самом заголовке секции — отдельная
+   строка ради одной кнопки заняла бы больше места, чем сама кнопка. */
+.notes-sort {
+  float: right; padding: 2px 9px; font-size: 11.5px; font-weight: 400;
+  text-transform: none; letter-spacing: 0;
+}
+
 /* ---------- Пакетный QC (сводная таблица по нескольким дорожкам) ---------- */
 
 .qc-batch-head {

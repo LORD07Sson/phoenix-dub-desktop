@@ -2,8 +2,8 @@
 // этот модуль только открывает диалог выбора файла и рисует результат.
 
 import { invoke, openDialog } from "./tauri.js";
-import { openSheet, dialogSkeletonHtml, toast } from "./api.js";
-import { $, esc, formatTime, formatRange } from "./utils.js";
+import { openSheet, dialogSkeletonHtml, toast, apiPost } from "./api.js";
+import { $, esc, formatTime, formatRange, noteTimePrefix } from "./utils.js";
 
 const FINDING_LABELS = {
   clipping: "Клиппинг", silence: "Пауза", quiet: "Тихо", loud: "Громко",
@@ -33,12 +33,15 @@ function findingsHtml(findings) {
 // Сам прогон QC + отрисовка результата — вынесено отдельной функцией,
 // чтобы её могли звать и обычный диалог выбора файла (ниже), и
 // file-drop.js напрямую с уже известным путём (без диалога).
-export async function runQcAnalysis(path) {
+// opts.reportId — прогон запущен из карточки отчёта (кнопка «QC дорожки»),
+// значит находки можно положить прямо в заметки этого отчёта: у каждой
+// уже есть время начала, а заметки теперь понимают тайм-код.
+export async function runQcAnalysis(path, opts = {}) {
   const overlay = openSheet(`
     <h2>QC звука</h2>
     <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-8px;">${esc(path)}</p>
     <div id="qc-body">${dialogSkeletonHtml(3)}</div>
-    <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
+    <div class="sheet-actions" id="qc-actions"><button class="btn" data-close>Закрыть</button></div>
   `);
   overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
 
@@ -52,9 +55,39 @@ export async function runQcAnalysis(path) {
     body.innerHTML =
       `<div style="color:var(--ink-soft); font-size:12.5px; margin-bottom:10px;">Длительность ${formatTime(report.duration)} · Пик ${report.peak_dbfs.toFixed(1)} дБФС · RMS ${report.rms_dbfs.toFixed(1)} дБФС</div>` +
       findingsHtml(report.findings);
+    if (opts.reportId) wireAddToNotes(overlay, opts.reportId, report.findings);
   } catch (e) {
     overlay.querySelector("#qc-body").innerHTML = `<div style="color:var(--s-stop);">${esc(e)}</div>`;
   }
+}
+
+// Каждая находка уезжает в заметки отдельной строкой с тайм-кодом —
+// перепечатывать «на 4:12 клиппинг» руками больше не нужно.
+function wireAddToNotes(overlay, reportId, findings) {
+  const actions = overlay.querySelector("#qc-actions");
+  const btn = document.createElement("button");
+  btn.className = "btn primary";
+  btn.style.marginRight = "auto";
+  btn.textContent = `📝 В заметки отчёта (${findings.length})`;
+  actions.prepend(btn);
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "Добавляю…";
+    let added = 0;
+    try {
+      for (const f of findings) {
+        await apiPost(`/report/${reportId}/notes`, { text: noteTimePrefix(f.start) + f.message });
+        added++;
+      }
+      toast(`Добавлено заметок: ${added}.`);
+      document.dispatchEvent(new CustomEvent("report-notes-added", { detail: { publicId: reportId } }));
+      overlay.remove();
+    } catch (e) {
+      toast(`Добавлено ${added} из ${findings.length}: ${e.message}`, "error");
+      btn.disabled = false;
+      btn.textContent = `📝 В заметки отчёта (${findings.length})`;
+    }
+  });
 }
 
 // ---------- пакетный прогон ----------

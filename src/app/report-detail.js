@@ -4,8 +4,9 @@
 
 import { apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
 import { state } from "./state.js";
-import { invoke, saveDialog } from "./tauri.js";
-import { esc, initials, STATUS_DOT_CLASS, isOverdue } from "./utils.js";
+import { invoke, saveDialog, openDialog } from "./tauri.js";
+import { esc, initials, STATUS_DOT_CLASS, isOverdue, parseNoteTime, secondsFromTimeInput, noteTimePrefix } from "./utils.js";
+import { runQcAnalysis, QC_EXTENSIONS } from "./qc.js";
 import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
 import { loadRoles, loadAssignable, userOptionsHtml } from "./titles-admin.js";
 import { setDropTarget } from "./file-drop.js";
@@ -27,11 +28,19 @@ export async function openReportDetail(publicId) {
   setDropTarget(publicId);
   const onFileUploaded = e => { if (e.detail.publicId === publicId) render(); };
   document.addEventListener("report-file-uploaded", onFileUploaded);
+  // Находки QC, уехавшие в заметки, должны появиться в открытой карточке
+  // сразу, а не после ручного обновления.
+  document.addEventListener("report-notes-added", onFileUploaded);
+  // Порядок заметок — состояние самой шторки, а не сервера: render()
+  // вызывается на каждое действие, и сбрасывать выбор на каждом было бы
+  // неприятно.
+  let notesByTime = false;
   new MutationObserver((_muts, obs) => {
     if (!overlay.isConnected) {
       obs.disconnect();
       setDropTarget(null);
       document.removeEventListener("report-file-uploaded", onFileUploaded);
+      document.removeEventListener("report-notes-added", onFileUploaded);
     }
   }).observe(document.body, { childList: true });
 
@@ -61,6 +70,19 @@ export async function openReportDetail(publicId) {
 
     const dotClass = STATUS_DOT_CLASS[detail.status] || "draft";
     const overdue = isOverdue(detail);
+
+    // Заметки с тайм-кодом — это список правок по дорожке, и читать его
+    // удобнее по времени, а не по времени написания.
+    const timedCount = notes.notes.filter(n => parseNoteTime(n.text)).length;
+    const orderedNotes = notesByTime
+      ? notes.notes.slice().sort((a, b) => {
+          const ta = parseNoteTime(a.text), tb = parseNoteTime(b.text);
+          if (ta && tb) return ta.seconds - tb.seconds;
+          if (ta) return -1;
+          if (tb) return 1;
+          return 0;
+        })
+      : notes.notes;
 
     overlay.querySelector(".sheet").innerHTML = `
       <div class="detail-head">
@@ -97,9 +119,12 @@ export async function openReportDetail(publicId) {
       </div>
 
       <div class="detail-section">
-        <h3>Заметки ${notes.notes.length ? `(${notes.notes.length})` : ""}</h3>
-        <div id="notes-list">${notes.notes.map(noteHtml).join("") || `<div class="no-assignee">Пока нет заметок</div>`}</div>
-        <div class="add-row">
+        <h3>Заметки ${notes.notes.length ? `(${notes.notes.length})` : ""}
+          ${timedCount >= 2 ? `<button class="btn ghost notes-sort" id="notes-sort">${notesByTime ? "По времени добавления" : "По тайм-коду"}</button>` : ""}
+        </h3>
+        <div id="notes-list">${orderedNotes.map(noteHtml).join("") || `<div class="no-assignee">Пока нет заметок</div>`}</div>
+        <div class="add-row note-add-row">
+          <input id="note-time" class="note-time-input" placeholder="04:12" maxlength="8" inputmode="numeric" title="Время на дорожке — необязательно">
           <textarea id="note-new" rows="2" placeholder="Написать заметку…"></textarea>
           <button class="btn" id="note-add">Добавить</button>
         </div>
@@ -128,6 +153,7 @@ export async function openReportDetail(publicId) {
 
       <div class="detail-section">
         <div style="display:flex; gap:8px;">
+          <button class="btn ghost" id="btn-qc-track" style="flex:1;">🎧 QC дорожки</button>
           <button class="btn ghost" id="btn-history" style="flex:1;">🕓 История</button>
           <button class="btn ghost" id="btn-activity" style="flex:1;">📜 Активность</button>
         </div>
@@ -266,14 +292,34 @@ export async function openReportDetail(publicId) {
         await render();
       } catch (e) { toast(`Не удалось добавить пункт: ${e.message}`, "error"); }
     });
+    const notesSortBtn = sheet.querySelector("#notes-sort");
+    if (notesSortBtn) notesSortBtn.addEventListener("click", async () => {
+      notesByTime = !notesByTime;
+      await render();
+    });
     sheet.querySelector("#note-add").addEventListener("click", async () => {
       const ta = sheet.querySelector("#note-new");
+      const timeInput = sheet.querySelector("#note-time");
       const text = ta.value.trim();
       if (!text) return;
+      const seconds = secondsFromTimeInput(timeInput.value);
+      if (seconds === null) {
+        toast("Время — в формате 04:12 или 1:02:03.", "error");
+        timeInput.focus();
+        return;
+      }
+      // Время уходит префиксом в сам текст: отдельного поля под него в
+      // API заметок нет, а так его увидят и бот, и мини-апп.
+      const payload = timeInput.value.trim() ? noteTimePrefix(seconds) + text : text;
       try {
-        await apiPost(`/report/${publicId}/notes`, { text });
+        await apiPost(`/report/${publicId}/notes`, { text: payload });
         await render();
       } catch (e) { toast(`Не удалось добавить заметку: ${e.message}`, "error"); }
+    });
+    sheet.querySelector("#btn-qc-track").addEventListener("click", async () => {
+      const picked = await openDialog({ multiple: false, filters: [{ name: "Аудио/видео", extensions: QC_EXTENSIONS }] });
+      if (!picked) return;
+      await runQcAnalysis(Array.isArray(picked) ? picked[0] : picked, { reportId: publicId });
     });
     sheet.querySelectorAll("[data-download-file]").forEach(btn => {
       btn.addEventListener("click", async () => {
@@ -330,9 +376,13 @@ function checklistItemHtml(item) {
 }
 
 function noteHtml(n) {
-  return `<div class="note-item">
+  const t = parseNoteTime(n.text);
+  return `<div class="note-item${t ? " timed" : ""}">
     <div class="meta">${esc(n.author)} · ${esc(n.created_at || "")}</div>
-    <div>${esc(n.text)}</div>
+    <div class="note-body">
+      ${t ? `<span class="note-time" title="время на дорожке">${esc(t.label)}</span>` : ""}
+      <span>${esc(t ? t.rest : n.text)}</span>
+    </div>
   </div>`;
 }
 

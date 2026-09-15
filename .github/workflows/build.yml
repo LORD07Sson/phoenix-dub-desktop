@@ -90,9 +90,7 @@ jobs:
           npm ci
           npm run lint
           npm run build
-          npm run verify
-          npm run test:board
-          npm run test:profile
+          npm test
 
       # ffmpeg нужен для локального QC звука — раньше требовался в PATH
       # у пользователя, теперь кладём готовый статичный бинарник прямо
