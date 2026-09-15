@@ -1029,7 +1029,12 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 
 /* ---------- Доска (канбан по статусам, /api/board) ---------- */
 
-.board { display: flex; gap: 12px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; cursor: grab; }
+/* scroll-behavior: smooth — колесо мыши едет с анимацией, а не скачком
+   (как у любого нормального карусельного слайдера). Во время ручного
+   drag'а (board.js: wireBoardScroll) переключается на auto — иначе
+   доска отставала бы от курсора, плавность там не нужна, нужна
+   мгновенная 1:1 привязка к пальцу/курсору. */
+.board { display: flex; gap: 12px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; cursor: grab; scroll-behavior: smooth; }
 .board.panning { cursor: grabbing; }
 .board.panning .board-card { cursor: grabbing; }
 .board-col {
