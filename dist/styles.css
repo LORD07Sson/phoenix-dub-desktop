@@ -561,12 +561,20 @@ thead th.sorted.asc::after { content: " ▴"; }
 
 th.col-check, td.col-check { width: 34px; padding-left: 14px !important; }
 th.col-check input, td.col-check input { cursor: pointer; }
+th.col-actions, td.col-actions { width: 64px; }
 
 tbody tr {
   cursor: pointer;
   border-bottom: 1px solid var(--line-soft);
 }
 tbody tr:hover { background: var(--surface-2); }
+
+/* Быстрые действия (назначить/сменить статус) — скрыты, пока курсор не
+   над строкой, чтобы таблица не была засорена кнопками, когда они не
+   нужны (тот же приём, что кнопка "показать пароль" в полях ввода). */
+td.row-actions { opacity: 0; transition: opacity .12s ease; white-space: nowrap; }
+tbody tr:hover td.row-actions { opacity: 1; }
+td.row-actions .icon-btn { padding: 4px 6px; font-size: 12px; margin-right: 4px; }
 tbody tr.selected { background: var(--accent-soft); }
 tbody td { padding: 9px 10px; }
 tbody td.num { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
