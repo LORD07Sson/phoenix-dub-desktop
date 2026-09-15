@@ -10,9 +10,11 @@
 // Поднимает jsdom с реальным index.html, стабит window.__TAURI_INTERNALS__
 // (иначе синхронный getCurrentWindow() в vendor/tauri-api/window.js
 // бросает исключение прямо на этапе импорта — в реальном приложении его
-// подставляет сам Tauri) и импортирует dist/app/main.js через Node ESM
-// loader с resolve-хуком, читающим тот же dist/importmap.json, что и
-// браузер — тем самым проверяется тот же граф, что видит WebView.
+// подставляет сам Tauri) и импортирует dist/app/main.js напрямую — все
+// импорты в dist/app|vendor относительные (никаких бэйр-спецификаторов
+// вроде "@tauri-apps/api/core" и import map — на реальном WebView2
+// пользователя внешний import map не подхватился, см. app/tauri.js),
+// поэтому Node резолвит их сам, без кастомных loader-хуков.
 
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
@@ -48,18 +50,6 @@ dom.window.__TAURI_INTERNALS__ = {
   convertFileSrc: p => p,
   metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
 };
-
-const importMap = JSON.parse(readFileSync(path.join(distDir, "importmap.json"), "utf8"));
-
-const nodeResolve = await import("node:module").then(m => m.default ?? m);
-const { register } = nodeResolve;
-
-// Node не понимает import map нативно — резолвим бэйр-спецификаторы сами
-// через кастомный loader-хук на тот же importmap.json, что видит браузер.
-register(pathToFileURL(path.join(import.meta.dirname, "resolve-hook.mjs")).href, {
-  parentURL: import.meta.url,
-  data: { importMap, distDir },
-});
 
 const mainUrl = pathToFileURL(path.join(distDir, "app", "main.js")).href;
 await import(mainUrl);

@@ -6,21 +6,26 @@
 // esc()/атрибуты, но лишняя защита в глубину не помешает).
 //
 // Сами файлы — vendored копии официальных npm-пакетов (см. dist/vendor/
-// README.md), бэйр-спецификаторы ("@tauri-apps/api/core") резолвятся через
-// <script type="importmap"> в index.html, не бандлером — в проекте его
-// принципиально нет.
+// README.md). Импортируем их ОТНОСИТЕЛЬНЫМИ путями, а не бэйр-
+// спецификаторами ("@tauri-apps/api/core") через import map — на реальном
+// WebView2 у пользователя внешний <script type="importmap" src="...">
+// не подхватился (эта фича браузеров новее, чем сам инлайновый import map,
+// и по факту оказалась не везде доступна), из-за чего весь граф модулей
+// падал с ошибкой резолва прямо на старте — сплэш-экран висел вечно,
+// tryRestoreSession() просто никогда не запускался. Относительные пути
+// резолвятся штатным ES-module loader'ом браузера без каких-либо доп.
+// фич — работает везде. dist/importmap.json удалён — больше не нужен.
 //
 // tauri-plugin-updater/tauri-plugin-process больше не нужны — автообновление
 // теперь на Velopack (см. main.rs: check_for_update/download_and_apply_update,
 // вызываются через invoke(); прогресс — событием "update-progress", его и
-// слушаем через listen() ниже). Раньше тут были ещё @tauri-apps/plugin-updater
-// и @tauri-apps/plugin-process — удалены вместе с PR #7.
+// слушаем через listen() ниже).
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { sendNotification } from "@tauri-apps/plugin-notification";
+import { invoke } from "../vendor/tauri-api/core.js";
+import { listen } from "../vendor/tauri-api/event.js";
+import { getCurrentWindow } from "../vendor/tauri-api/window.js";
+import { open as openDialog } from "../vendor/tauri-plugin-dialog/index.js";
+import { sendNotification } from "../vendor/tauri-plugin-notification/index.js";
 
 export { invoke, listen, getCurrentWindow, openDialog, sendNotification };
 
