@@ -30,6 +30,9 @@
     "active": true,
     "targets": ["nsis"],
     "createUpdaterArtifacts": true,
+    "resources": {
+      "binaries/ffmpeg.exe": "./"
+    },
     "windows": {
       "nsis": {
         "installMode": "currentUser",
