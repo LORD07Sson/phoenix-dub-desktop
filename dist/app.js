@@ -790,6 +790,13 @@ async function openSettings() {
   let autostartOn = false;
   try { autostartOn = await invoke("is_autostart"); } catch (_) {}
 
+  // Переключатель dev-режима виден только реальным разработчикам студии
+  // (state.isDeveloper — из /api/me, is_developer сервер сам проверяет
+  // по OWNER_IDS на каждый /api/dev/* запрос, фронту тут не доверяют).
+  if (state.isDeveloper == null) {
+    try { state.isDeveloper = !!(await apiGet("/me")).is_developer; } catch (_) { state.isDeveloper = false; }
+  }
+
   const overlay = openSheet(`
     <h2>Настройки</h2>
     <div class="row" style="align-items:center; justify-content:space-between;">
@@ -803,6 +810,11 @@ async function openSettings() {
         <option value="light">Светлая</option>
       </select>
     </div>
+    ${state.isDeveloper ? `
+    <div class="row dev-pill-toggle" style="align-items:center; justify-content:space-between;">
+      <span>🛠 Режим разработчика</span>
+      <input type="checkbox" id="s-dev-mode" ${isDevModeOn() ? "checked" : ""}>
+    </div>` : ""}
     <div class="row" style="align-items:center; justify-content:space-between;">
       <span>Версия ${esc(APP_VERSION)}</span>
       <button class="btn" id="s-check-update" style="padding:5px 12px; font-size:12.5px;">Проверить обновления</button>
@@ -810,6 +822,7 @@ async function openSettings() {
     <p style="color:var(--ink-soft); font-size:12.5px;">
       Ctrl+Shift+P — показать/скрыть окно из любого места, даже когда оно свёрнуто в трей.<br>
       Крестик у окна сворачивает в трей — опрос новых назначений продолжает идти в фоне.
+      ${state.isDeveloper ? "<br>Режим разработчика открывает правку чужих ролей/профиля/даты вступления/наград — на карточке коллеги (клик по тизеру команды)." : ""}
     </p>
     <div class="sheet-actions"><button class="btn primary" data-close>Готово</button></div>
   `);
@@ -823,6 +836,8 @@ async function openSettings() {
       e.target.checked = !e.target.checked;
     }
   });
+  const devToggle = overlay.querySelector("#s-dev-mode");
+  if (devToggle) devToggle.addEventListener("change", e => setDevModeOn(e.target.checked));
   overlay.querySelector("#s-check-update").addEventListener("click", () => checkForUpdates(false));
   overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
 }
@@ -1196,6 +1211,265 @@ function loadStructureHtml(me) {
   `;
 }
 
+// ---------- Режим разработчика (/api/dev/*, только для owner) ----------
+// Тумблер хранится в localStorage, как и в мини-аппе — чисто
+// косметическое переключение, что показать (панель правки на карточке).
+// Авторизацию на КАЖДОЕ действие сервер всё равно проверяет заново по
+// OWNER_IDS (_require_owner) — фронту тут доверять нельзя.
+
+const DEV_MODE_KEY = "phoenix-dev-mode";
+function isDevModeOn() {
+  try { return localStorage.getItem(DEV_MODE_KEY) === "1"; } catch (_) { return false; }
+}
+function setDevModeOn(on) {
+  try { localStorage.setItem(DEV_MODE_KEY, on ? "1" : "0"); } catch (_) {}
+}
+function devModeActive() { return !!state.isDeveloper && isDevModeOn(); }
+
+let META_ROLES = null;
+async function loadMetaRoles() {
+  if (META_ROLES) return META_ROLES;
+  try { META_ROLES = (await apiGet("/meta")).roles || []; } catch (_) { META_ROLES = []; }
+  return META_ROLES;
+}
+
+function devPanelHtml(d) {
+  return `
+    <div class="sec-title" style="margin-top:16px;">🛠 Служебные данные</div>
+    <div class="dev-bento">
+      <div class="dev-bcell wide">
+        <div class="h">Идентификаторы</div>
+        <div class="ro-line"><span>telegram_id</span><b>${d.telegram_id}</b></div>
+        <div class="ro-line"><span>internal id</span><b>${d.internal_id != null ? d.internal_id : "—"}</b></div>
+        <div class="ro-line"><span>в базе с</span><b style="font-family:inherit; font-weight:400;">${esc(d.created_at || "—")}</b></div>
+      </div>
+      <div class="dev-bcell wide">
+        <div class="h">Роль</div>
+        <select id="dev-role-select" class="field-input"><option value="">— загрузка…</option></select>
+        <button id="dev-role-save" class="dev-save-btn">Сохранить роль</button>
+      </div>
+      <div class="dev-bcell wide">
+        <div class="h">Статус и о себе</div>
+        <input type="text" id="dev-status-input" class="field-input" maxlength="80" placeholder="Короткий статус" value="${esc(d.status_text || "")}">
+        <textarea id="dev-bio-input" class="field-textarea" maxlength="300" placeholder="О себе">${esc(d.bio || "")}</textarea>
+        <button id="dev-profile-save" class="dev-save-btn">Сохранить профиль</button>
+      </div>
+      <div class="dev-bcell">
+        <div class="h">Дата вступления</div>
+        <input type="date" id="dev-joined-input" class="field-input" value="${esc((d.created_at || "").slice(0, 10))}">
+        <button id="dev-joined-save" class="dev-save-btn">Сохранить</button>
+      </div>
+      <div class="dev-bcell">
+        <div class="h">Выдать награду</div>
+        <div class="dev-badge-row">
+          <input type="text" id="dev-badge-icon" class="field-input" placeholder="🐉" maxlength="8">
+          <input type="text" id="dev-badge-label" class="field-input" placeholder="Название" maxlength="60">
+        </div>
+        <button id="dev-badge-grant" class="dev-save-btn">Выдать</button>
+      </div>
+    </div>
+  `;
+}
+
+function wireDevPanel(root, telegramId, onSaved) {
+  loadMetaRoles().then(roles => {
+    const sel = root.querySelector("#dev-role-select");
+    if (!sel) return;
+    sel.innerHTML = `<option value="">— без роли —</option>` + roles.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+  });
+
+  const roleBtn = root.querySelector("#dev-role-save");
+  if (roleBtn) roleBtn.addEventListener("click", async () => {
+    const role = root.querySelector("#dev-role-select").value;
+    roleBtn.disabled = true;
+    try {
+      await apiPost(`/dev/user/${telegramId}/role`, { role });
+      toast("Роль обновлена.");
+      if (onSaved) await onSaved();
+    } catch (e) { toast(`Не удалось сохранить роль: ${e.message}`, "error"); }
+    finally { roleBtn.disabled = false; }
+  });
+
+  const profileBtn = root.querySelector("#dev-profile-save");
+  if (profileBtn) profileBtn.addEventListener("click", async () => {
+    const status_text = root.querySelector("#dev-status-input").value;
+    const bio = root.querySelector("#dev-bio-input").value;
+    profileBtn.disabled = true;
+    try {
+      await apiPost(`/dev/user/${telegramId}/profile`, { status_text, bio });
+      toast("Профиль обновлён.");
+      if (onSaved) await onSaved();
+    } catch (e) { toast(`Не удалось сохранить профиль: ${e.message}`, "error"); }
+    finally { profileBtn.disabled = false; }
+  });
+
+  const joinedBtn = root.querySelector("#dev-joined-save");
+  if (joinedBtn) joinedBtn.addEventListener("click", async () => {
+    const date = root.querySelector("#dev-joined-input").value;
+    if (!date) { toast("Укажите дату.", "error"); return; }
+    joinedBtn.disabled = true;
+    try {
+      await apiPost(`/dev/user/${telegramId}/joined`, { date });
+      toast("Дата вступления обновлена.");
+      if (onSaved) await onSaved();
+    } catch (e) { toast(`Не удалось сохранить дату: ${e.message}`, "error"); }
+    finally { joinedBtn.disabled = false; }
+  });
+
+  const badgeBtn = root.querySelector("#dev-badge-grant");
+  if (badgeBtn) badgeBtn.addEventListener("click", async () => {
+    const icon = root.querySelector("#dev-badge-icon").value || "🏅";
+    const label = root.querySelector("#dev-badge-label").value.trim();
+    if (!label) { toast("Нужно название награды.", "error"); return; }
+    badgeBtn.disabled = true;
+    try {
+      await apiPost(`/dev/user/${telegramId}/badge`, { icon, label });
+      toast("Награда выдана.");
+      if (onSaved) await onSaved();
+    } catch (e) { toast(`Не удалось выдать награду: ${e.message}`, "error"); }
+    finally { badgeBtn.disabled = false; }
+  });
+}
+
+// ---------- Команда / чужой профиль ----------
+
+async function openTeamSheet() {
+  const overlay = openSheet(dialogSkeletonHtml(6), "wide");
+  overlay.querySelector(".sheet").innerHTML = `<h2>Команда</h2>` + dialogSkeletonHtml(6);
+  let d;
+  try {
+    d = await apiGet("/team");
+  } catch (e) {
+    overlay.querySelector(".sheet").innerHTML = `<h2>Команда</h2><div class="bento-empty">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+    overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+    return;
+  }
+  const rows = (d.users || []).map(u => `
+    <div class="team-row" data-open-user="${u.telegram_id}">
+      ${avatarHtml(u.telegram_id, u.name, "sm")}
+      <span class="online-dot${u.online ? "" : " off"}"></span>
+      <div class="nm"><div class="n">${esc(u.name)}${u.is_owner ? ` <span class="dev-pill">DEV</span>` : ""}</div><div class="r">${esc(u.role || "без роли")}</div></div>
+      <div class="stat">${u.assigned} сейчас · ${u.completed_total} закрыто</div>
+    </div>
+  `).join("");
+  overlay.querySelector(".sheet").innerHTML = `
+    <h2>Команда · ${d.users.length}</h2>
+    <div class="team-list">${rows || `<div class="bento-empty">Пока никого нет.</div>`}</div>
+    <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
+  `;
+  const sheet = overlay.querySelector(".sheet");
+  loadAvatars(sheet);
+  sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  sheet.querySelectorAll("[data-open-user]").forEach(row => {
+    row.addEventListener("click", () => openUserProfile(parseInt(row.dataset.openUser, 10)));
+  });
+}
+
+async function openUserProfile(telegramId) {
+  const overlay = openSheet(dialogSkeletonHtml(6), "wide");
+  let d;
+  try {
+    d = await apiGet(`/user/${telegramId}`);
+  } catch (e) {
+    overlay.querySelector(".sheet").innerHTML = `<div class="bento-empty">Не удалось загрузить профиль: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+    overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+    return;
+  }
+  d.telegram_id = telegramId;
+  const reportsHtml = (d.reports && d.reports.length) ? `
+    <div class="sec-title" style="margin-top:16px;">📋 Текущие отчёты</div>
+    <div class="mini-list">
+      ${d.reports.map(r => `<div class="mini-row" data-open-report="${esc(r.public_id)}" style="cursor:pointer;"><span class="name">${esc(r.public_id)} · ${esc(r.title)}</span><span class="val">${esc(r.status_label)}</span></div>`).join("")}
+    </div>` : "";
+
+  const sheet = overlay.querySelector(".sheet");
+  sheet.innerHTML = `
+    ${profileHeaderHtml(d)}
+    <div class="bento">${badgesBentoHtml(d, 0)}</div>
+    ${reportsHtml}
+    ${devModeActive() ? devPanelHtml(d) : ""}
+    <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
+  `;
+  wireProfileCommon(sheet, telegramId);
+  sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  sheet.querySelectorAll("[data-open-report]").forEach(row => {
+    row.addEventListener("click", () => openReportDetail(row.dataset.openReport));
+  });
+  if (devModeActive()) wireDevPanel(sheet, telegramId, async () => { await openUserProfile(telegramId); overlay.remove(); });
+}
+
+// Шапка + тизер команды + цитата статуса + био + метастрока + «Структура
+// загрузки» — общая часть между своей «Я» и карточкой коллеги (тот же
+// приём, что и в мини-аппе: /api/me и /api/user/{id} отдают совместимую
+// форму, поэтому и разметка одна на двоих).
+function profileHeaderHtml(d) {
+  const tier = tenureTier(d.member_since_days);
+  const rMeta = roleMeta(d.role);
+  const roleLabel = d.role ? esc(d.role) : "Участник PHOENIX";
+
+  let joinedLine = "";
+  if (d.created_at) {
+    const jd = new Date(d.created_at.replace(" ", "T") + "Z");
+    if (!isNaN(jd.getTime())) {
+      joinedLine = ` · в команде с ${jd.getUTCDate()} ${MONTHS_RU[jd.getUTCMonth() + 1]}. ${jd.getUTCFullYear()}`;
+    }
+  }
+
+  return `
+    <div class="profile-banner-wrap" data-role="profile-banner"></div>
+    <div class="profile-head-card">
+      <span class="avatar-ring${tier ? " tier-" + tier : ""}">${avatarHtml(d.telegram_id, d.display_name || d.name, "xl")}</span>
+      <div class="nm-row">
+        <span class="nm">${esc(d.display_name || d.name)}</span>
+        ${d.is_developer || d.is_owner ? `<span class="dev-pill">DEV</span>` : ""}
+        ${rankTagHtml(d.studio_rank)}
+      </div>
+      ${d.username ? `<div class="un">@${esc(d.username)}</div>` : ""}
+      ${d.internal_id != null ? `<div class="id-row"><span class="id-chip">#${d.internal_id}</span>${joinedLine}${d.is_online ? ` · <span style="color:var(--s-done); font-weight:600;">в сети</span>` : ""}</div>` : ""}
+      <span class="role-tag" style="--tag-c:${rMeta.c}">${rMeta.ic} ${roleLabel}</span>
+    </div>
+
+    ${teamTeaserHtml(d)}
+    ${d.status_text ? `<div class="status-quote">💬 ${esc(d.status_text)}</div>` : ""}
+    ${d.bio ? `<div class="profile-bio">${esc(d.bio)}</div>` : ""}
+
+    <div class="bc-meta-line">📋 ${d.assigned} на нём сейчас${d.overdue ? ` · <span class="warn">⏰ ${d.overdue} просрочено</span>` : ""}${d.avg_days != null ? ` · ⏱ в среднем ${d.avg_days.toFixed ? d.avg_days.toFixed(1) : d.avg_days} дн.` : ""}</div>
+
+    ${loadStructureHtml(d)}
+  `;
+}
+
+// Достижения — общий бенто-блок, тоже переиспользуется для «Я» и чужого профиля.
+function badgesBentoHtml(d, delayMs) {
+  const unlocked = (d.badges || []).slice().sort((a, b) => (BADGE_RARITY_ORDER[a.rarity] ?? 9) - (BADGE_RARITY_ORDER[b.rarity] ?? 9));
+  return `
+    <div class="bcell wide" style="animation-delay:${delayMs}ms;">
+      <h3>Достижения</h3>
+      <div class="badge-grid">
+        ${unlocked.map(b => `
+          <div class="badge-item ${b.unlocked ? "unlocked" : ""}" title="${esc(b.label)}${!b.unlocked && b.target ? ` — ${b.current}/${b.target}` : ""}">
+            <div>${esc(b.icon)}</div>
+            <span class="lbl">${esc(b.label)}</span>
+          </div>
+        `).join("")}
+      </div>
+    </div>`;
+}
+
+function wireProfileCommon(root, telegramId) {
+  loadAvatars(root);
+  loadProfileBanner(root.querySelector('[data-role="profile-banner"]'), telegramId);
+  playDonutIntro(root);
+  root.querySelectorAll(".role-bar-fill").forEach(el => {
+    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.width = el.dataset.pct + "%"; }));
+  });
+  root.querySelectorAll(".goal-ring-fill").forEach(el => {
+    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.strokeDashoffset = el.dataset.targetOffset; }));
+  });
+  const teaser = root.querySelector("#team-teaser");
+  if (teaser) teaser.addEventListener("click", openTeamSheet);
+}
+
 async function loadProfile() {
   const root = $("#profile-body");
   root.innerHTML = `<div class="skeleton-wrap"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>`;
@@ -1206,19 +1480,7 @@ async function loadProfile() {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить профиль: ${esc(e.message)}</div>`;
     return;
   }
-
-  const unlockedBadges = (me.badges || []).slice().sort((a, b) => (BADGE_RARITY_ORDER[a.rarity] ?? 9) - (BADGE_RARITY_ORDER[b.rarity] ?? 9));
-  const tier = tenureTier(me.member_since_days);
-  const rMeta = roleMeta(me.role);
-  const roleLabel = me.role ? esc(me.role) : "Участник PHOENIX";
-
-  let joinedLine = "";
-  if (me.created_at) {
-    const jd = new Date(me.created_at.replace(" ", "T") + "Z");
-    if (!isNaN(jd.getTime())) {
-      joinedLine = ` · в команде с ${jd.getUTCDate()} ${MONTHS_RU[jd.getUTCMonth() + 1]}. ${jd.getUTCFullYear()}`;
-    }
-  }
+  state.isDeveloper = !!me.is_developer; // используется для показа переключателя dev-режима в Настройках
 
   const goalSet = me.monthly_goal != null && me.monthly_goal > 0;
   const goalDone = me.completed_month || 0;
@@ -1240,27 +1502,7 @@ async function loadProfile() {
   `;
 
   root.innerHTML = `
-    <div class="profile-banner-wrap" id="profile-banner"></div>
-    <div class="profile-head-card">
-      <span class="avatar-ring${tier ? " tier-" + tier : ""}">${avatarHtml(me.telegram_id, me.display_name || me.name, "xl")}</span>
-      <div class="nm-row">
-        <span class="nm">${esc(me.display_name || me.name)}</span>
-        ${me.is_developer ? `<span class="dev-pill">DEV</span>` : ""}
-        ${rankTagHtml(me.studio_rank)}
-      </div>
-      ${me.username ? `<div class="un">@${esc(me.username)}</div>` : ""}
-      ${me.internal_id != null ? `<div class="id-row"><span class="id-chip">#${me.internal_id}</span>${joinedLine}${me.is_online ? ` · <span style="color:var(--s-done); font-weight:600;">в сети</span>` : ""}</div>` : ""}
-      <span class="role-tag" style="--tag-c:${rMeta.c}">${rMeta.ic} ${roleLabel}</span>
-    </div>
-
-    ${teamTeaserHtml(me)}
-    ${me.status_text ? `<div class="status-quote">💬 ${esc(me.status_text)}</div>` : ""}
-    ${me.bio ? `<div class="profile-bio">${esc(me.bio)}</div>` : ""}
-
-    <div class="bc-meta-line">📋 ${me.assigned} на нём сейчас${me.overdue ? ` · <span class="warn">⏰ ${me.overdue} просрочено</span>` : ""}${me.avg_days != null ? ` · ⏱ в среднем ${me.avg_days.toFixed ? me.avg_days.toFixed(1) : me.avg_days} дн.` : ""}</div>
-
-    ${loadStructureHtml(me)}
-
+    ${profileHeaderHtml(me)}
     <div class="bento">
       ${goalCardHtml}
       <div class="bcell" style="animation-delay:60ms;">
@@ -1273,29 +1515,13 @@ async function loadProfile() {
         <div class="big-num">${me.on_time_pct != null ? me.on_time_pct + "%" : "—"}</div>
         <div class="sub">${me.avg_days != null ? `в среднем ${me.avg_days.toFixed(1)} дн. на отчёт` : ""}</div>
       </div>
-      <div class="bcell wide" style="animation-delay:140ms;">
-        <h3>Достижения</h3>
-        <div class="badge-grid">
-          ${unlockedBadges.map(b => `
-            <div class="badge-item ${b.unlocked ? "unlocked" : ""}" title="${esc(b.label)}${!b.unlocked && b.target ? ` — ${b.current}/${b.target}` : ""}">
-              <div>${esc(b.icon)}</div>
-              <span class="lbl">${esc(b.label)}</span>
-            </div>
-          `).join("")}
-        </div>
-      </div>
+      ${badgesBentoHtml(me, 140)}
     </div>
+    ${devModeActive() ? devPanelHtml(me) : ""}
   `;
-  loadAvatars(root);
-  loadProfileBanner(root.querySelector("#profile-banner"), me.telegram_id);
-  playDonutIntro(root);
-  root.querySelectorAll(".role-bar-fill").forEach(el => {
-    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.width = el.dataset.pct + "%"; }));
-  });
-  root.querySelectorAll(".goal-ring-fill").forEach(el => {
-    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.strokeDashoffset = el.dataset.targetOffset; }));
-  });
+  wireProfileCommon(root, me.telegram_id);
   root.querySelector("#goal-card").addEventListener("click", () => monthlyGoalDialog(me.monthly_goal));
+  if (devModeActive()) wireDevPanel(root, me.telegram_id, () => loadProfile());
 }
 
 function monthlyGoalDialog(current) {
