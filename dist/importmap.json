@@ -1,0 +1,11 @@
+{
+  "imports": {
+    "@tauri-apps/api/core": "vendor/tauri-api/core.js",
+    "@tauri-apps/api/event": "vendor/tauri-api/event.js",
+    "@tauri-apps/api/window": "vendor/tauri-api/window.js",
+    "@tauri-apps/plugin-dialog": "vendor/tauri-plugin-dialog/index.js",
+    "@tauri-apps/plugin-notification": "vendor/tauri-plugin-notification/index.js",
+    "@tauri-apps/plugin-updater": "vendor/tauri-plugin-updater/index.js",
+    "@tauri-apps/plugin-process": "vendor/tauri-plugin-process/index.js"
+  }
+}
