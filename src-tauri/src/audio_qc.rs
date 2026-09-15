@@ -3,10 +3,15 @@
 //! куски, длинные паузы. Без Silero VAD (лишняя зависимость для десктопа) —
 //! паузы ищутся порогом громкости, как и в прежней реализации.
 //!
-//! Декодирование — через `ffmpeg` (должен быть в PATH), дальше работаем с
-//! уже готовым PCM (i16 моно 16кГц) без внешних DSP-крейтов.
+//! Декодирование — через `ffmpeg`. Раньше требовался ffmpeg в PATH — теперь
+//! сначала пробуем версию, лежащую рядом с самим приложением (кладётся в
+//! ту же папку, что и .exe, через bundle.resources в tauri.conf.json —
+//! CI качает её один раз при сборке, см. build.yml), и только если её нет,
+//! откатываемся на системный PATH. Так у пользователя ничего не нужно
+//! ставить отдельно, но у кого-то PATH тоже сработает как раньше.
 
 use serde::Serialize;
+use std::path::PathBuf;
 use std::process::Command;
 
 #[derive(Serialize, Clone)]
@@ -35,6 +40,42 @@ const WINDOW_SECONDS: f64 = 0.05;
 pub fn analyze(path: &str) -> Result<QcReport, String> {
     let samples = decode_pcm(path)?;
     analyze_samples(&samples)
+}
+
+/// Путь к ffmpeg рядом с исполняемым файлом приложения, если он там
+/// есть (packaged-вариант) — иначе `None`, и вызывающий код откатится
+/// на системный PATH. `current_exe()` — тот же приём, что использует
+/// сам Tauri для поиска sidecar-бинарников.
+fn bundled_ffmpeg_path() -> Option<PathBuf> {
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let candidate = exe_dir.join(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" });
+    candidate.is_file().then_some(candidate)
+}
+
+/// Быстрая проверка, что найденный ffmpeg реально запускается на этой
+/// системе (не битый архитектурно/повреждённый файл) — лучше явно
+/// сказать об этом и откатиться на PATH, чем один раз молча упасть на
+/// декодировании реального файла с непонятной ошибкой.
+fn ffmpeg_supported(exe: &std::path::Path) -> bool {
+    Command::new(exe)
+        .arg("-version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Резолвит, каким ffmpeg пользоваться: сначала bundled рядом с .exe
+/// (если он реально запускается), иначе — просто "ffmpeg" из PATH.
+fn resolve_ffmpeg() -> String {
+    if let Some(bundled) = bundled_ffmpeg_path() {
+        if ffmpeg_supported(&bundled) {
+            return bundled.to_string_lossy().into_owned();
+        }
+        // Лежит рядом, но не запускается (например, собран не под ту
+        // архитектуру) — не тихо молчим, а пробуем PATH дальше.
+        eprintln!("bundled ffmpeg найден по пути {:?}, но не запустился — используем PATH", bundled);
+    }
+    "ffmpeg".to_string()
 }
 
 /// Собственно анализ — вынесена из `analyze` отдельно от decode_pcm, чтобы
@@ -186,7 +227,8 @@ fn amplitude_to_dbfs(a: f64) -> f64 {
 /// Декодирует любой аудио/видео-файл в PCM s16le моно 16кГц через ffmpeg,
 /// читая результат из stdout — временных файлов не создаём.
 fn decode_pcm(path: &str) -> Result<Vec<i16>, String> {
-    let output = Command::new("ffmpeg")
+    let ffmpeg = resolve_ffmpeg();
+    let output = Command::new(&ffmpeg)
         .args([
             "-v", "error",
             "-i", path,
@@ -197,7 +239,10 @@ fn decode_pcm(path: &str) -> Result<Vec<i16>, String> {
             "-",
         ])
         .output()
-        .map_err(|e| format!("ffmpeg не найден или не запустился: {e}. Убедитесь, что ffmpeg установлен и есть в PATH."))?;
+        .map_err(|e| format!(
+            "ffmpeg не найден или не запустился ({ffmpeg}): {e}. В штатной сборке ffmpeg идёт вместе с приложением — \
+             попробуйте переустановить; либо поставьте ffmpeg сами и добавьте его в PATH."
+        ))?;
 
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);

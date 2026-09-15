@@ -1,0 +1,1 @@
+# placeholder — CI подменяет настоящим ffmpeg.exe перед сборкой (см. build.yml), см. src-tauri/binaries/.gitignore

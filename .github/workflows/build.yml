@@ -57,6 +57,36 @@ jobs:
           sed -i.bak -E 's/const APP_VERSION = \"[0-9.]+\"/const APP_VERSION = \"${{ env.PKG_VERSION }}\"/' dist/app.js
           rm -f dist/app.js.bak
 
+      # ffmpeg нужен для локального QC звука — раньше требовался в PATH
+      # у пользователя, теперь кладём готовый статичный бинарник прямо
+      # в установщик (src-tauri/binaries/ffmpeg.exe, см. tauri.conf.json
+      # bundle.resources и audio_qc.rs). В git лежит только текстовый
+      # плейсхолдер (иначе даже `cargo check` падает — resources
+      # проверяются на каждой сборке) — тут подменяем его настоящим.
+      #
+      # Источник — закреплённый (не "latest", иммутабельный) релиз
+      # BtbN/FFmpeg-Builds, статичная LGPL-сборка (без GPL-кодеков —
+      # нам для QC нужно только декодирование, лицензионно чище).
+      # SHA256 зафиксирован — если апстрим когда-нибудь переиздаст
+      # файл под тем же именем с другим содержимым, сборка упадёт
+      # явной ошибкой, а не тихо подсунет что-то другое.
+      - name: Скачать и проверить статичный ffmpeg.exe
+        shell: bash
+        run: |
+          set -e
+          url="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-14-13-17/ffmpeg-n9.0.1-29-gad500d59cb-win64-lgpl-9.0.zip"
+          expected_sha256="084874559d629b29cea0cae5b4d3cbb8e384d323f4eb3f1835bd9705d83bf58"
+          curl -sL --max-time 180 -o ffmpeg.zip "$url"
+          actual_sha256=$(sha256sum ffmpeg.zip | cut -d' ' -f1)
+          if [ "$actual_sha256" != "$expected_sha256" ]; then
+            echo "::error::SHA256 не совпал — ожидали $expected_sha256, получили $actual_sha256"
+            exit 1
+          fi
+          unzip -q ffmpeg.zip -d ffmpeg_extracted
+          find ffmpeg_extracted -iname "ffmpeg.exe" -exec cp {} src-tauri/binaries/ffmpeg.exe \;
+          rm -rf ffmpeg.zip ffmpeg_extracted
+          test -s src-tauri/binaries/ffmpeg.exe || { echo "::error::ffmpeg.exe не найден в архиве"; exit 1; }
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
