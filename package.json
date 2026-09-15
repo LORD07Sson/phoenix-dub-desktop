@@ -7,7 +7,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "verify": "node scripts/verify-modules.mjs",
-    "test:board": "node scripts/board-gestures-test.mjs"
+    "test:board": "node scripts/board-gestures-test.mjs",
+    "test:profile": "node scripts/profile-qc-test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",

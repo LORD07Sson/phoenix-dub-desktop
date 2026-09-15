@@ -21,7 +21,7 @@
 import { appWindow, invoke } from "./tauri.js";
 import { state } from "./state.js";
 import { toast } from "./api.js";
-import { runQcAnalysis, QC_EXTENSIONS } from "./qc.js";
+import { runQc, QC_EXTENSIONS } from "./qc.js";
 
 let activeReportId = null;
 export function setDropTarget(publicId) { activeReportId = publicId; }
@@ -67,7 +67,10 @@ function baseName(path) {
         toast("Откройте карточку отчёта, чтобы прикрепить файл (или перетащите аудио/видео для QC).", "error");
         return;
       }
-      for (const path of qcPaths) await runQcAnalysis(path);
+      // Одним вызовом, а не циклом по файлам: на несколько дорожек
+      // runQc открывает сводную таблицу вместо стопки модалок
+      // (см. runQcBatch в qc.js).
+      await runQc(qcPaths);
       return;
     }
 
