@@ -76,6 +76,10 @@ module.exports = [
         process: "readonly",
         globalThis: "readonly",
         setTimeout: "readonly",
+        // board-gestures-test.mjs сам кладёт jsdom-овский document в
+        // globalThis (иначе бандл его не увидит) и дальше обращается к
+        // нему по имени.
+        document: "readonly",
       },
     },
     rules: {
