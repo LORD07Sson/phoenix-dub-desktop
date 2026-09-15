@@ -68,3 +68,54 @@ export const STATUS_COLOR_VAR = {
 };
 
 export const BADGE_RARITY_ORDER = { legendary: 0, epic: 1, rare: 2, common: 3, custom: 0 };
+
+// Нативное контекстное меню по правому клику — не привязано к одной
+// вкладке, чтобы можно было переиспользовать где угодно (сейчас —
+// строки «Команда» в profile.js). Одно меню в DOM на всё приложение,
+// закрывается по клику вовне/Escape/скроллу — обычное поведение любого
+// контекстного меню в десктопном приложении.
+let menuEl = null;
+function closeContextMenu() {
+  if (menuEl) { menuEl.remove(); menuEl = null; }
+  document.removeEventListener("click", closeContextMenu);
+  document.removeEventListener("contextmenu", closeOnNextContextMenu, true);
+  window.removeEventListener("blur", closeContextMenu);
+  window.removeEventListener("scroll", closeContextMenu, true);
+  document.removeEventListener("keydown", onMenuKeydown);
+}
+function onMenuKeydown(e) { if (e.key === "Escape") closeContextMenu(); }
+// Правый клик по другому месту, пока меню открыто, должен закрыть его,
+// а не оставить старое висящим поверх нового контента.
+function closeOnNextContextMenu() { closeContextMenu(); }
+
+// items: [{ label, danger?, action() }]
+export function showContextMenu(x, y, items) {
+  closeContextMenu();
+  menuEl = document.createElement("div");
+  menuEl.className = "context-menu";
+  menuEl.innerHTML = items.map((it, i) =>
+    `<button class="context-menu-item${it.danger ? " danger" : ""}" data-i="${i}">${esc(it.label)}</button>`
+  ).join("");
+  document.body.appendChild(menuEl);
+
+  const rect = menuEl.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - rect.width - 8);
+  const top = Math.min(y, window.innerHeight - rect.height - 8);
+  menuEl.style.left = `${Math.max(8, left)}px`;
+  menuEl.style.top = `${Math.max(8, top)}px`;
+
+  menuEl.querySelectorAll(".context-menu-item").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const item = items[Number(btn.dataset.i)];
+      closeContextMenu();
+      if (item && item.action) item.action();
+    });
+  });
+  setTimeout(() => {
+    document.addEventListener("click", closeContextMenu);
+    document.addEventListener("contextmenu", closeOnNextContextMenu, true);
+    window.addEventListener("blur", closeContextMenu);
+    window.addEventListener("scroll", closeContextMenu, true);
+    document.addEventListener("keydown", onMenuKeydown);
+  }, 0);
+}
