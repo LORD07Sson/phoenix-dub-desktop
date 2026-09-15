@@ -680,6 +680,18 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 .sheet h2 { margin: 0 0 14px; font-size: 15px; }
 .sheet .row { display: flex; gap: 8px; margin-bottom: 10px; }
 .sheet .row > * { flex: 1; }
+/* select/input/textarea прямо в .row (статус, приоритет, срок, тема
+   в настройках и т.п.) раньше не были стилизованы вообще — рендерились
+   нативным виджетом ОС (белый фон) поверх тёмной модалки. */
+.sheet select, .sheet input[type="text"], .sheet input[type="date"],
+.sheet input[type="number"] {
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.sheet select:focus, .sheet input:focus { border-color: var(--fire); }
 .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .sheet-wide { width: min(620px, 94vw); }
 
