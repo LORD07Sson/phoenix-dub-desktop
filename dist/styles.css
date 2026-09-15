@@ -74,6 +74,11 @@ body {
 
 input, button, select { font: inherit; color: inherit; }
 
+/* Файл из проводника занесён над окном, пока открыта карточка отчёта
+   (см. file-drop.js/onDragDropEvent) — рамка-подсказка "сюда можно
+   отпустить", а не молчаливое ожидание без единого сигнала. */
+body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
+
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

@@ -7,6 +7,7 @@ import { state } from "./state.js";
 import { esc, initials, STATUS_DOT_CLASS, isOverdue } from "./utils.js";
 import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
 import { loadRoles, loadAssignable, userOptionsHtml } from "./titles-admin.js";
+import { setDropTarget } from "./file-drop.js";
 
 const QC_FINDING_LABELS_RU = { clipping: "Клиппинг", silence: "Пауза", noise: "Шум", loud: "Громко", quiet: "Тихо" };
 const FILE_ICONS = { photo: "🖼", video: "🎬", audio: "🎵", voice: "🎙", document: "📄" };
@@ -16,6 +17,22 @@ export async function openReportDetail(publicId) {
     <h2 class="skeleton-row" style="width:60%; height:22px;"></h2>
     ${dialogSkeletonHtml(5)}
   `, "wide");
+
+  // Пока эта карточка открыта — сюда падает файл, перетащенный из
+  // проводника (см. file-drop.js). Снимаем цель при закрытии ЛЮБЫМ
+  // способом (кнопка, фон, ✕) — наблюдаем за удалением overlay из DOM,
+  // а не вешаем на каждую отдельную кнопку закрытия (тот же приём, что
+  // и в titles-admin.js).
+  setDropTarget(publicId);
+  const onFileUploaded = e => { if (e.detail.publicId === publicId) render(); };
+  document.addEventListener("report-file-uploaded", onFileUploaded);
+  new MutationObserver((_muts, obs) => {
+    if (!overlay.isConnected) {
+      obs.disconnect();
+      setDropTarget(null);
+      document.removeEventListener("report-file-uploaded", onFileUploaded);
+    }
+  }).observe(document.body, { childList: true });
 
   async function render() {
     let detail, notes, checklist, files, roles, assignable;

@@ -24,6 +24,14 @@ serde_json = "1"
 # патчи вместо полного скачивания каждый раз. См. main.rs.
 velopack = "1.2.0"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+# Загрузка файла, перетащенного из проводника (upload_report_file в
+# main.rs) — multipart POST на свой API напрямую из Rust, минуя
+# JS/fetch: тогда не нужен tauri-plugin-fs с его capability-скоупом на
+# ЛЮБОЙ путь на диске (drag&drop роняет путь произвольного файла
+# пользователя, не только из appdata/temp) — команда сама читает файл
+# std::fs::read по пришедшему пути и сама шлёт его на сервер.
+# rustls вместо native-tls — не тащит системный OpenSSL на сборку.
+reqwest = { version = "0.12", default-features = false, features = ["multipart", "json", "rustls-tls"] }
 
 [profile.release]
 panic = "abort"

@@ -29,6 +29,7 @@ module.exports = [
         confirm: "readonly",
         prompt: "readonly",
         MutationObserver: "readonly",
+        CustomEvent: "readonly",
       },
     },
     rules: {

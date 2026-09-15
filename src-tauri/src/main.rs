@@ -108,6 +108,60 @@ async fn is_autostart(app: tauri::AppHandle) -> Result<bool, String> {
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
 
+// Тот же хост, что и API_BASE в dist/app/api.js — держать в синхроне
+// руками, если он когда-нибудь сменится (не тянем сюда JS-константу,
+// у Rust-стороны и так уже есть свой захардкоженный UPDATE_REPO_URL —
+// тот же принцип: несколько мест, где живёт "адрес прода", это
+// осознанный компромисс маленького проекта без общего конфига).
+const API_BASE: &str = "https://minitg.shitstudent.com:8443/api";
+
+/// Файл, перетащенный из проводника (см. dist/app/file-drop.js,
+/// onDragDropEvent отдаёт только путь на диске, не байты) — читаем его
+/// здесь, в Rust, и сами шлём multipart-запросом на
+/// /api/report/{id}/files/upload, а не через JS/fetch: так не нужен
+/// tauri-plugin-fs со capability-скоупом на произвольный путь на диске
+/// (drag&drop даёт путь ЛЮБОГО файла пользователя, не только из
+/// appdata/temp, куда обычно и ограничивают fs-плагин).
+#[tauri::command]
+async fn upload_report_file(report_id: String, file_path: String, init_data: String) -> Result<serde_json::Value, String> {
+    let path = std::path::Path::new(&file_path);
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file".to_string());
+
+    // std::fs::read (блокирующий), не tokio::fs — не тащим отдельно
+    // зависимость на tokio ради одного чтения файла; та же цена, что
+    // и у синхронного qc_analyze выше.
+    let bytes = std::fs::read(&file_path).map_err(|e| format!("Не удалось прочитать файл: {e}"))?;
+
+    let part = reqwest::multipart::Part::bytes(bytes).file_name(file_name);
+    let form = reqwest::multipart::Form::new().part("file", part);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{API_BASE}/report/{report_id}/files/upload"))
+        .header("X-Init-Data", init_data)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("Не удалось отправить файл: {e}"))?;
+
+    if !resp.status().is_success() {
+        let detail = resp
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|v| v.get("detail").and_then(|d| d.as_str()).map(str::to_string))
+            .unwrap_or_else(|| "сервер отклонил файл".to_string());
+        return Err(detail);
+    }
+
+    resp.json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("Некорректный ответ сервера: {e}"))
+}
+
 fn main() {
     // Должен быть самой первой инструкцией в main() — Velopack иногда
     // перезапускает/завершает процесс сам для служебных операций
@@ -159,6 +213,7 @@ fn main() {
             is_autostart,
             check_for_update,
             download_and_apply_update,
+            upload_report_file,
         ])
         .setup(|app| {
             // Глобальная горячая клавиша — свернуть/показать окно из любого места (Ctrl+Shift+P).
