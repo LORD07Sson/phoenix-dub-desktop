@@ -76,6 +76,7 @@ cargo build --release --manifest-path src-tauri/Cargo.toml --features custom-pro
 ```bash
 npm run lint                        # ESLint по src/app/**
 npm run build && npm run verify     # собранный бандл реально импортируется
+npm run test:board                  # жесты доски (мышь/палец) на собранном бандле
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 

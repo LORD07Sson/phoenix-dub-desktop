@@ -53,20 +53,42 @@ function boardCardHtml(r, status) {
     </div>`;
 }
 
-// Ручной drag одной карточки — от pointerdown до pointerup. Ниже
-// DRAG_THRESHOLD_PX это просто клик (открываем карточку отчёта),
-// выше — тащим клон-«призрак» под курсором и подсвечиваем колонку,
-// над которой он сейчас висит (document.elementFromPoint, не события
-// самой колонки — с ручным драгом других dragenter/dragover всё равно
-// нет).
+// Ручной drag одной карточки — от pointerdown до pointerup.
+//
+// Мышь: как и было. Ниже DRAG_THRESHOLD_PX это просто клик (открываем
+// карточку отчёта), выше — тащим клон-«призрак» под курсором и
+// подсвечиваем колонку, над которой он сейчас висит
+// (document.elementFromPoint, не события самой колонки — с ручным
+// драгом других dragenter/dragover всё равно нет).
+//
+// Палец/перо: жест сначала считается прокруткой доски, как в телефоне —
+// повёл пальцем по любому месту, включая карточки, и доска едет влево/
+// вправо. Иначе прокрутить было почти невозможно: карточками занята вся
+// площадь колонок, а зажатие на них начинало перенос. Перенести карточку
+// пальцем можно после удержания на месте (LONG_PRESS_MS) — ровно та же
+// схема, что в мобильных канбан-досках.
+//
+// Почему не «горизонтально = прокрутка» и для мыши тоже: перенос
+// карточки в соседнюю колонку по своей природе горизонтальный, так что
+// на мыши это отобрало бы главный жест доски.
+const LONG_PRESS_MS = 350;
+
 function wireCardDrag(card) {
   card.addEventListener("pointerdown", downEvent => {
     if (downEvent.button !== 0) return; // только левая кнопка мыши
     const startX = downEvent.clientX;
     const startY = downEvent.clientY;
-    let started = false;
+    const boardEl = card.closest(".board");
+    const byTouch = downEvent.pointerType !== "mouse";
+    // "pending" — ещё не решили, прокрутка это или перенос (только палец);
+    // "pan" — тянем доску; "card" — тащим карточку.
+    let mode = byTouch ? "pending" : "card";
+    let dragging = false; // карточка реально поехала
+    let panned = false;   // доску реально сдвинули
     let ghost = null;
     let overCol = null;
+    let holdTimer = null;
+    const startScroll = boardEl ? boardEl.scrollLeft : 0;
 
     // Захват указателя на самой карточке — без него в реальном
     // WebView2 pointermove/pointerup, навешанные на window, иногда не
@@ -77,22 +99,10 @@ function wireCardDrag(card) {
     // того, что реально под курсором.
     card.setPointerCapture(downEvent.pointerId);
 
-    function onMove(e) {
-      if (e.pointerId !== downEvent.pointerId) return;
-      if (!started) {
-        if (Math.hypot(e.clientX - startX, e.clientY - startY) < DRAG_THRESHOLD_PX) return;
-        started = true;
-        card.classList.add("dragging");
-        const rect = card.getBoundingClientRect();
-        ghost = card.cloneNode(true);
-        ghost.classList.add("board-card-ghost");
-        ghost.style.width = `${rect.width}px`;
-        document.body.appendChild(ghost);
-        document.body.style.cursor = "grabbing";
-      }
-      ghost.style.left = `${e.clientX + 14}px`;
-      ghost.style.top = `${e.clientY + 14}px`;
-      const under = document.elementFromPoint(e.clientX, e.clientY);
+    function moveGhost(x, y) {
+      ghost.style.left = `${x + 14}px`;
+      ghost.style.top = `${y + 14}px`;
+      const under = document.elementFromPoint(x, y);
       const col = under && under.closest(".board-col");
       if (col !== overCol) {
         if (overCol) overCol.classList.remove("drag-over");
@@ -101,13 +111,88 @@ function wireCardDrag(card) {
       }
     }
 
+    function beginCardDrag(x, y) {
+      dragging = true;
+      card.classList.add("dragging");
+      const rect = card.getBoundingClientRect();
+      ghost = card.cloneNode(true);
+      ghost.classList.add("board-card-ghost");
+      ghost.style.width = `${rect.width}px`;
+      document.body.appendChild(ghost);
+      document.body.style.cursor = "grabbing";
+      moveGhost(x, y);
+    }
+
+    if (byTouch) {
+      holdTimer = setTimeout(() => { // DevSkim: ignore DS172411 — функция, не строка
+        holdTimer = null;
+        if (mode !== "pending") return;
+        mode = "card";
+        // Палец всё это время стоял на месте, значит браузер жест ещё не
+        // классифицировал — можно забрать его себе целиком, вместе с
+        // вертикалью (иначе перенос карточки вверх/вниз уехал бы в
+        // прокрутку страницы, см. touch-action: pan-y в styles.css).
+        card.style.touchAction = "none";
+        beginCardDrag(startX, startY);
+      }, LONG_PRESS_MS);
+    }
+
+    function endPanVisuals() {
+      if (!boardEl) return;
+      boardEl.classList.remove("panning");
+      boardEl.style.scrollBehavior = "smooth"; // вернуть плавность колесу мыши
+    }
+
+    function onMove(e) {
+      if (e.pointerId !== downEvent.pointerId) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+
+      if (mode === "pending") {
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+        // Повели раньше, чем сработало удержание — это прокрутка.
+        clearTimeout(holdTimer);
+        holdTimer = null;
+        mode = "pan";
+        if (boardEl) {
+          boardEl.classList.add("panning");
+          // 1:1 за пальцем, без анимации — как и в wireBoardScroll.
+          boardEl.style.scrollBehavior = "auto";
+        }
+      }
+
+      if (mode === "pan") {
+        if (!boardEl) return;
+        panned = true;
+        boardEl.scrollLeft = startScroll - dx;
+        return;
+      }
+
+      if (!dragging) {
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+        beginCardDrag(e.clientX, e.clientY);
+        return;
+      }
+      moveGhost(e.clientX, e.clientY);
+    }
+
     async function onUp(e) {
       if (e.pointerId !== downEvent.pointerId) return;
       card.removeEventListener("pointermove", onMove);
       card.removeEventListener("pointerup", onUp);
       card.removeEventListener("pointercancel", onUp);
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
       if (card.hasPointerCapture(downEvent.pointerId)) card.releasePointerCapture(downEvent.pointerId);
-      if (!started) return; // обычный клик — открыть карточку откроет собственный click-обработчик
+      card.style.touchAction = "";
+
+      if (mode === "pan") {
+        endPanVisuals();
+        // Пролистнули доску пальцем — это не тап по карточке, открывать
+        // отчёт не надо (тот же признак, что и у настоящего драга).
+        if (panned) lastDragEndAt.set(card, Date.now());
+        return;
+      }
+      if (!dragging) return; // обычный клик/тап — карточку откроет собственный click-обработчик
       lastDragEndAt.set(card, Date.now());
       card.classList.remove("dragging");
       document.body.style.cursor = "";

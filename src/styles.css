@@ -1084,14 +1084,16 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
    drag'а (board.js: wireBoardScroll) переключается на auto — иначе
    доска отставала бы от курсора, плавность там не нужна, нужна
    мгновенная 1:1 привязка к пальцу/курсору. */
-/* touch-action: none — без него браузер может сам забрать жест
-   панорамирования нативно (тач/перо, а иногда и обычная мышь в
-   некоторых конфигурациях WebView2) ДО того, как его увидит наш
-   pointerdown/pointermove в board.js:wireBoardScroll — самодельный
-   drag тогда просто не запускается, хотя код сам по себе верный.
-   Тот же недостающий кусок нужен и карточкам (перенос между
-   колонками, wireCardDrag) — см. .board-card ниже. */
-.board { display: flex; gap: 12px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; cursor: grab; scroll-behavior: smooth; touch-action: none; }
+/* touch-action: pan-y — горизонталь забираем себе (её тянет наш
+   самодельный drag в board.js), вертикаль отдаём браузеру. Раньше тут
+   стояло none: без него браузер перехватывал жест панорамирования ДО
+   нашего pointerdown/pointermove, и самодельный drag не запускался.
+   Но none отнимает и вертикаль — пальцем нельзя было прокрутить
+   страницу, стоя на доске. pan-y решает обе задачи сразу: горизонталь
+   браузер не трогает (pointermove доходят до нас), вертикаль
+   прокручивает сам, как на любой обычной странице.
+   Карточкам нужно то же самое — см. .board-card ниже. */
+.board { display: flex; gap: 12px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; cursor: grab; scroll-behavior: smooth; touch-action: pan-y; }
 .board.panning { cursor: grabbing; }
 .board.panning .board-card { cursor: grabbing; }
 .board-col {
@@ -1107,7 +1109,12 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
   padding: 10px 12px; cursor: pointer; animation: row-in .22s ease both;
   transition: border-color .15s ease, transform .15s ease, opacity .15s ease;
-  touch-action: none; /* тот же самодельный drag, см. .board выше — карточка тоже тащится вручную (wireCardDrag) */
+  /* pan-y, как и у .board выше: горизонтальный жест пальцем по карточке
+     прокручивает доску (см. wireCardDrag), вертикальный — страницу.
+     На время переноса самой карточки (долгое удержание) board.js
+     ставит элементу touch-action: none инлайном — там жест наш целиком,
+     включая вертикаль. */
+  touch-action: pan-y;
 }
 /* border-top/right/bottom-color, а не border-color целиком — иначе
    перекрывает цветную левую полоску статуса (border-left, инлайн-стиль
