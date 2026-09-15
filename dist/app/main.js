@@ -20,6 +20,7 @@ import "./qc.js";
 import { checkForUpdates } from "./settings.js";
 import "./notifications.js";
 import "./presence.js";
+import "./command-palette.js";
 
 tryRestoreSession();
 setTimeout(() => appWindow.show(), 0); // DevSkim: ignore DS172411 — функция, не строка

@@ -51,15 +51,18 @@
     </div>
   </div>
 
-  <div class="tabstrip" id="tabstrip">
-    <button class="tab-btn active" data-tab="overview">📊 Обзор</button>
-    <button class="tab-btn" data-tab="list">📋 Список</button>
-    <button class="tab-btn" data-tab="board">🗂 Доска</button>
-    <button class="tab-btn" data-tab="titles">🗳️ Тайтлы</button>
-    <button class="tab-btn" data-tab="feed">🕘 Лента</button>
-    <button class="tab-btn" data-tab="profile">👤 Я</button>
+  <div class="app-body">
+  <div class="sidebar" id="tabstrip">
+    <button class="tab-btn active" data-tab="overview" title="Обзор"><span class="tab-ic">📊</span></button>
+    <button class="tab-btn" data-tab="list" title="Список"><span class="tab-ic">📋</span></button>
+    <button class="tab-btn" data-tab="board" title="Доска"><span class="tab-ic">🗂</span></button>
+    <button class="tab-btn" data-tab="titles" title="Тайтлы"><span class="tab-ic">🗳️</span></button>
+    <button class="tab-btn" data-tab="feed" title="Лента"><span class="tab-ic">🕘</span></button>
+    <div class="sidebar-spacer"></div>
+    <button class="tab-btn" data-tab="profile" title="Я"><span class="tab-ic">👤</span></button>
   </div>
 
+  <div class="app-content">
   <!-- ===== Обзор ===== -->
   <div class="tab-panel active" data-panel="overview">
     <div class="scroll-panel" id="overview-panel">
@@ -161,6 +164,8 @@
     <div class="scroll-panel" id="profile-panel">
       <div id="profile-body"></div>
     </div>
+  </div>
+  </div>
   </div>
 </div>
 

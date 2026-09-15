@@ -203,40 +203,55 @@ input, button, select { font: inherit; color: inherit; }
 
 .titlebar-right { display: flex; align-items: center; gap: 8px; }
 
-/* ---------- Вкладки (Обзор / Список / Я) ---------- */
+/* ---------- Навигация (Обзор / Список / Я) ----------
+   Раньше — горизонтальная полоска вкладок сверху, как в мини-аппе.
+   На широком окне ПК это оставляло пустые поля по бокам у самого
+   контента; вертикальный sidebar с иконками (тот же приём, что у
+   VS Code/Slack/Linear) использует эту ширину и явно читается как
+   desktop-приложение, а не перенесённая веб-страница. */
 
-.tabstrip {
+.app-body { flex: 1; display: flex; min-height: 0; }
+
+.sidebar {
+  flex: none;
+  width: 60px;
   display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 4px;
-  padding: 8px 16px 0;
+  padding: 12px 0;
   background: var(--bg-2);
-  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
 }
+.sidebar-spacer { flex: 1; }
+
 .tab-btn {
   border: none;
   background: transparent;
   color: var(--ink-soft);
-  padding: 9px 16px;
-  border-radius: 10px 10px 0 0;
+  width: 42px; height: 42px;
+  border-radius: 12px;
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 17px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   transition: color .15s, background .15s;
   position: relative;
 }
+.tab-btn .tab-ic { line-height: 1; }
 .tab-btn:hover { color: var(--ink); background: var(--surface-2); }
 .tab-btn.active { color: var(--fire); background: var(--surface); }
 .tab-btn.active::after {
   content: "";
   position: absolute;
-  left: 10px; right: 10px; bottom: -1px;
-  height: 2px;
-  background: linear-gradient(90deg, var(--fire), var(--gold));
-  border-radius: 2px;
+  left: -9px; top: 8px; bottom: 8px;
+  width: 3px;
+  background: linear-gradient(180deg, var(--fire), var(--gold));
+  border-radius: 0 3px 3px 0;
 }
+
+.app-content { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 .tab-panel { display: none; flex: 1; min-height: 0; }
 .tab-panel.active { display: flex; flex-direction: column; animation: tab-in .25s ease; }
@@ -720,6 +735,31 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 .sheet select:focus, .sheet input:focus { border-color: var(--fire); }
 .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .sheet-wide { width: min(620px, 94vw); }
+
+/* ---------- Командная палитра (Ctrl+K) ---------- */
+/* Сверху, а не по центру экрана, как обычные диалоги — привычнее для
+   command palette (VS Code/Linear), да и не перекрывает взгляд на то,
+   куда сейчас перейдёшь. */
+.cmdk-overlay { align-items: flex-start; }
+.cmdk-overlay .sheet { width: min(560px, 92vw); margin-top: 14vh; padding: 8px; max-height: 60vh; }
+.cmdk-input-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.cmdk-input-row .cmdk-ic { color: var(--ink-dim); flex: none; }
+#cmdk-input {
+  flex: 1; border: none; background: transparent; color: var(--ink);
+  font-size: 14px; outline: none;
+}
+.cmdk-list { padding: 6px; overflow: auto; max-height: 44vh; }
+.cmdk-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 10px; cursor: pointer;
+  font-size: 13px;
+}
+.cmdk-item .cmdk-ic { flex: none; width: 20px; text-align: center; }
+.cmdk-item .cmdk-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-item .cmdk-sub { color: var(--ink-dim); font-size: 11.5px; flex: none; }
+.cmdk-item.sel { background: var(--surface-2); }
+.cmdk-item.sel .cmdk-sub { color: var(--ink-soft); }
+.cmdk-empty { padding: 16px; text-align: center; color: var(--ink-dim); font-size: 12.5px; }
 
 /* ---------- Карточка отчёта ---------- */
 
