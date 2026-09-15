@@ -30,6 +30,7 @@ module.exports = [
         prompt: "readonly",
         MutationObserver: "readonly",
         CustomEvent: "readonly",
+        AbortController: "readonly",
       },
     },
     rules: {

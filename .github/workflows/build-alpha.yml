@@ -1,0 +1,133 @@
+name: Build desktop client (alpha channel)
+
+# Отдельно от build.yml — тот собирает только на изменение VERSION
+# (настоящий релиз), это же собирает НА КАЖДЫЙ push в main, без
+# ожидания "настоящего" релиза (см. запрос: "чтобы не постоянно
+# приходилось обновлять релиз" для проверки свежих фич). Публикуется
+# отдельным Velopack-каналом ("alpha", см. docs.velopack.io/packaging/
+# channels) — клиент выбирает канал сам в Настройках
+# (get_update_channel/set_update_channel в main.rs), стабильный канал
+# из build.yml этими сборками не затрагивается вообще: они живут в
+# releases.alpha.json, стабильный клиент продолжает читать
+# releases.win.json и их не увидит.
+#
+# Один rolling-релиз (тег alpha-latest), не новый релиз на каждый
+# push — старый alpha-latest удаляется перед публикацией нового.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build-alpha:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # Версия альфа-сборки — VERSION + "-alpha.<номер запуска>+<короткий
+      # коммит>". Хвост "-alpha.N" — то, по чему Velopack реально сравнивает
+      # версии (номер запуска монотонно растёт, поэтому каждая альфа-сборка
+      # гарантированно "новее" предыдущей даже если VERSION между ними не
+      # менялся); "+sha" — SemVer build-metadata, в сравнение версий не
+      # участвует (SemVer это буквально не учитывает), только для
+      # отображения "текущий/последний коммит" в Настройках (settings.js
+      # достаёт его из APP_VERSION regex'ом по "+").
+      - name: Версия альфа-сборки
+        shell: bash
+        run: |
+          short_sha="$(echo "${{ github.sha }}" | cut -c1-8)"
+          echo "SHORT_SHA=$short_sha" >> "$GITHUB_ENV"
+          echo "PKG_VERSION=$(cat VERSION)-alpha.${{ github.run_number }}+$short_sha" >> "$GITHUB_ENV"
+
+      - name: Подставить версию в tauri.conf.json/Cargo.toml/settings.js
+        shell: bash
+        run: |
+          set -e
+          node -e "
+            const fs = require('fs');
+            const p = 'src-tauri/tauri.conf.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+            c.version = '${{ env.PKG_VERSION }}';
+            fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
+          "
+          sed -i.bak -E 's/^version = \"[0-9.]+\"/version = \"${{ env.PKG_VERSION }}\"/' src-tauri/Cargo.toml
+          rm -f src-tauri/Cargo.toml.bak
+          sed -i.bak -E 's/const APP_VERSION = \"[0-9.]+\"/const APP_VERSION = \"${{ env.PKG_VERSION }}\"/' dist/app/settings.js
+          rm -f dist/app/settings.js.bak
+
+      # Тот же закреплённый ffmpeg.exe, что и в build.yml — держать в
+      # синхроне руками при обновлении URL/SHA256 там.
+      - name: Скачать и проверить статичный ffmpeg.exe
+        shell: bash
+        run: |
+          set -e
+          url="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-14-13-17/ffmpeg-n9.0.1-29-gad500d59cb-win64-lgpl-9.0.zip"
+          expected_sha256="084874559d629b29cea0cae5b4d3cbb8e384d323f4eb3f1835bd9705d83bf58e"
+          curl -sL --max-time 180 -o ffmpeg.zip "$url"
+          actual_sha256=$(sha256sum ffmpeg.zip | cut -d' ' -f1)
+          if [ "$actual_sha256" != "$expected_sha256" ]; then
+            echo "::error::SHA256 не совпал — ожидали $expected_sha256, получили $actual_sha256"
+            exit 1
+          fi
+          unzip -q ffmpeg.zip -d ffmpeg_extracted
+          find ffmpeg_extracted -iname "ffmpeg.exe" -exec cp {} src-tauri/binaries/ffmpeg.exe \;
+          rm -rf ffmpeg.zip ffmpeg_extracted
+          test -s src-tauri/binaries/ffmpeg.exe || { echo "::error::ffmpeg.exe не найден в архиве"; exit 1; }
+
+      - name: cargo build --release
+        shell: bash
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml
+
+      - name: Собрать альфа-канал через vpk
+        shell: bash
+        run: |
+          set -e
+          dotnet tool update -g vpk
+          mkdir -p pack_dir
+          cp src-tauri/target/release/phoenix-dub-desktop.exe pack_dir/
+          cp src-tauri/binaries/ffmpeg.exe pack_dir/
+          echo "Альфа-сборка из main (commit ${{ github.sha }}) — тестовая, может быть менее стабильной." > release_notes.md
+          vpk pack \
+            --packId PhoenixDubDesktop \
+            --packVersion "${{ env.PKG_VERSION }}" \
+            --packDir pack_dir \
+            --mainExe phoenix-dub-desktop.exe \
+            --packTitle "PHOENIX DUB Desktop" \
+            --icon src-tauri/icons/icon.ico \
+            --releaseNotes release_notes.md \
+            --channel alpha \
+            --outputDir release_output
+
+      # Тег alpha-latest — один и тот же на каждый запуск (rolling
+      # release), поэтому старый релиз под этим тегом удаляем перед
+      # публикацией нового — иначе vpk upload наткнётся на уже
+      # существующий тег. "|| true" — на самом первом запуске такого
+      # релиза ещё нет, gh обычным образом вернёт ошибку, которую тут
+      # можно спокойно проигнорировать.
+      - name: Убрать предыдущий alpha-latest
+        shell: bash
+        run: gh release delete alpha-latest --yes --cleanup-tag || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Опубликовать альфа-релиз на GitHub
+        shell: bash
+        run: |
+          set -e
+          vpk upload github \
+            --outputDir release_output \
+            --repoUrl "https://github.com/${{ github.repository }}" \
+            --token "${{ secrets.GITHUB_TOKEN }}" \
+            --channel alpha \
+            --publish \
+            --tag alpha-latest \
+            --releaseName "PHOENIX DUB alpha (${{ env.SHORT_SHA }})"

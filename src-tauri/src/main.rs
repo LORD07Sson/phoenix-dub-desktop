@@ -15,15 +15,59 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_store::StoreExt;
 
 // Репозиторий публичный — GithubSource читает releases напрямую через
 // GitHub API (без токена, лимит 60 запросов/час на IP — с запасом для
 // студийного инструмента), прокси на своём сервере не нужен.
 const UPDATE_REPO_URL: &str = "https://github.com/LORD07Sson/phoenix-dub-desktop";
 
-fn velopack_update_manager() -> Result<velopack::UpdateManager, String> {
+// Канал обновлений — та же настройка Velopack, что описана в
+// docs.velopack.io/packaging/channels: сборки альфа-канала публикует
+// отдельный workflow на каждый push в main (build-alpha.yml), без
+// правки VERSION — обычный build.yml (стабильный канал `win`) остаётся
+// только на реальные релизы. Хранится через tauri-plugin-store (тот же
+// плагин уже был зарегистрирован, просто раньше ничем не пользовались).
+const SETTINGS_STORE: &str = "settings.json";
+const UPDATE_CHANNEL_KEY: &str = "update_channel";
+const ALPHA_CHANNEL: &str = "alpha";
+
+#[tauri::command]
+fn get_update_channel(app: tauri::AppHandle) -> Result<String, String> {
+    let store = app.store(SETTINGS_STORE).map_err(|e| e.to_string())?;
+    Ok(store
+        .get(UPDATE_CHANNEL_KEY)
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "stable".to_string()))
+}
+
+#[tauri::command]
+fn set_update_channel(app: tauri::AppHandle, channel: String) -> Result<(), String> {
+    if channel != "stable" && channel != ALPHA_CHANNEL {
+        return Err(format!("Неизвестный канал обновлений: {channel}"));
+    }
+    let store = app.store(SETTINGS_STORE).map_err(|e| e.to_string())?;
+    store.set(UPDATE_CHANNEL_KEY, serde_json::json!(channel));
+    Ok(())
+}
+
+fn velopack_update_manager(app: &tauri::AppHandle) -> Result<velopack::UpdateManager, String> {
     let source = velopack::sources::GithubSource::new(UPDATE_REPO_URL, None, false);
-    velopack::UpdateManager::new(source, None, None).map_err(|e| e.to_string())
+    let channel = get_update_channel(app.clone())?;
+    // AllowVersionDowngrade — иначе переключение обратно на stable
+    // после альфы не увидело бы стабильную версию как обновление:
+    // "0.5.8-alpha.90" по SemVer СТАРШЕ "0.5.8" (у прешрелиза ниже
+    // приоритет, чем у финальной версии с теми же числами), а стабильный
+    // канал вообще может не успеть обогнать номер, до которого дошла
+    // альфа. Ровно тот сценарий "хочу вернуться на stable без
+    // переустановки", который описывает сам ExplicitChannel в докстринге
+    // Velopack.
+    let options = velopack::UpdateOptions {
+        AllowVersionDowngrade: true,
+        ExplicitChannel: if channel == ALPHA_CHANNEL { Some(ALPHA_CHANNEL.to_string()) } else { None },
+        ..Default::default()
+    };
+    velopack::UpdateManager::new(source, Some(options), None).map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -33,8 +77,8 @@ struct UpdateInfoOut {
 }
 
 #[tauri::command]
-fn check_for_update() -> Result<Option<UpdateInfoOut>, String> {
-    let um = velopack_update_manager()?;
+fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfoOut>, String> {
+    let um = velopack_update_manager(&app)?;
     match um.check_for_updates().map_err(|e| e.to_string())? {
         velopack::UpdateCheck::UpdateAvailable(info) => Ok(Some(UpdateInfoOut {
             version: info.TargetFullRelease.Version.clone(),
@@ -52,7 +96,7 @@ fn check_for_update() -> Result<Option<UpdateInfoOut>, String> {
 /// файле (сейчас ffmpeg внутри — установщик тяжёлый).
 #[tauri::command]
 fn download_and_apply_update(app: tauri::AppHandle) -> Result<(), String> {
-    let um = velopack_update_manager()?;
+    let um = velopack_update_manager(&app)?;
     let info = match um.check_for_updates().map_err(|e| e.to_string())? {
         velopack::UpdateCheck::UpdateAvailable(info) => *info,
         _ => return Err("Обновление больше не доступно — кто-то уже обновился раньше вас?".into()),
@@ -214,6 +258,8 @@ fn main() {
             check_for_update,
             download_and_apply_update,
             upload_report_file,
+            get_update_channel,
+            set_update_channel,
         ])
         .setup(|app| {
             // Глобальная горячая клавиша — свернуть/показать окно из любого места (Ctrl+Shift+P).
