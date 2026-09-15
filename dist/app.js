@@ -139,18 +139,37 @@ $("#theme-toggle").addEventListener("click", () => {
 
 // ---------- авторизация ----------
 
+// Экран загрузки при старте — тот же маскот/прогресс-бар, что и в
+// мини-аппе (см. #splash в miniapp/static/index.html). Держим минимум
+// 700мс, чтобы не мигать на мгновенном /whoami, и прячем сразу же,
+// как только известно, куда вести — в приложение или на экран входа.
+const SPLASH_MIN_MS = 700;
+const splashShownAt = Date.now();
+function hideSplash() {
+  const el = $("#app-splash");
+  if (!el || el.dataset.hidden) return;
+  el.dataset.hidden = "1";
+  const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - splashShownAt));
+  setTimeout(() => {
+    el.classList.add("hide");
+    setTimeout(() => el.remove(), 400);
+  }, wait);
+}
+
 async function tryRestoreSession() {
   const token = await invoke("token_load");
-  if (!token) return showAuth();
+  if (!token) { hideSplash(); return showAuth(); }
   state.token = token;
   try {
     const who = await api("GET", "/whoami");
     state.telegramId = who.telegram_id;
     showApp();
+    hideSplash();
     await refreshAll();
   } catch (e) {
     // токен отозван/протух — просим войти заново, а не молча виснем.
     await invoke("token_clear").catch(() => {});
+    hideSplash();
     showAuth(`Сессия истекла: ${e.message}`);
   }
 }
@@ -223,6 +242,7 @@ function loadActiveTab(force) {
   state.loadedTabs.add(name);
   if (name === "overview") loadOverview();
   else if (name === "list") loadReports();
+  else if (name === "feed") loadFeed();
   else if (name === "profile") loadProfile();
 }
 
@@ -1040,8 +1060,125 @@ async function loadOverview() {
 }
 
 // ---------- Я (профиль) ----------
+// Разметка и логика ниже — портированы «в точь-точь» из мини-аппа
+// (miniapp/static/index.html: profileHtml/teamTeaserHtml/statDonutHtml/
+// goalRingHtml/rankTagHtml/tenureTier/avatarHtml), под тот же /api/me.
 
 const BADGE_RARITY_ORDER = { legendary: 0, epic: 1, rare: 2, common: 3, custom: 0 };
+const MONTHS_RU = ["", "янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+
+function avatarHtml(telegramId, name, size) {
+  const initial = esc((name || "?").trim().charAt(0).toUpperCase() || "?");
+  const cls = size === "xl" ? " xl" : (size === "sm" ? " sm" : "");
+  return `<span class="avatar${cls}" data-avatar-for="${telegramId || ""}">${initial}</span>`;
+}
+
+// Реальные фото участников подгружаются лениво поверх инициалов —
+// тот же приём, что в мини-аппе: отдельный <img>, а не background,
+// чтобы молча остаться на инициалах при 204/ошибке сети (см. /api/avatar).
+function loadAvatars(root) {
+  (root || document).querySelectorAll("[data-avatar-for]").forEach(el => {
+    const tid = el.getAttribute("data-avatar-for");
+    if (!tid || el.getAttribute("data-avatar-loaded")) return;
+    el.setAttribute("data-avatar-loaded", "1");
+    const img = new Image();
+    img.onload = () => { el.innerHTML = ""; el.appendChild(img); };
+    img.onerror = () => {};
+    img.src = `${API_BASE}/avatar/${tid}?init_data=${encodeURIComponent(state.token)}`;
+  });
+}
+
+// Кольцо аватара по стажу в команде — те же пороги, что в мини-аппе.
+function tenureTier(days) {
+  if (days == null) return null;
+  if (days >= 365) return "gold";
+  if (days >= 180) return "silver";
+  if (days >= 30) return "bronze";
+  return null;
+}
+
+function roleMeta(role) {
+  const r = (role || "").toLowerCase();
+  if (r.includes("актр") || r.includes("актё") || r.includes("дублир")) return { ic: "🎙", c: "var(--sakura)" };
+  if (r.includes("режисс")) return { ic: "🎬", c: "var(--fire)" };
+  if (r.includes("звукореж")) return { ic: "🔊", c: "var(--s-review)" };
+  if (r.includes("перевод")) return { ic: "📝", c: "var(--gold)" };
+  if (r.includes("тайпсет") || r.includes("тайминг")) return { ic: "⏱", c: "var(--ember)" };
+  if (r.includes("монтаж")) return { ic: "🎞", c: "var(--sakura)" };
+  if (r.includes("дизайн")) return { ic: "✏️", c: "var(--gold)" };
+  return { ic: "🎭", c: "var(--fire)" };
+}
+
+function rankTagHtml(rank) {
+  if (!rank) return "";
+  const medals = { 1: "🥇", 2: "🥈", 3: "🥉" };
+  const medal = medals[rank.place] || "🏅";
+  return `<span class="rank-tag rank-${rank.place <= 3 ? rank.place : "other"}">${medal} #${rank.place} из ${rank.total}</span>`;
+}
+
+function goalRingHtml(pct, over) {
+  const r = 30, c = 2 * Math.PI * r;
+  return `<svg class="goal-ring" viewBox="0 0 70 70" width="70" height="70">
+    <circle class="goal-ring-track" cx="35" cy="35" r="${r}"></circle>
+    <circle class="goal-ring-fill${over ? " over" : ""}" cx="35" cy="35" r="${r}"
+      stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${c.toFixed(2)}"
+      data-target-offset="${(c - (pct / 100) * c).toFixed(2)}"></circle>
+  </svg>`;
+}
+
+function teamTeaserHtml(me) {
+  if (!me.team || !me.team.count) return "";
+  const stack = me.team.preview.map(u => avatarHtml(u.telegram_id, u.name, "sm")).join("");
+  const names = me.team.preview.map(u => u.name).join(", ");
+  return `
+    <div class="team-teaser" id="team-teaser">
+      <span class="stack">${stack}</span>
+      <div><div class="tt">${me.team.count} ${pluralColleagues(me.team.count)} по студии</div>
+      ${names ? `<div class="tsub">${esc(names)}${me.team.count > me.team.preview.length ? " и др." : ""}</div>` : ""}</div>
+      <span class="go">→</span>
+    </div>`;
+}
+
+// «Структура загрузки» — донат по статусам активных отчётов + разбивка
+// по ролям пайплайна, одной озаглавленной карточкой (как в мини-аппе),
+// с явным пустым состоянием вместо того, чтобы просто не показывать
+// раздел при отсутствии данных.
+function loadStructureHtml(me) {
+  const hasReports = me.reports && me.reports.length;
+  const hasRoles = me.role_breakdown && me.role_breakdown.length;
+  if (!hasReports && !hasRoles) {
+    return `
+      <div class="sec-title">📊 Структура загрузки</div>
+      <div class="stat-donut-card stat-donut-empty">🕊️ Пока нечего показать — нет ни одного активного отчёта на руках</div>
+    `;
+  }
+  const statusCounts = {};
+  for (const r of me.reports || []) statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
+  const segments = Object.entries(STATUS_COLOR_VAR)
+    .filter(([status]) => statusCounts[status])
+    .map(([status, colorVar]) => ({
+      label: state.statusOptions.find(([v]) => v === status)?.[1] || status,
+      count: statusCounts[status],
+      colorVar,
+    }));
+  const donutBlock = hasReports ? `
+    <div class="donut-wrap">
+      ${donutHtml(segments)}
+      <div class="donut-legend">${donutLegendHtml(segments)}</div>
+    </div>` : "";
+  const roleBlock = hasRoles ? `
+    <div style="margin-top:${hasReports ? "14px" : "0"}; font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;">Роли в пайплайне</div>
+    ${me.role_breakdown.map(rb => `
+      <div class="role-bar-row">
+        <div class="label"><span>${esc(rb.role)}</span><span>${rb.count} · ${rb.pct}%</span></div>
+        <div class="role-bar-track"><div class="role-bar-fill" data-pct="${rb.pct}"></div></div>
+      </div>
+    `).join("")}` : "";
+  return `
+    <div class="sec-title">📊 Структура загрузки</div>
+    <div class="stat-donut-card">${donutBlock}${roleBlock}</div>
+  `;
+}
 
 async function loadProfile() {
   const root = $("#profile-body");
@@ -1054,97 +1191,73 @@ async function loadProfile() {
     return;
   }
 
-  const statusCounts = {};
-  for (const r of me.reports || []) statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
-  const mySegments = Object.entries(STATUS_COLOR_VAR).map(([status, colorVar]) => ({
-    label: state.statusOptions.find(([v]) => v === status)?.[1] || status,
-    count: statusCounts[status] || 0,
-    colorVar,
-  }));
-
   const unlockedBadges = (me.badges || []).slice().sort((a, b) => (BADGE_RARITY_ORDER[a.rarity] ?? 9) - (BADGE_RARITY_ORDER[b.rarity] ?? 9));
+  const tier = tenureTier(me.member_since_days);
+  const rMeta = roleMeta(me.role);
+  const roleLabel = me.role ? esc(me.role) : "Участник PHOENIX";
+
+  let joinedLine = "";
+  if (me.created_at) {
+    const jd = new Date(me.created_at.replace(" ", "T") + "Z");
+    if (!isNaN(jd.getTime())) {
+      joinedLine = ` · в команде с ${jd.getUTCDate()} ${MONTHS_RU[jd.getUTCMonth() + 1]}. ${jd.getUTCFullYear()}`;
+    }
+  }
 
   const goalSet = me.monthly_goal != null && me.monthly_goal > 0;
   const goalDone = me.completed_month || 0;
+  const goalOver = goalSet && goalDone >= me.monthly_goal;
   const goalPct = goalSet ? Math.min(100, Math.round((goalDone / me.monthly_goal) * 100)) : 0;
+  const goalCardHtml = goalSet ? `
+    <div class="bcell wide goal-card with-ring" id="goal-card">
+      <div class="goal-ring-wrap">${goalRingHtml(goalPct, goalOver)}
+        <div class="goal-ring-label"><b>${goalDone}</b><span>из ${me.monthly_goal}</span></div>
+      </div>
+      <div><div class="cap">${goalOver ? "✅ цель выполнена" : `цель месяца · <b>${goalPct}%</b>`}</div>
+      <div class="edit-hint">изменить →</div></div>
+    </div>
+  ` : `
+    <div class="bcell wide goal-card" id="goal-card">
+      <h3>Цель месяца</h3>
+      <div class="goal-hint" style="margin-top:4px;">🎯 Цель на месяц не задана — нажмите, чтобы поставить себе план.</div>
+    </div>
+  `;
 
   root.innerHTML = `
-    <div class="profile-head">
-      <div class="profile-head-inner">
-        <div class="profile-avatar-wrap">
-          <div class="profile-avatar">${esc(initials(me.display_name || me.name))}</div>
-          <span class="profile-online-dot ${me.is_online ? "" : "offline"}" title="${me.is_online ? "в сети" : "не в сети"}"></span>
-        </div>
-        <div class="profile-head-info">
-          <div class="profile-name-row">
-            <h2>${esc(me.display_name || me.name)}</h2>
-            ${me.studio_rank ? `<span class="rank-square" title="Место в студии за месяц по закрытым сериям">${me.studio_rank.place}</span>` : ""}
-          </div>
-          <div class="meta">
-            ${me.username ? "@" + esc(me.username) : "ID " + me.telegram_id}${me.member_since_days != null ? ` · в студии ${me.member_since_days} дн.` : ""}
-            ${me.is_online ? ` · <span class="online-text">в сети</span>` : ""}
-          </div>
-          <div class="profile-badges-chips">
-            ${me.role ? `<span class="role-pill">${esc(me.role)}</span>` : ""}
-            ${me.studio_rank ? `<span class="rank-chip">🏆 ${me.studio_rank.place} место из ${me.studio_rank.total} за месяц</span>` : ""}
-            ${me.is_developer ? `<span class="rank-chip">🛠 Разработчик</span>` : ""}
-          </div>
-        </div>
+    <div class="profile-banner-wrap"></div>
+    <div class="profile-head-card">
+      <span class="avatar-ring${tier ? " tier-" + tier : ""}">${avatarHtml(me.telegram_id, me.display_name || me.name, "xl")}</span>
+      <div class="nm-row">
+        <span class="nm">${esc(me.display_name || me.name)}</span>
+        ${me.is_developer ? `<span class="dev-pill">DEV</span>` : ""}
+        ${rankTagHtml(me.studio_rank)}
       </div>
+      ${me.username ? `<div class="un">@${esc(me.username)}</div>` : ""}
+      ${me.internal_id != null ? `<div class="id-row"><span class="id-chip">#${me.internal_id}</span>${joinedLine}${me.is_online ? ` · <span style="color:var(--s-done); font-weight:600;">в сети</span>` : ""}</div>` : ""}
+      <span class="role-tag" style="--tag-c:${rMeta.c}">${rMeta.ic} ${roleLabel}</span>
     </div>
 
+    ${teamTeaserHtml(me)}
+    ${me.status_text ? `<div class="status-quote">💬 ${esc(me.status_text)}</div>` : ""}
+    ${me.bio ? `<div class="profile-bio">${esc(me.bio)}</div>` : ""}
+
+    <div class="bc-meta-line">📋 ${me.assigned} на нём сейчас${me.overdue ? ` · <span class="warn">⏰ ${me.overdue} просрочено</span>` : ""}${me.avg_days != null ? ` · ⏱ в среднем ${me.avg_days.toFixed ? me.avg_days.toFixed(1) : me.avg_days} дн.` : ""}</div>
+
+    ${loadStructureHtml(me)}
+
     <div class="bento">
-      <div class="bcell wide goal-card" id="goal-card" style="animation-delay:0ms;">
-        <h3>Цель месяца</h3>
-        ${goalSet ? `
-          <div class="goal-label"><b>${goalDone} / ${me.monthly_goal}</b><span>${goalPct}%</span></div>
-          <div class="goal-track"><div class="goal-fill" data-pct="${goalPct}"></div></div>
-          <div class="goal-hint">закрыто отчётов в этом месяце · нажмите, чтобы изменить цель</div>
-        ` : `
-          <div class="goal-hint" style="margin-top:4px;">Цель не поставлена — нажмите, чтобы поставить себе план на месяц.</div>
-        `}
-      </div>
-      <div class="bcell wide" style="animation-delay:30ms;">
-        <h3>Мои активные отчёты</h3>
-        <div class="donut-wrap">
-          ${donutHtml(mySegments)}
-          <div class="donut-legend">${donutLegendHtml(mySegments)}</div>
-        </div>
-      </div>
+      ${goalCardHtml}
       <div class="bcell" style="animation-delay:60ms;">
-        <h3>Назначено</h3>
-        <div class="big-num">${me.assigned}</div>
-        <div class="sub">${me.overdue ? `⏰ ${me.overdue} просрочено` : "просрочек нет"}</div>
-      </div>
-      <div class="bcell" style="animation-delay:100ms;">
         <h3>Закрыто</h3>
         <div class="big-num">${me.completed_total}</div>
         <div class="sub">${me.completed_week} за неделю · ${me.completed_month} за месяц</div>
       </div>
-      <div class="bcell" style="animation-delay:140ms;">
+      <div class="bcell" style="animation-delay:100ms;">
         <h3>Вовремя</h3>
         <div class="big-num">${me.on_time_pct != null ? me.on_time_pct + "%" : "—"}</div>
         <div class="sub">${me.avg_days != null ? `в среднем ${me.avg_days.toFixed(1)} дн. на отчёт` : ""}</div>
       </div>
-      ${me.role_breakdown && me.role_breakdown.length ? `
-      <div class="bcell wide" style="animation-delay:180ms;">
-        <h3>По ролям в пайплайне</h3>
-        ${me.role_breakdown.map(rb => `
-          <div class="role-bar-row">
-            <div class="label"><span>${esc(rb.role)}</span><span>${rb.count} · ${rb.pct}%</span></div>
-            <div class="role-bar-track"><div class="role-bar-fill" data-pct="${rb.pct}"></div></div>
-          </div>
-        `).join("")}
-      </div>` : ""}
-      ${me.team && me.team.count ? `
-      <div class="bcell" style="animation-delay:220ms;">
-        <h3>Коллеги</h3>
-        <div class="team-teaser">
-          <span class="avatar-stack">${me.team.preview.map(t => `<span class="avatar-bubble">${esc(initials(t.name))}</span>`).join("")}</span>
-          <span class="sub">${me.team.count} ${pluralColleagues(me.team.count)}</span>
-        </div>
-      </div>` : ""}
-      <div class="bcell wide" style="animation-delay:260ms;">
+      <div class="bcell wide" style="animation-delay:140ms;">
         <h3>Достижения</h3>
         <div class="badge-grid">
           ${unlockedBadges.map(b => `
@@ -1157,9 +1270,13 @@ async function loadProfile() {
       </div>
     </div>
   `;
+  loadAvatars(root);
   playDonutIntro(root);
-  root.querySelectorAll(".role-bar-fill, .goal-fill").forEach(el => {
+  root.querySelectorAll(".role-bar-fill").forEach(el => {
     requestAnimationFrame(() => requestAnimationFrame(() => { el.style.width = el.dataset.pct + "%"; }));
+  });
+  root.querySelectorAll(".goal-ring-fill").forEach(el => {
+    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.strokeDashoffset = el.dataset.targetOffset; }));
   });
   root.querySelector("#goal-card").addEventListener("click", () => monthlyGoalDialog(me.monthly_goal));
 }
@@ -1193,6 +1310,111 @@ function pluralColleagues(n) {
   if (mod10 === 1 && mod100 !== 11) return "коллега";
   if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return "коллеги";
   return "коллег";
+}
+
+// ---------- Лента (история изменений по отчётам + админ-лог) ----------
+// Тот же /api/feed, что у мини-аппа — объединяет report_activity и
+// (только для владельцев студии) admin_log, листается "Показать ещё".
+
+function relTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso.replace(" ", "T") + (iso.indexOf("Z") === -1 && iso.indexOf("+") === -1 ? "Z" : ""));
+  if (isNaN(d.getTime())) return iso;
+  const diffMin = Math.round((Date.now() - d.getTime()) / 60000);
+  if (diffMin < 1) return "только что";
+  if (diffMin < 60) return `${diffMin} мин назад`;
+  const diffH = Math.round(diffMin / 60);
+  if (diffH < 24) return `${diffH} ч назад`;
+  const diffD = Math.round(diffH / 24);
+  return `${diffD} дн назад`;
+}
+
+function feedMeta(ev) {
+  if (ev.kind === "admin") return { ic: "🛡️", c: "var(--sakura)" };
+  const a = ev.action || "";
+  if (a.includes("создан")) return { ic: "🆕", c: "var(--s-done)" };
+  if (a.includes("просрочк")) return { ic: "⚠️", c: "var(--s-stop)" };
+  if (a.includes("Статус")) return { ic: "🔄", c: "var(--fire)" };
+  if (a.includes("снят")) return { ic: "➖", c: "var(--ink-dim)" };
+  if (a.includes("назначен")) return { ic: "👤", c: "var(--s-review)" };
+  if (a.includes("Заметка")) return { ic: "📝", c: "var(--gold)" };
+  if (a.includes("Файл")) return { ic: "📎", c: "var(--s-review)" };
+  if (a.includes("Пайплайн")) return { ic: "⏭", c: "var(--ember)" };
+  if (a.includes("дедлайн") || a.includes("Срок")) return { ic: "⏰", c: "var(--s-fix)" };
+  if (a.includes("изменён")) return { ic: "✏️", c: "var(--ink-soft)" };
+  return { ic: "•", c: "var(--ink-dim)" };
+}
+
+function feedItemHtml(ev) {
+  const meta = feedMeta(ev);
+  let actionText = esc(ev.action);
+  if (ev.public_id) actionText += ` <span style="color:var(--fire); font-weight:700;">${esc(ev.public_id)}</span>`;
+  const detailText = ev.detail ? `<div class="feed-detail">${esc(ev.detail)}</div>` : "";
+  const titleText = ev.title ? `<div class="feed-detail" style="color:var(--ink-dim)">${esc(ev.title)}</div>` : "";
+  const linkable = !!ev.public_id;
+  return `
+    <div class="feed-item">
+      <div class="feed-dot" style="--fc:${meta.c}">${meta.ic}</div>
+      <div class="feed-body${linkable ? " linkable" : ""}"${linkable ? ` data-open="${esc(ev.public_id)}"` : ""}>
+        <div class="feed-action">${actionText}</div>
+        ${titleText}${detailText}
+        <div class="feed-meta">
+          ${ev.kind === "admin" ? `<span style="color:var(--sakura); font-weight:700;">владелец</span><span class="sep">·</span>` : ""}
+          <span>${esc(ev.actor)}</span><span class="sep">·</span><span>${relTime(ev.created_at)}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function wireFeedList(root) {
+  root.querySelectorAll(".feed-body[data-open]").forEach(el => {
+    el.addEventListener("click", () => openReportDetail(el.dataset.open));
+  });
+}
+
+const FEED_PAGE_SIZE = 60;
+
+async function loadFeed() {
+  const root = $("#feed-body");
+  root.innerHTML = dialogSkeletonHtml(6);
+  let d;
+  try {
+    d = await apiGet("/feed", { offset: 0, page_size: FEED_PAGE_SIZE });
+  } catch (e) {
+    root.innerHTML = `<div class="bento-empty">Не удалось загрузить ленту: ${esc(e.message)}</div>`;
+    return;
+  }
+  if (!d.events.length) {
+    root.innerHTML = `<div class="empty-state"><div style="font-size:34px; margin-bottom:8px;">🕓</div>Пока тихо<div class="sub" style="margin-top:4px;">как только кто-то что-то сделает с отчётом — появится здесь</div></div>`;
+    return;
+  }
+  root.innerHTML = `
+    <div class="feed-list" id="feed-list" data-count="${d.events.length}">${d.events.map(feedItemHtml).join("")}</div>
+    ${d.has_more ? `<button class="btn feed-load-more" id="feed-loadmore">Показать ещё (${d.total - d.events.length})</button>` : ""}
+  `;
+  wireFeedList(root);
+  const loadMoreBtn = $("#feed-loadmore");
+  if (loadMoreBtn) loadMoreBtn.addEventListener("click", async () => {
+    const list = $("#feed-list");
+    const offset = parseInt(list.dataset.count, 10) || 0;
+    loadMoreBtn.disabled = true;
+    loadMoreBtn.textContent = "Загрузка…";
+    try {
+      const res = await apiGet("/feed", { offset, page_size: FEED_PAGE_SIZE });
+      list.insertAdjacentHTML("beforeend", res.events.map(feedItemHtml).join(""));
+      list.dataset.count = offset + res.events.length;
+      wireFeedList(root);
+      if (res.has_more) {
+        loadMoreBtn.disabled = false;
+        loadMoreBtn.textContent = `Показать ещё (${res.total - offset - res.events.length})`;
+      } else {
+        loadMoreBtn.remove();
+      }
+    } catch (e) {
+      toast(`Не удалось загрузить ленту: ${e.message}`, "error");
+      loadMoreBtn.disabled = false;
+    }
+  });
 }
 
 // ---------- запуск ----------
