@@ -108,14 +108,27 @@ async function openSettings() {
     if (channel !== "alpha") return;
 
     const currentSha = commitFromVersion(APP_VERSION) || "?";
-    overlay.querySelector("#s-commit-current").textContent = currentSha;
-    overlay.querySelector("#s-commit-latest").textContent = "…";
+    const currentEl = overlay.querySelector("#s-commit-current");
+    const latestEl = overlay.querySelector("#s-commit-latest");
+    currentEl.textContent = currentSha;
+    currentEl.title = APP_VERSION;
+    latestEl.textContent = "…";
+    latestEl.title = "";
     try {
       const update = await invoke("check_for_update");
-      const latestSha = update ? (commitFromVersion(update.version) || "?") : currentSha;
-      overlay.querySelector("#s-commit-latest").textContent = latestSha;
-    } catch (_) {
-      overlay.querySelector("#s-commit-latest").textContent = "?";
+      // update === null у Velopack означает "на канале нечего ставить" —
+      // не то же самое, что ошибка запроса (см. catch ниже), различаем
+      // текстом, чтобы не гадать по одному "?" в обоих случаях.
+      if (update) {
+        latestEl.textContent = commitFromVersion(update.version) || "?";
+        latestEl.title = update.version;
+      } else {
+        latestEl.textContent = "нет новее";
+        latestEl.title = "check_for_update вернул null — Velopack считает текущую версию актуальной для этого канала.";
+      }
+    } catch (e) {
+      latestEl.textContent = "?";
+      latestEl.title = `Ошибка check_for_update: ${e}`;
     }
   }
   refreshAlphaBlock(updateChannel);
