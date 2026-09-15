@@ -6,6 +6,7 @@ import { apiGet, openSheet, toast } from "./api.js";
 import { $, esc } from "./utils.js";
 import { applyTheme } from "./theme.js";
 import { isDevModeOn, setDevModeOn } from "./devmode.js";
+import { openAdminPanel } from "./admin.js";
 
 const APP_VERSION = "0.5.0"; // подставляется автоматически из VERSION при сборке в CI (build.yml)
 
@@ -42,6 +43,10 @@ async function openSettings() {
       <span>Версия ${esc(APP_VERSION)}</span>
       <button class="btn" id="s-check-update" style="padding:5px 12px; font-size:12.5px;">Проверить обновления</button>
     </div>
+    <div class="row" style="align-items:center; justify-content:space-between;">
+      <span>Доступ участников и состояние системы</span>
+      <button class="btn" id="s-open-admin" style="padding:5px 12px; font-size:12.5px;">🔐 Админ-панель</button>
+    </div>
     <p style="color:var(--ink-soft); font-size:12.5px;">
       Ctrl+Shift+P — показать/скрыть окно из любого места, даже когда оно свёрнуто в трей.<br>
       Крестик у окна сворачивает в трей — опрос новых назначений продолжает идти в фоне.
@@ -62,6 +67,7 @@ async function openSettings() {
   const devToggle = overlay.querySelector("#s-dev-mode");
   if (devToggle) devToggle.addEventListener("change", e => setDevModeOn(e.target.checked));
   overlay.querySelector("#s-check-update").addEventListener("click", () => checkForUpdates(false));
+  overlay.querySelector("#s-open-admin").addEventListener("click", openAdminPanel);
   overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
 }
 $("#open-settings").addEventListener("click", openSettings);
