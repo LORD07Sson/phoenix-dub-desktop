@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Права основного окна — доступ к диалогам, уведомлениям, глобальным горячим клавишам, автозапуску, апдейтеру и сети только к своему API.",
+  "description": "Права основного окна — доступ к диалогам, уведомлениям, глобальным горячим клавишам и автозапуску. Апдейтер (Velopack) и сеть к своему API — только через Rust-команды, JS-плагины для них не нужны.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -17,8 +17,6 @@
     "global-shortcut:allow-unregister",
     "autostart:allow-enable",
     "autostart:allow-disable",
-    "autostart:allow-is-enabled",
-    "updater:default",
-    "process:allow-restart"
+    "autostart:allow-is-enabled"
   ]
 }

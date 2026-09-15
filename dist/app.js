@@ -843,21 +843,25 @@ async function openSettings() {
 }
 $("#open-settings").addEventListener("click", openSettings);
 
-// ---------- автообновление ----------
+// ---------- автообновление (Velopack) ----------
+// Раньше тут был window.__TAURI__.updater (tauri-plugin-updater) —
+// теперь апдейтер целиком на Rust-стороне (см. check_for_update/
+// download_and_apply_update в main.rs, Velopack + GithubSource читает
+// релизы репозитория напрямую, без прокси на своём сервере). JS только
+// вызывает команды и слушает событие "update-progress" для прогресс-бара.
 
 const APP_VERSION = "0.5.0"; // подставляется автоматически из VERSION при сборке в CI (build.yml)
 
 async function checkForUpdates(silent) {
   try {
-    const { check } = window.__TAURI__.updater;
-    const update = await check();
+    const update = await invoke("check_for_update");
     if (!update) {
       if (!silent) toast("У вас уже последняя версия.");
       return;
     }
     const yes = await confirmUpdateSheet(update);
     if (!yes) return;
-    await installUpdate(update);
+    await installUpdate();
   } catch (e) {
     if (!silent) toast(`Не удалось проверить обновления: ${e}`, "error");
   }
@@ -867,7 +871,7 @@ function confirmUpdateSheet(update) {
   return new Promise(resolve => {
     const overlay = openSheet(`
       <h2>Доступно обновление ${esc(update.version)}</h2>
-      <div style="color:var(--ink-soft); font-size:13px; white-space:pre-wrap; max-height:200px; overflow:auto; margin-bottom:6px;">${esc(update.body || "Без описания изменений.")}</div>
+      <div style="color:var(--ink-soft); font-size:13px; white-space:pre-wrap; max-height:200px; overflow:auto; margin-bottom:6px;">${esc(update.notes || "Без описания изменений.")}</div>
       <div class="sheet-actions">
         <button class="btn ghost" data-no>Позже</button>
         <button class="btn primary" data-yes>Обновить и перезапустить</button>
@@ -879,7 +883,7 @@ function confirmUpdateSheet(update) {
   });
 }
 
-async function installUpdate(update) {
+async function installUpdate() {
   const overlay = openSheet(`
     <h2>Устанавливаю обновление…</h2>
     <div class="update-progress-track"><div class="update-progress-fill" id="upd-fill"></div></div>
@@ -887,27 +891,19 @@ async function installUpdate(update) {
   `);
   const fill = overlay.querySelector("#upd-fill");
   const statusEl = overlay.querySelector("#upd-status");
-  let total = 0, downloaded = 0;
+  const unlisten = await window.__TAURI__.event.listen("update-progress", event => {
+    const pct = Math.max(0, Math.min(100, event.payload));
+    fill.style.width = pct + "%";
+    statusEl.textContent = pct < 100 ? `Скачано ${pct}%` : "Устанавливаю…";
+  });
   try {
-    await update.downloadAndInstall(event => {
-      if (event.event === "Started") {
-        total = event.data.contentLength || 0;
-      } else if (event.event === "Progress") {
-        downloaded += event.data.chunkLength || 0;
-        if (total) {
-          const pct = Math.min(100, Math.round((downloaded / total) * 100));
-          fill.style.width = pct + "%";
-          statusEl.textContent = `Скачано ${pct}%`;
-        }
-      } else if (event.event === "Finished") {
-        fill.style.width = "100%";
-        statusEl.textContent = "Устанавливаю…";
-      }
-    });
-    statusEl.textContent = "Готово — перезапуск…";
-    const { relaunch } = window.__TAURI__.process;
-    await relaunch();
+    // При успехе download_and_apply_update завершает процесс изнутри
+    // (apply_updates_and_restart) — этот await просто никогда не
+    // вернётся управлением дальше в обычном сценарии, окно закроется
+    // само. Ветка catch — только на случай реальной ошибки.
+    await invoke("download_and_apply_update");
   } catch (e) {
+    unlisten();
     statusEl.textContent = `Ошибка: ${e}`;
     statusEl.style.color = "var(--s-stop)";
   }

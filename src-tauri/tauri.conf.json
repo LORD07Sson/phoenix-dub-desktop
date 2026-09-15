@@ -19,7 +19,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://minitg.shitstudent.com:8443 https:; font-src 'self'"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://minitg.shitstudent.com:8443; font-src 'self'"
     },
     "trayIcon": {
       "iconPath": "icons/icon.png",
@@ -27,18 +27,7 @@
     }
   },
   "bundle": {
-    "active": true,
-    "targets": ["nsis"],
-    "createUpdaterArtifacts": true,
-    "resources": {
-      "binaries/ffmpeg.exe": "./"
-    },
-    "windows": {
-      "nsis": {
-        "installMode": "currentUser",
-        "displayLanguageSelector": false
-      }
-    },
+    "active": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -49,14 +38,5 @@
     "category": "Utility",
     "shortDescription": "Клиент студии дубляжа PHOENIX DUB",
     "longDescription": "Десктоп-клиент студии: список отчётов, массовые операции, локальный QC звука, трей с уведомлениями."
-  },
-  "plugins": {
-    "updater": {
-      "active": true,
-      "endpoints": [
-        "https://minitg.shitstudent.com:8443/api/desktop/update"
-      ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI5NzZGM0Q3ODM0QzI1RjEKUldUeEpVeUQxL04yS1JtN3VUeGMvTHFhMVhoak8zaXFwM3p4UEk3MDIrajNVOHhuQnJteVY0b2EK"
-    }
   }
 }

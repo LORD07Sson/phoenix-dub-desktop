@@ -15,11 +15,14 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
-tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
 tauri-plugin-store = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Автообновление — Velopack вместо tauri-plugin-updater+NSIS-инсталлятора:
+# GithubSource читает релизы репозитория напрямую (он публичный, прокси
+# на своём сервере не нужен), тихая установка без UAC, задел на дельта-
+# патчи вместо полного скачивания каждый раз. См. main.rs.
+velopack = "1.2.0"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 [profile.release]
