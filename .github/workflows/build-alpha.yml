@@ -23,6 +23,17 @@ jobs:
     permissions:
       contents: write
     runs-on: windows-latest
+    # Без этого два быстрых пуша подряд (обычное дело при активной
+    # разработке — см. историю дня, когда несколько мержей ушли за
+    # минуты) гоняли бы два параллельных запуска, оба одновременно
+    # трогающих один и тот же rolling-релиз alpha-latest (удаление +
+    # публикация) — реальная гонка, а не гипотетическая. Не отменяем
+    # уже идущий запуск (cancel-in-progress: false) — обрываться
+    # посреди публикации релиза хуже, чем просто выстроиться в очередь
+    # и подождать; см. тот же приём в MHSanaei/3x-ui release.yml.
+    concurrency:
+      group: alpha-release
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v7
@@ -127,7 +138,20 @@ jobs:
       # можно спокойно проигнорировать.
       - name: Убрать предыдущий alpha-latest
         shell: bash
-        run: gh release delete alpha-latest --yes --cleanup-tag || true
+        run: |
+          retry() {
+            for i in 1 2 3; do
+              "$@" && return 0
+              echo "попытка $i не удалась: $*" >&2
+              sleep $((i * 5))
+            done
+            return 1
+          }
+          # "|| true" — на самом первом запуске такого релиза ещё нет,
+          # gh обычным образом вернёт ошибку, которую тут можно
+          # спокойно проигнорировать (retry её тоже отработает впустую
+          # 3 раза и упадёт — но общий exit code всё равно гасим).
+          retry gh release delete alpha-latest --yes --cleanup-tag || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -135,7 +159,15 @@ jobs:
         shell: bash
         run: |
           set -e
-          vpk upload github \
+          retry() {
+            for i in 1 2 3; do
+              "$@" && return 0
+              echo "попытка $i не удалась: $*" >&2
+              sleep $((i * 5))
+            done
+            return 1
+          }
+          retry vpk upload github \
             --outputDir release_output \
             --repoUrl "https://github.com/${{ github.repository }}" \
             --token "${{ secrets.GITHUB_TOKEN }}" \
