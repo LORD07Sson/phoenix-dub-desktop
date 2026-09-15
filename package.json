@@ -1,0 +1,19 @@
+{
+  "name": "phoenix-dub-desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.4.2",
+    "@tauri-apps/plugin-notification": "^2.3.3",
+    "solid-js": "^1.9.9"
+  },
+  "devDependencies": {
+    "vite": "^7.1.9",
+    "vite-plugin-solid": "^2.11.9"
+  }
+}

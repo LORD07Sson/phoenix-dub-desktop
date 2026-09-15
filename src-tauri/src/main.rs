@@ -152,14 +152,14 @@ async fn is_autostart(app: tauri::AppHandle) -> Result<bool, String> {
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
 
-// Тот же хост, что и API_BASE в dist/app/api.js — держать в синхроне
+// Тот же хост, что и API_BASE в src/app/api.js — держать в синхроне
 // руками, если он когда-нибудь сменится (не тянем сюда JS-константу,
 // у Rust-стороны и так уже есть свой захардкоженный UPDATE_REPO_URL —
 // тот же принцип: несколько мест, где живёт "адрес прода", это
 // осознанный компромисс маленького проекта без общего конфига).
 const API_BASE: &str = "https://minitg.shitstudent.com:8443/api";
 
-/// Файл, перетащенный из проводника (см. dist/app/file-drop.js,
+/// Файл, перетащенный из проводника (см. src/app/file-drop.js,
 /// onDragDropEvent отдаёт только путь на диске, не байты) — читаем его
 /// здесь, в Rust, и сами шлём multipart-запросом на
 /// /api/report/{id}/files/upload, а не через JS/fetch: так не нужен

@@ -1,17 +1,18 @@
-// Плоский конфиг ESLint (v9) для фронтенда — обычный vanilla JS без
-// сборки, поэтому конфиг минимальный: браузерные глобалы + ES2022,
-// без TypeScript/React-специфичных правил, которые тут не нужны.
+// Плоский конфиг ESLint (v9) для фронтенда — минимальный: браузерные
+// глобалы + ES2022 + JSX (для Overview.jsx на SolidJS — см. историю
+// миграции, остальные вкладки пока на vanilla JS). .cjs, а не .js —
+// package.json теперь несёт "type": "module" (нужно Vite-конфигу),
+// а этот файл сам написан в CommonJS (module.exports).
 module.exports = [
   {
-    // dist/app/*.js — наш код, ES-модули (import/export). dist/vendor/**
-    // намеренно исключён ниже — сторонние файлы из npm-пакетов Tauri,
-    // копируются как есть (см. dist/vendor/README.md), не наш стиль
-    // проверять/чинить.
-    files: ["dist/app/**/*.js"],
-    ignores: ["dist/vendor/**"],
+    // src/app/*.js(x) — наш код, ES-модули (import/export). src/vendor/
+    // больше нет — vendored-копии npm-пакетов Tauri заменены реальными
+    // зависимостями (см. package.json), их резолвит и бандлит Vite.
+    files: ["src/app/**/*.js", "src/app/**/*.jsx"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",
+      parserOptions: { ecmaFeatures: { jsx: true } },
       globals: {
         window: "readonly",
         document: "readonly",

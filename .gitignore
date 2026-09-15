@@ -16,3 +16,8 @@ legacy_python_client/releases/*/phoenix-dub-desktop.app
 
 node_modules/
 *.log
+
+# Собирается из src/ через `npm run build` (Vite) — см. историю
+# миграции vanilla JS -> Vite/Solid. Раньше dist/ был исходниками
+# и лежал в git, теперь это build-артефакт, как src-tauri/target/ выше.
+/dist/
