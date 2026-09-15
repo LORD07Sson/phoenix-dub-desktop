@@ -26,6 +26,7 @@ module.exports = [
         URLSearchParams: "readonly",
         Promise: "readonly",
         Image: "readonly",
+        confirm: "readonly",
       },
     },
     rules: {
