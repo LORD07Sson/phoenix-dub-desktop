@@ -911,3 +911,68 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 .board-card .deadline.overdue { color: var(--s-stop); font-weight: 700; }
 .board-col-more { width: 100%; font-size: 12px; padding: 6px; }
 .board-col-empty { text-align: center; color: var(--ink-dim); font-size: 12px; padding: 14px 4px; }
+
+/* ---------- Тайтлы (голосование, /api/public/*) — портировано
+   из мини-аппа: сезон-чипы + сетка постеров + герой-карточка лидера
+   сезона + развёрнутая карточка тайтла с метаданными Shikimori/AniList. ---------- */
+
+.chip-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.qchip {
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface-2); color: var(--ink-soft); cursor: pointer;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.qchip.on { color: #1a0f0a; background: linear-gradient(135deg, var(--ember), var(--fire)); border-color: transparent; }
+.qchip:active { transform: scale(.96); }
+
+.vote-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 4px; }
+.vote-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; transition: opacity .15s ease, border-color .15s ease; animation: row-in .22s ease both; }
+.vote-card:hover { border-color: var(--fire); }
+.vote-card.vote-pending { opacity: .55; pointer-events: none; }
+.vote-card-tap { display: contents; cursor: pointer; }
+.vote-poster { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; background: var(--surface-2); }
+.vote-poster-ph { display: flex; align-items: center; justify-content: center; font-size: 28px; color: var(--ink-dim); aspect-ratio: 2/3; background: var(--surface-2); }
+.vote-name { font-size: 13px; font-weight: 700; padding: 8px 9px 2px; line-height: 1.3; }
+.vote-actions { display: flex; gap: 6px; padding: 8px 9px 9px; margin-top: auto; }
+.vote-btn { flex: 1; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 6px 4px; font-size: 12px; color: var(--ink-soft); font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 4px; cursor: pointer; }
+.vote-btn.on-like { color: var(--s-done); border-color: color-mix(in srgb, var(--s-done) 45%, var(--line)); background: color-mix(in srgb, var(--s-done) 16%, var(--surface-2)); }
+.vote-btn.on-dislike { color: var(--s-stop); border-color: color-mix(in srgb, var(--s-stop) 45%, var(--line)); background: color-mix(in srgb, var(--s-stop) 16%, var(--surface-2)); }
+.vote-card.voted-like { border-color: color-mix(in srgb, var(--s-done) 55%, var(--line)); }
+.vote-card.voted-dislike { border-color: color-mix(in srgb, var(--s-stop) 55%, var(--line)); }
+
+.bcell.vote-hero { display: flex; gap: 12px; padding: 10px; background: linear-gradient(160deg, color-mix(in srgb, var(--gold) 12%, var(--surface)), var(--surface) 70%); }
+.vote-hero-poster { width: 84px; aspect-ratio: 2/3; object-fit: cover; border-radius: 10px; flex: none; background: var(--surface-2); align-self: center; }
+.vote-hero-body { display: flex; flex-direction: column; justify-content: center; min-width: 0; flex: 1; }
+.vote-hero-tag { align-self: flex-start; font-size: 10px; font-weight: 800; color: #3a1c0a; background: linear-gradient(90deg, var(--gold), var(--fire)); padding: 3px 9px; border-radius: 20px; margin-bottom: 6px; }
+.vote-hero-name { font-size: 15px; font-weight: 800; line-height: 1.25; margin-bottom: 10px; }
+.bcell.vote-hero .vote-actions { padding: 0; margin: 0; max-width: 220px; }
+
+/* Развёрнутая карточка тайтла — размытый/затемнённый постер фоном
+   сверху шторки (отрицательные margin съедают padding .sheet), дальше
+   обычный текстовый блок. */
+.td-hero { position: relative; margin: -20px -20px 0; padding: 26px 0 30px; overflow: hidden; border-radius: 18px 18px 0 0; }
+.td-bg { position: absolute; inset: 0; background-size: cover; background-position: center; filter: brightness(.4) saturate(1.15); transform: scale(1.15); }
+.td-bg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(13,7,8,.15) 0%, rgba(13,7,8,.35) 55%, var(--surface) 100%); }
+.td-poster-wrap { position: relative; display: flex; justify-content: center; }
+.td-poster { width: 150px; aspect-ratio: 2/3; border-radius: 16px; object-fit: cover; box-shadow: 0 16px 32px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.06); background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 32px; }
+.td-body { position: relative; padding: 14px 2px 4px; text-align: center; }
+.td-name { font-size: 17px; font-weight: 800; line-height: 1.3; }
+.td-name-original { font-size: 12.5px; color: var(--ink-soft); margin-top: 4px; }
+.td-stat-row { display: flex; justify-content: center; gap: 10px; margin-top: 14px; }
+.td-stat-pill { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 20px; padding: 7px 15px; font-size: 13px; font-weight: 700; }
+.td-stat-pill.like { color: var(--s-done); }
+.td-stat-pill.dislike { color: var(--s-stop); }
+.td-vote-cta { display: flex; gap: 2px; margin-top: 14px; border-radius: 14px; overflow: hidden; }
+.td-vote-cta button { flex: 1; border: none; padding: 13px 8px; font-size: 14px; font-weight: 800; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; background: var(--surface-2); color: var(--ink-soft); }
+.td-vote-cta button.on-like { background: linear-gradient(135deg, #7cd9a0, var(--s-done)); color: #062814; }
+.td-vote-cta button.on-dislike { background: linear-gradient(135deg, #ff9d95, var(--s-stop)); color: #3a0906; }
+.td-meta { margin-top: 20px; text-align: left; }
+.td-meta-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; line-height: 1.4; }
+.td-ic { width: 26px; height: 26px; flex: none; display: flex; align-items: center; justify-content: center; border: 1.5px solid var(--ink-dim); color: var(--ink-soft); }
+.td-ic.round { border-radius: 50%; }
+.td-ic.square { border-radius: 8px; }
+.td-ic svg { width: 15px; height: 15px; display: block; }
+.td-genre-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.td-genre-chip { font-size: 12px; padding: 5px 12px; border-radius: 20px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-soft); }
+.td-desc { margin-top: 14px; font-size: 13.5px; line-height: 1.6; color: var(--ink); text-align: left; white-space: pre-line; }
