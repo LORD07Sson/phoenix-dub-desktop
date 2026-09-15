@@ -60,7 +60,7 @@ function wireDropZone(colEl, status, onDropped) {
     const publicId = e.dataTransfer.getData("text/plain");
     if (!publicId) return;
     try {
-      const res = await apiPost(`/report/${publicId}/status`, { status });
+      const res = await apiPost(`/report/${encodeURIComponent(publicId)}/status`, { status });
       if (res.changed) {
         toast("Статус изменён.");
         await onDropped();
