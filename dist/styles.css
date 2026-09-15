@@ -982,7 +982,9 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 
 /* ---------- Доска (канбан по статусам, /api/board) ---------- */
 
-.board { display: flex; gap: 12px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; }
+.board { display: flex; gap: 12px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; cursor: grab; }
+.board.panning { cursor: grabbing; }
+.board.panning .board-card { cursor: grabbing; }
 .board-col {
   flex: none; width: 260px;
   background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px;

@@ -119,6 +119,43 @@ function wireCardDrag(card) {
   });
 }
 
+// Колонок обычно больше, чем видно в окне (board шире, чем экран,
+// overflow-x: auto) — но колесо мыши по умолчанию крутит только
+// вертикаль, а внутри .board вертикального переполнения нет, поэтому
+// без этого доска выглядела «нельзя прокрутить». Переводим вертикальный
+// скролл колеса в горизонтальный (как в Trello/Notion), плюс drag
+// пустого места доски левой кнопкой — тоже горизонтальный скролл, не
+// перенос карточки (обработчик карточек — отдельный, wireCardDrag).
+function wireBoardScroll(boardEl) {
+  if (!boardEl) return;
+  boardEl.addEventListener("wheel", e => {
+    if (e.deltaY === 0) return;
+    // Трекпад с горизонтальным жестом шлёт deltaX сам — не мешаем ему.
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    boardEl.scrollLeft += e.deltaY;
+  }, { passive: false });
+
+  let panning = false;
+  let startX = 0;
+  let startScroll = 0;
+  boardEl.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || e.target.closest(".board-card")) return;
+    panning = true;
+    startX = e.clientX;
+    startScroll = boardEl.scrollLeft;
+    boardEl.classList.add("panning");
+  });
+  window.addEventListener("pointermove", e => {
+    if (!panning) return;
+    boardEl.scrollLeft = startScroll - (e.clientX - startX);
+  });
+  window.addEventListener("pointerup", () => {
+    panning = false;
+    boardEl.classList.remove("panning");
+  });
+}
+
 function wireBoardCards(root) {
   root.querySelectorAll(".board-card[data-open]").forEach(el => {
     el.addEventListener("click", () => {
@@ -160,6 +197,7 @@ export async function loadBoard() {
     </div>
   `;
   wireBoardCards(root);
+  wireBoardScroll(root.querySelector(".board"));
   root.querySelectorAll("[data-loadmore]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const status = btn.dataset.loadmore;
