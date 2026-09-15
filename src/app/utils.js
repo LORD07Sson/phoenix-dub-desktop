@@ -47,6 +47,36 @@ export function formatTime(sec) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+// Заметка с тайм-кодом — «[4:12] шум на вдохе». Отдельного поля под время
+// в API заметок нет (см. docs/API.md), поэтому оно живёт префиксом в самом
+// тексте: боту и мини-аппу это просто первые символы строки, ничего не
+// ломается, а десктоп вытаскивает время регуляркой и показывает меткой.
+const NOTE_TIME_RE = /^\[(\d{1,3}):([0-5]\d)(?::([0-5]\d))?\]\s*/;
+
+export function parseNoteTime(text) {
+  const m = NOTE_TIME_RE.exec(String(text || ""));
+  if (!m) return null;
+  const [, a, b, c] = m;
+  const seconds = c ? Number(a) * 3600 + Number(b) * 60 + Number(c) : Number(a) * 60 + Number(b);
+  return { seconds, label: c ? `${a}:${b}:${c}` : `${a}:${b}`, rest: String(text).slice(m[0].length) };
+}
+
+// То же самое в обратную сторону — для кнопки «находки QC в заметки».
+export function noteTimePrefix(seconds) {
+  return `[${formatTime(seconds)}] `;
+}
+
+// Строка из поля ввода: «4:12», «04:12», «1:02:03». Пусто — время не
+// указано (обычная заметка), мусор — null, и вызывающий ругается.
+export function secondsFromTimeInput(value) {
+  const v = String(value || "").trim();
+  if (!v) return 0;
+  const m = /^(\d{1,3}):([0-5]\d)(?::([0-5]\d))?$/.exec(v);
+  if (!m) return null;
+  const [, a, b, c] = m;
+  return c ? Number(a) * 3600 + Number(b) * 60 + Number(c) : Number(a) * 60 + Number(b);
+}
+
 export function formatRange(start, end) {
   const dur = end - start;
   if (dur < 1) return `${formatTime(start)} (~${Math.round(dur * 1000)} мс)`;

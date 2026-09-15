@@ -96,9 +96,7 @@ jobs:
           npm ci
           npm run lint
           npm run build
-          npm run verify
-          npm run test:board
-          npm run test:profile
+          npm test
 
       # Тот же закреплённый ffmpeg.exe, что и в build.yml — держать в
       # синхроне руками при обновлении URL/SHA256 там.
