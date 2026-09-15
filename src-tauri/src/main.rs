@@ -55,6 +55,16 @@ async fn is_autostart(app: tauri::AppHandle) -> Result<bool, String> {
 
 fn main() {
     tauri::Builder::default()
+        // Второй запуск (ярлык, автозапуск + ручной старт и т.п.) не должен
+        // плодить второй процесс — вместо этого просто разворачиваем уже
+        // работающее окно. Должен регистрироваться самым первым плагином.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
