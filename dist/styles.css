@@ -4,6 +4,20 @@
 
 [hidden] { display: none !important; }
 
+/* ---------- Фокус для клавиатурной навигации ----------
+   :focus-visible — чтобы кольцо появлялось только при Tab/стрелках,
+   а не при обычном клике мышью (как в остальном UI студии). */
+:focus-visible {
+  outline: 2px solid var(--fire);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline-offset: 1px;
+}
+.tab-btn:focus-visible { outline-offset: -3px; }
+.btn:focus-visible, .icon-btn:focus-visible { outline-offset: 2px; }
+
 :root {
   --bg: #0a0506;
   --bg-2: #120a0c;
@@ -246,6 +260,12 @@ input, button, select { font: inherit; color: inherit; }
   padding: 16px;
   opacity: 0;
   animation: bcell-in .4s ease forwards;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.bcell:hover {
+  transform: translateY(-2px) scale(1.012);
+  border-color: var(--fire);
+  box-shadow: 0 6px 20px rgba(255, 122, 69, .14);
 }
 .bcell.wide { grid-column: span 2; }
 @media (max-width: 640px) { .bcell.wide { grid-column: span 1; } }
@@ -273,8 +293,23 @@ input, button, select { font: inherit; color: inherit; }
 
 .donut-wrap { display: flex; align-items: center; gap: 16px; }
 .donut-svg circle.donut-seg {
-  transition: stroke-dashoffset 1s cubic-bezier(.22,.9,.3,1);
+  transition: stroke-dashoffset 1s cubic-bezier(.22,.9,.3,1), filter .15s ease, opacity .15s ease;
 }
+/* Не трогаем transform/stroke-width у самого круга — на нём уже висит
+   SVG-атрибут transform="rotate(...)" для позиционирования сегмента,
+   и CSS-transform его бы перезаписал. Подсвечиваем через filter + притушиваем соседей. */
+.donut-svg:has(circle.donut-seg:hover) circle.donut-seg:not(:hover) { opacity: .55; }
+.donut-svg circle.donut-seg:hover {
+  filter: drop-shadow(0 0 4px rgba(255, 122, 69, .6));
+  cursor: default;
+}
+.donut-legend-item {
+  border-radius: 6px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  transition: background .15s ease;
+}
+.donut-legend-item:hover { background: var(--surface-2); }
 .donut-legend { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
 .donut-legend-item { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
 .donut-legend-item .dot { flex: none; }
@@ -518,11 +553,39 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
   margin-bottom: 8px;
   background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
   background-size: 400% 100%;
-  animation: skeleton-shimmer 1.4s ease infinite;
+  animation: skeleton-shimmer 1.4s ease infinite, skeleton-fade-in .2s ease both;
 }
 @keyframes skeleton-shimmer {
   0% { background-position: 100% 50%; }
   100% { background-position: 0 50%; }
+}
+@keyframes skeleton-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Скелетон таблицы и сама таблица плавно перекрещиваются по opacity,
+   а не дёргаются между hidden/visible — и появляются только если
+   загрузка реально затянулась (см. setTimeout(100ms) в loadReports()),
+   чтобы на быстром ответе сервера не было мерцания. */
+#skeleton {
+  opacity: 0;
+  transition: opacity .18s ease;
+}
+#skeleton.visible { opacity: 1; }
+.content table {
+  transition: opacity .18s ease;
+}
+.content table.loading { opacity: .35; }
+
+/* Появление строк таблицы с лёгкой нарастающей задержкой (stagger),
+   а не все разом — см. renderReports() в app.js. */
+.row-in {
+  animation: row-in .28s ease both;
+}
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .row-in, .bcell, #skeleton, .content table, .toast { animation: none !important; transition: none !important; }
 }
 
 .bulk-bar {
@@ -660,17 +723,38 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
   z-index: 100;
 }
 .toast {
+  position: relative;
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-left: 3px solid var(--fire);
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 10px 14px 13px;
   font-size: 13px;
   box-shadow: var(--shadow);
   animation: toast-in .2s ease;
   max-width: 320px;
+  overflow: hidden;
+  cursor: pointer;
 }
+.toast-text { display: block; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.toast.toast-out { animation: toast-out .18s ease forwards; }
+@keyframes toast-out { to { opacity: 0; transform: translateY(-4px) scale(.98); } }
+
+/* Полоска автозакрытия — визуально показывает, сколько времени
+   осталось до того, как тост исчезнет сам. Клик по тосту закрывает раньше. */
+.toast-progress {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: var(--fire);
+  transform-origin: left;
+  animation-name: toast-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+@keyframes toast-progress { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 
 .spinner {
   width: 16px; height: 16px;

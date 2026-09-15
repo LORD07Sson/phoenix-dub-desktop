@@ -63,9 +63,24 @@ function toast(text, kind = "info") {
   const el = document.createElement("div");
   el.className = "toast";
   if (kind === "error") el.style.borderLeftColor = "var(--s-stop)";
-  el.textContent = text;
+  const duration = 4200;
+  el.innerHTML = `<span class="toast-text"></span><span class="toast-progress" style="animation-duration:${duration}ms;"></span>`;
+  el.querySelector(".toast-text").textContent = text;
   root.appendChild(el);
-  setTimeout(() => el.remove(), 4200);
+  const remove = () => {
+    el.classList.add("toast-out");
+    el.addEventListener("animationend", () => el.remove(), { once: true });
+  };
+  const timer = setTimeout(remove, duration);
+  el.addEventListener("click", () => { clearTimeout(timer); remove(); });
+}
+
+// Скелетон-заглушка для модалок, пока грузятся реальные данные
+// (карточка отчёта, QC-анализ) — вместо одного спиннера с текстом.
+function dialogSkeletonHtml(lines = 4) {
+  const rows = Array.from({ length: lines }, (_, i) =>
+    `<div class="skeleton-row" style="animation-delay:${i * 60}ms;"></div>`).join("");
+  return `<div class="skeleton-wrap">${rows}</div>`;
 }
 
 async function api(method, path, body) {
@@ -243,8 +258,13 @@ async function loadReports() {
   const statusbar = $("#statusbar");
   const skeleton = $("#skeleton");
   const table = $(".content table");
-  skeleton.hidden = false;
-  table.style.opacity = ".4";
+  // Скелетон показываем только если загрузка реально затянулась (>100мс) —
+  // иначе на быстром ответе он просто мигнёт туда-обратно.
+  const skeletonTimer = setTimeout(() => {
+    skeleton.hidden = false;
+    requestAnimationFrame(() => skeleton.classList.add("visible"));
+  }, 100);
+  table.classList.add("loading");
   try {
     const r = await apiGet("/reports", currentFilters());
     state.reports = r.reports || [];
@@ -255,8 +275,10 @@ async function loadReports() {
     toast(`Не удалось загрузить список: ${e.message}`, "error");
     statusbar.textContent = "Ошибка загрузки.";
   } finally {
-    skeleton.hidden = true;
-    table.style.opacity = "";
+    clearTimeout(skeletonTimer);
+    skeleton.classList.remove("visible");
+    setTimeout(() => { skeleton.hidden = true; }, 180);
+    table.classList.remove("loading");
   }
 }
 
@@ -287,10 +309,14 @@ function renderReports() {
   const empty = $("#empty-state");
   empty.hidden = state.reports.length > 0;
 
-  for (const r of state.reports) {
+  state.reports.forEach((r, i) => {
     const tr = document.createElement("tr");
     tr.dataset.publicId = r.public_id;
     if (state.selected.has(r.public_id)) tr.classList.add("selected");
+    // Stagger: строки появляются с небольшой нарастающей задержкой, а не все разом.
+    // Ограничиваем задержку первыми ~18 строками, чтобы длинные списки не "доезжали" целую вечность.
+    tr.classList.add("row-in");
+    tr.style.animationDelay = `${Math.min(i, 18) * 22}ms`;
     const dotClass = STATUS_DOT_CLASS[r.status] || "draft";
     const overdue = isOverdue(r);
     tr.innerHTML = `
@@ -308,7 +334,7 @@ function renderReports() {
     });
     tr.addEventListener("click", () => openReportDetail(r.public_id));
     tbody.appendChild(tr);
-  }
+  });
 
   $("#statusbar").textContent =
     `Отчётов: ${state.reports.length} из ${state.total} · клик по строке — открыть карточку, ` +
@@ -474,9 +500,8 @@ const QC_FINDING_LABELS_RU = { clipping: "Клиппинг", silence: "Пауз�
 
 async function openReportDetail(publicId) {
   const overlay = openSheet(`
-    <div style="display:flex; align-items:center; gap:10px; padding:30px 0; justify-content:center;">
-      <span class="spinner"></span> Загрузка…
-    </div>
+    <h2 class="skeleton-row" style="width:60%; height:22px;"></h2>
+    ${dialogSkeletonHtml(5)}
   `, "wide");
 
   async function render() {
@@ -708,9 +733,7 @@ async function openQcDialog() {
   const overlay = openSheet(`
     <h2>QC звука</h2>
     <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-8px;">${esc(path)}</p>
-    <div id="qc-body" style="display:flex; align-items:center; gap:10px; padding:20px 0;">
-      <span class="spinner"></span> Анализирую…
-    </div>
+    <div id="qc-body">${dialogSkeletonHtml(3)}</div>
     <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
   `);
   overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
