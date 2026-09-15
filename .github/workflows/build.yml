@@ -169,3 +169,35 @@ jobs:
             --publish \
             --tag "v${{ env.PKG_VERSION }}" \
             --releaseName "PHOENIX DUB v${{ env.PKG_VERSION }}"
+
+      # Та же страховка, что и в build-alpha.yml: vpk умеет выйти с кодом
+      # 0, оставив релиз черновиком — сборка зелёная, а обновления никто
+      # не видит, потому что черновик не отдаётся публичным API.
+      - name: Проверить, что релиз опубликован
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          tag="v${{ env.PKG_VERSION }}"
+          id=$(gh api "repos/$REPO/releases" --jq ".[] | select(.tag_name==\"$tag\") | .id" | head -1)
+          if [ -z "$id" ]; then
+            echo "::error::Релиза $tag нет вообще"
+            exit 1
+          fi
+          if [ "$(gh api "repos/$REPO/releases/$id" --jq .draft)" = "true" ]; then
+            echo "::warning::vpk оставил релиз черновиком — публикуем сами"
+            gh api -X PATCH "repos/$REPO/releases/$id" -F draft=false
+          fi
+          url="https://github.com/$REPO/releases/download/$tag/releases.win.json"
+          for i in 1 2 3; do
+            if curl -fsSL -o feed_check.json "$url"; then
+              echo "Фид стабильного канала доступен:"
+              cat feed_check.json
+              exit 0
+            fi
+            sleep $((i * 5))
+          done
+          echo "::error::releases.win.json недоступен по $url — клиенты обновление не увидят"
+          exit 1
