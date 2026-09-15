@@ -13,6 +13,8 @@ const APP_VERSION = "0.5.0"; // подставляется автоматиче�
 async function openSettings() {
   let autostartOn = false;
   try { autostartOn = await invoke("is_autostart"); } catch (_) {}
+  let updateChannel = "stable";
+  try { updateChannel = await invoke("get_update_channel"); } catch (_) {}
 
   // Переключатель dev-режима виден только реальным разработчикам студии
   // (state.isDeveloper — из /api/me, is_developer сервер сам проверяет
@@ -44,6 +46,13 @@ async function openSettings() {
       <button class="btn" id="s-check-update" style="padding:5px 12px; font-size:12.5px;">Проверить обновления</button>
     </div>
     <div class="row" style="align-items:center; justify-content:space-between;">
+      <span>🧪 Канал обновлений</span>
+      <select id="s-update-channel">
+        <option value="stable" ${updateChannel === "stable" ? "selected" : ""}>Стабильный</option>
+        <option value="alpha" ${updateChannel === "alpha" ? "selected" : ""}>Альфа (тестовые сборки)</option>
+      </select>
+    </div>
+    <div class="row" style="align-items:center; justify-content:space-between;">
       <span>Доступ участников и состояние системы</span>
       <button class="btn" id="s-open-admin" style="padding:5px 12px; font-size:12.5px;">🔐 Админ-панель</button>
     </div>
@@ -51,6 +60,7 @@ async function openSettings() {
       Ctrl+Shift+P — показать/скрыть окно из любого места, даже когда оно свёрнуто в трей.<br>
       Крестик у окна сворачивает в трей — опрос новых назначений продолжает идти в фоне.
       ${state.isDeveloper ? "<br>Режим разработчика открывает правку чужих ролей/профиля/даты вступления/наград — на карточке коллеги (клик по тизеру команды)." : ""}
+      <br>Альфа-канал — тестовые сборки чаще, без ожидания «настоящего» релиза, но менее стабильные. Переключение применяется со следующей проверки обновлений.
     </p>
     <div class="sheet-actions"><button class="btn primary" data-close>Готово</button></div>
   `);
@@ -67,6 +77,15 @@ async function openSettings() {
   const devToggle = overlay.querySelector("#s-dev-mode");
   if (devToggle) devToggle.addEventListener("change", e => setDevModeOn(e.target.checked));
   overlay.querySelector("#s-check-update").addEventListener("click", () => checkForUpdates(false));
+  overlay.querySelector("#s-update-channel").addEventListener("change", async e => {
+    const channel = e.target.value;
+    try {
+      await invoke("set_update_channel", { channel });
+      toast(channel === "alpha" ? "Альфа-канал включён." : "Возвращено на стабильный канал.");
+    } catch (err) {
+      toast(`Не удалось сменить канал: ${err}`, "error");
+    }
+  });
   overlay.querySelector("#s-open-admin").addEventListener("click", openAdminPanel);
   overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
 }

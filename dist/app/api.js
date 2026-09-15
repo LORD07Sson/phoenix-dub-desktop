@@ -7,19 +7,33 @@ import { $ } from "./utils.js";
 
 export const API_BASE = "https://minitg.shitstudent.com:8443/api";
 
+// Без явного таймаута fetch() ждёт ответа сколько угодно — если сеть
+// до сервера просто медленная/легла (не сразу видимая ошибка, а тихое
+// зависание соединения), пользователь смотрит на неподвижный скелетон
+// без единого сигнала, что что-то пошло не так, и это неотличимо от
+// зависшего интерфейса. 20с — заметно больше обычного отклика (доли
+// секунды — единицы секунд), но не бесконечность.
+const REQUEST_TIMEOUT_MS = 20_000;
+
 export async function api(method, path, body) {
   const headers = { "Content-Type": "application/json" };
   if (state.token) headers["X-Init-Data"] = state.token;
   const url = `${API_BASE}${path}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS); // DevSkim: ignore DS172411 — функция, не строка
   let resp;
   try {
     resp = await fetch(url, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
     });
   } catch (e) {
+    if (e.name === "AbortError") throw new Error("Сервер не отвечает — проверьте соединение и попробуйте снова.");
     throw new Error(`Нет связи с сервером: ${e.message}`);
+  } finally {
+    clearTimeout(timeout);
   }
   if (!resp.ok) {
     let detail = resp.status;

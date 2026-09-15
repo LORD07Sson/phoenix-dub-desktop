@@ -18,21 +18,45 @@ export function switchTab(name) {
 }
 $all(".tab-btn").forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 
+// Возвращает промис самой загрузки (раньше не возвращала — refreshAll
+// ниже отпускал кнопку «Обновить» сразу после ВЫЗОВА loadOverview()/
+// loadReports() и т.п., а не после того, как они реально отработали,
+// поэтому кнопка выглядела снятой с паузы за секунды до того, как
+// данные на самом деле пришли).
 export function loadActiveTab(force) {
   const name = state.activeTab;
-  if (!force && state.loadedTabs.has(name)) return;
+  if (!force && state.loadedTabs.has(name)) return Promise.resolve();
   state.loadedTabs.add(name);
-  if (name === "overview") loadOverview();
-  else if (name === "list") loadReports();
-  else if (name === "board") loadBoard();
-  else if (name === "titles") loadTitlesTab();
-  else if (name === "feed") loadFeed();
-  else if (name === "profile") loadProfile();
+  if (name === "overview") return loadOverview();
+  if (name === "list") return loadReports();
+  if (name === "board") return loadBoard();
+  if (name === "titles") return loadTitlesTab();
+  if (name === "feed") return loadFeed();
+  if (name === "profile") return loadProfile();
+  return Promise.resolve();
 }
 
+let refreshInFlight = false;
+
 export async function refreshAll() {
-  await loadUsers();
-  loadActiveTab(true);
+  // Защита от повторных нажатий — раньше вторая (нетерпеливая) кнопка
+  // во время ещё идущей загрузки просто запускала ещё один параллельный
+  // раунд запросов, и субъективно "подвисание" только усиливалось:
+  // сеть и так медленная, а тут догоняющий запрос той же вкладки.
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  const btn = $("#refresh-btn");
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "⏳ Обновляю…";
+  try {
+    await loadUsers();
+    await loadActiveTab(true);
+  } finally {
+    refreshInFlight = false;
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 }
 
 export async function loadUsers() {
