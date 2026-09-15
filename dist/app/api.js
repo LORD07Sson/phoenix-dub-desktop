@@ -35,6 +35,7 @@ export function apiGet(path, params) {
   return api("GET", path + qs);
 }
 export function apiPost(path, body) { return api("POST", path, body || {}); }
+export function apiDelete(path) { return api("DELETE", path); }
 
 export function openSheet(html, variant) {
   const tpl = $(variant === "wide" ? "#tpl-overlay-wide" : "#tpl-overlay").content.cloneNode(true);

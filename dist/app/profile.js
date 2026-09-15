@@ -5,7 +5,7 @@
 // и /api/user/{id} (совместимая форма ответа — общая разметка на двоих).
 
 import { state } from "./state.js";
-import { API_BASE, apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
+import { API_BASE, apiGet, apiPost, apiDelete, openSheet, toast, dialogSkeletonHtml } from "./api.js";
 import { $, esc, MONTHS_RU, STATUS_COLOR_VAR, BADGE_RARITY_ORDER, pluralColleagues } from "./utils.js";
 import { donutHtml, donutLegendHtml, playDonutIntro } from "./charts.js";
 import { devModeActive, devPanelHtml, wireDevPanel } from "./devmode.js";
@@ -140,7 +140,9 @@ function loadStructureHtml(me) {
 
 // Шапка + тизер команды + цитата статуса + био + метастрока + «Структура
 // загрузки» — общая часть между своей «Я» и карточкой коллеги.
-function profileHeaderHtml(d) {
+// isSelf — показать карандаш редактирования статуса/био (только на
+// собственном профиле, /api/me/profile правит только СВОЙ профиль).
+function profileHeaderHtml(d, isSelf) {
   const tier = tenureTier(d.member_since_days);
   const rMeta = roleMeta(d.role);
   const roleLabel = d.role ? esc(d.role) : "Участник PHOENIX";
@@ -168,6 +170,7 @@ function profileHeaderHtml(d) {
     </div>
 
     ${teamTeaserHtml(d)}
+    ${isSelf ? `<div style="display:flex; justify-content:flex-end;"><button class="icon-btn" id="btn-edit-profile" title="Изменить статус и о себе">✏️</button></div>` : ""}
     ${d.status_text ? `<div class="status-quote">💬 ${esc(d.status_text)}</div>` : ""}
     ${d.bio ? `<div class="profile-bio">${esc(d.bio)}</div>` : ""}
 
@@ -188,13 +191,14 @@ function badgesBentoHtml(d, delayMs) {
           <div class="badge-item ${b.unlocked ? "unlocked" : ""}" title="${esc(b.label)}${!b.unlocked && b.target ? ` — ${b.current}/${b.target}` : ""}">
             <div>${esc(b.icon)}</div>
             <span class="lbl">${esc(b.label)}</span>
+            ${b.custom && devModeActive() ? `<button class="icon-btn badge-revoke" data-revoke-badge="${b.id}" title="Отозвать награду">✕</button>` : ""}
           </div>
         `).join("")}
       </div>
     </div>`;
 }
 
-function wireProfileCommon(root, telegramId) {
+function wireProfileCommon(root, telegramId, onReload) {
   loadAvatars(root);
   loadProfileBanner(root.querySelector('[data-role="profile-banner"]'), telegramId);
   playDonutIntro(root);
@@ -203,6 +207,21 @@ function wireProfileCommon(root, telegramId) {
   });
   root.querySelectorAll(".goal-ring-fill").forEach(el => {
     requestAnimationFrame(() => requestAnimationFrame(() => { el.style.strokeDashoffset = el.dataset.targetOffset; }));
+  });
+  root.querySelectorAll("[data-revoke-badge]").forEach(btn => {
+    btn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      if (!confirm("Отозвать эту награду?")) return;
+      btn.disabled = true;
+      try {
+        await apiDelete(`/dev/badge/${btn.dataset.revokeBadge}`);
+        toast("Награда отозвана.");
+        if (onReload) await onReload();
+      } catch (e) {
+        toast(`Не удалось отозвать: ${e.message}`, "error");
+        btn.disabled = false;
+      }
+    });
   });
   const teaser = root.querySelector("#team-teaser");
   if (teaser) teaser.addEventListener("click", openTeamSheet);
@@ -240,7 +259,7 @@ export async function loadProfile() {
   `;
 
   root.innerHTML = `
-    ${profileHeaderHtml(me)}
+    ${profileHeaderHtml(me, true)}
     <div class="bento">
       ${goalCardHtml}
       <div class="bcell" style="animation-delay:60ms;">
@@ -254,12 +273,71 @@ export async function loadProfile() {
         <div class="sub">${me.avg_days != null ? `в среднем ${me.avg_days.toFixed(1)} дн. на отчёт` : ""}</div>
       </div>
       ${badgesBentoHtml(me, 140)}
+      <div class="bcell wide" id="activity-card" style="animation-delay:180ms; cursor:pointer;">
+        <h3>Моя активность →</h3>
+        <div class="sub">последние действия по отчётам</div>
+      </div>
     </div>
     ${devModeActive() ? devPanelHtml(me) : ""}
   `;
-  wireProfileCommon(root, me.telegram_id);
+  wireProfileCommon(root, me.telegram_id, () => loadProfile());
   root.querySelector("#goal-card").addEventListener("click", () => monthlyGoalDialog(me.monthly_goal));
+  root.querySelector("#btn-edit-profile").addEventListener("click", () => editProfileDialog(me));
+  root.querySelector("#activity-card").addEventListener("click", () => openMyActivitySheet());
   if (devModeActive()) wireDevPanel(root, me.telegram_id, () => loadProfile());
+}
+
+function editProfileDialog(me) {
+  const overlay = openSheet(`
+    <h2>Статус и о себе</h2>
+    <div class="row"><input type="text" id="dlg-status" maxlength="80" placeholder="Короткий статус" value="${esc(me.status_text || "")}"></div>
+    <div class="row"><textarea id="dlg-bio" rows="3" maxlength="300" placeholder="О себе">${esc(me.bio || "")}</textarea></div>
+    <div class="sheet-actions">
+      <button class="btn ghost" data-close>Отмена</button>
+      <button class="btn primary" id="dlg-apply">Сохранить</button>
+    </div>
+  `);
+  overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  overlay.querySelector("#dlg-apply").addEventListener("click", async () => {
+    const status_text = overlay.querySelector("#dlg-status").value;
+    const bio = overlay.querySelector("#dlg-bio").value;
+    try {
+      await apiPost("/me/profile", { status_text, bio });
+      toast("Профиль обновлён.");
+      overlay.remove();
+      await loadProfile();
+    } catch (e) {
+      toast(`Не удалось сохранить: ${e.message}`, "error");
+    }
+  });
+}
+
+async function openMyActivitySheet() {
+  const overlay = openSheet(`<h2>Моя активность</h2>${dialogSkeletonHtml(6)}`);
+  const sheet = overlay.querySelector(".sheet");
+  let d;
+  try {
+    d = await apiGet("/me/activity");
+  } catch (e) {
+    sheet.innerHTML = `<h2>Моя активность</h2><div class="bento-empty">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+    sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+    return;
+  }
+  const rows = (d.events || []).map(ev => `
+    <div class="note-item" data-open-report="${esc(ev.public_id || "")}" style="${ev.public_id ? "cursor:pointer;" : ""}">
+      <div class="meta">${esc(ev.public_id || "")} ${esc(ev.title || "")} · ${esc(ev.created_at || "")}</div>
+      <div>${esc(ev.action || "")}${ev.detail ? ` — ${esc(ev.detail)}` : ""}</div>
+    </div>
+  `).join("");
+  sheet.innerHTML = `
+    <h2>Моя активность</h2>
+    <div>${rows || `<div class="bento-empty">Пока пусто</div>`}</div>
+    <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
+  `;
+  sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  sheet.querySelectorAll("[data-open-report]").forEach(row => {
+    if (row.dataset.openReport) row.addEventListener("click", () => openReportDetail(row.dataset.openReport));
+  });
 }
 
 function monthlyGoalDialog(current) {
@@ -345,7 +423,7 @@ async function openUserProfile(telegramId) {
     ${devModeActive() ? devPanelHtml(d) : ""}
     <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
   `;
-  wireProfileCommon(sheet, telegramId);
+  wireProfileCommon(sheet, telegramId, async () => { await openUserProfile(telegramId); overlay.remove(); });
   sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
   sheet.querySelectorAll("[data-open-report]").forEach(row => {
     row.addEventListener("click", () => openReportDetail(row.dataset.openReport));

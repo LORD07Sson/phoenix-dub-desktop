@@ -2,11 +2,13 @@
 // серверная AI-проверка звука. Открывается из Списка/Доски/Ленты/
 // профиля коллеги.
 
-import { apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
+import { API_BASE, apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
+import { state } from "./state.js";
 import { esc, initials, STATUS_DOT_CLASS, isOverdue } from "./utils.js";
-import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog } from "./reports.js";
+import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
 
 const QC_FINDING_LABELS_RU = { clipping: "Клиппинг", silence: "Пауза", noise: "Шум", loud: "Громко", quiet: "Тихо" };
+const FILE_ICONS = { photo: "🖼", video: "🎬", audio: "🎵", voice: "🎙", document: "📄" };
 
 export async function openReportDetail(publicId) {
   const overlay = openSheet(`
@@ -49,7 +51,11 @@ export async function openReportDetail(publicId) {
       <div class="detail-section">
         <h3>Исполнители</h3>
         ${(detail.assignees && detail.assignees.length)
-          ? detail.assignees.map(a => `<div class="assignee-row"><span class="avatar-bubble">${esc(initials(a.first_name || a.username))}</span>${esc(a.first_name || a.username || `ID ${a.telegram_id}`)}</div>`).join("")
+          ? detail.assignees.map(a => `<div class="assignee-row" data-assignee="${a.telegram_id}">
+              <span class="avatar-bubble">${esc(initials(a.first_name || a.username))}</span>
+              <span style="flex:1;">${esc(a.first_name || a.username || `ID ${a.telegram_id}`)}</span>
+              <button class="icon-btn" data-unassign="${a.telegram_id}" title="Снять">✕</button>
+            </div>`).join("")
           : `<div class="no-assignee">Никто не назначен</div>`}
       </div>
 
@@ -74,10 +80,20 @@ export async function openReportDetail(publicId) {
       ${files.files.length ? `
       <div class="detail-section">
         <h3>Файлы (${files.files.length})</h3>
-        <div id="files-list">${files.files.map(fileHtml).join("")}</div>
+        <div id="files-list">${files.files.map(f => fileHtml(f, publicId)).join("")}</div>
       </div>` : ""}
 
-      <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
+      <div class="detail-section">
+        <div style="display:flex; gap:8px;">
+          <button class="btn ghost" id="btn-history" style="flex:1;">🕓 История</button>
+          <button class="btn ghost" id="btn-activity" style="flex:1;">📜 Активность</button>
+        </div>
+      </div>
+
+      <div class="sheet-actions">
+        <button class="btn danger" id="btn-delete-report" style="margin-right:auto;">🗑 Удалить отчёт</button>
+        <button class="btn" data-close>Закрыть</button>
+      </div>
     `;
 
     const sheet = overlay.querySelector(".sheet");
@@ -95,6 +111,52 @@ export async function openReportDetail(publicId) {
         } catch (e) { toast(`Не удалось изменить пункт: ${e.message}`, "error"); }
       });
     });
+    sheet.querySelectorAll("[data-checklist-del]").forEach(btn => {
+      btn.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        try {
+          await apiPost(`/report/${publicId}/checklist/${btn.dataset.checklistDel}/delete`, {});
+          await render();
+        } catch (e) { toast(`Не удалось удалить пункт: ${e.message}`, "error"); }
+      });
+    });
+    sheet.querySelectorAll("[data-unassign]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          const res = await apiPost(`/report/${publicId}/unassign`, { telegram_id: btn.dataset.unassign });
+          if (res.changed) { toast("Исполнитель снят."); await render(); }
+          else btn.disabled = false;
+        } catch (e) { toast(`Не удалось снять исполнителя: ${e.message}`, "error"); btn.disabled = false; }
+      });
+    });
+    sheet.querySelector("#btn-delete-report").addEventListener("click", async () => {
+      if (!confirm(`Удалить отчёт ${detail.public_id} («${detail.title}»)? Действие необратимо.`)) return;
+      const btn = sheet.querySelector("#btn-delete-report");
+      btn.disabled = true;
+      btn.textContent = "Удаляем…";
+      try {
+        const res = await apiPost(`/report/${publicId}/delete`, {});
+        if (res.deleted) {
+          toast("Отчёт удалён.");
+          overlay.remove();
+          await loadReports();
+        } else if (res.pending_approval) {
+          toast("Запрос на удаление отправлен владельцу.");
+          overlay.remove();
+        } else {
+          toast("Не удалось удалить.", "error");
+          btn.disabled = false;
+          btn.textContent = "🗑 Удалить отчёт";
+        }
+      } catch (e) {
+        toast(`Не удалось удалить: ${e.message}`, "error");
+        btn.disabled = false;
+        btn.textContent = "🗑 Удалить отчёт";
+      }
+    });
+    sheet.querySelector("#btn-history").addEventListener("click", () => openReportLogSheet(publicId, "history"));
+    sheet.querySelector("#btn-activity").addEventListener("click", () => openReportLogSheet(publicId, "activity"));
     sheet.querySelector("#checklist-add").addEventListener("click", async () => {
       const input = sheet.querySelector("#checklist-new");
       const text = input.value.trim();
@@ -141,7 +203,8 @@ export async function openReportDetail(publicId) {
 function checklistItemHtml(item) {
   return `<div class="checklist-item ${item.done ? "done" : ""}" data-id="${item.id}">
     <input type="checkbox" ${item.done ? "checked" : ""} tabindex="-1">
-    <span>${esc(item.text)}</span>
+    <span style="flex:1;">${esc(item.text)}</span>
+    <button class="icon-btn" data-checklist-del="${item.id}" title="Удалить">✕</button>
   </div>`;
 }
 
@@ -152,11 +215,61 @@ function noteHtml(n) {
   </div>`;
 }
 
-function fileHtml(f) {
+function fileHtml(f, publicId) {
   const isAudio = /audio|wav|mp3|flac|m4a|ogg/i.test(f.file_type || f.file_name || "");
+  const downloadUrl = `${API_BASE}/report/${encodeURIComponent(publicId)}/files/${f.id}/download?init_data=${encodeURIComponent(state.token || "")}`;
   return `<div class="file-item">
-    <div>${esc(f.file_name || f.file_type)} <span class="meta">${esc(f.file_size_label || "")}</span></div>
+    <div>${esc(FILE_ICONS[f.file_type] || "📎")} ${esc(f.file_name || f.file_type)} <span class="meta">${esc(f.file_size_label || "")}</span></div>
     ${isAudio ? `<button class="btn" style="padding:4px 10px; font-size:12px;" data-qc-file="${f.id}">🤖 AI-проверка</button>` : ""}
+    <a class="icon-btn" href="${downloadUrl}" target="_blank" rel="noopener" title="Скачать">⬇️</a>
     <div id="qc-result-${f.id}" style="width:100%;"></div>
   </div>`;
+}
+
+// История статуса и лента активности отчёта — тот же /history и
+// /activity, что и в мини-аппе, листаются кнопкой «Показать ещё»
+// (page_size=20, как там же), а не бесконечной прокруткой.
+async function openReportLogSheet(publicId, kind) {
+  const title = kind === "history" ? "🕓 История" : "📜 Активность";
+  const overlay = openSheet(`<h2>${title}</h2>${dialogSkeletonHtml(5)}`);
+  const sheet = overlay.querySelector(".sheet");
+
+  let offset = 0;
+  const pageSize = 20;
+  let events = [];
+
+  function eventLineHtml(ev) {
+    if (kind === "history") {
+      return `<div class="note-item">
+        <div class="meta">${esc(ev.actor)} · ${esc(ev.created_at || "")}</div>
+        <div>${esc(ev.new_status_label || "")}${ev.comment ? `: ${esc(ev.comment)}` : ""}</div>
+      </div>`;
+    }
+    return `<div class="note-item">
+      <div class="meta">${esc(ev.actor)} · ${esc(ev.created_at || "")}</div>
+      <div>${esc(ev.action || "")}${ev.detail ? ` — ${esc(ev.detail)}` : ""}</div>
+    </div>`;
+  }
+
+  async function loadMore() {
+    const res = await apiGet(`/report/${publicId}/${kind}`, { offset, page_size: pageSize });
+    events = events.concat(res.events || []);
+    offset += (res.events || []).length;
+    sheet.innerHTML = `
+      <h2>${title}</h2>
+      <div id="log-list">${events.map(eventLineHtml).join("") || `<div class="no-assignee">Пока пусто</div>`}</div>
+      ${res.has_more ? `<div class="sheet-actions"><button class="btn" id="log-more">Показать ещё</button></div>` : ""}
+      <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
+    `;
+    sheet.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => overlay.remove()));
+    const moreBtn = sheet.querySelector("#log-more");
+    if (moreBtn) moreBtn.addEventListener("click", () => { moreBtn.disabled = true; loadMore(); });
+  }
+
+  try {
+    await loadMore();
+  } catch (e) {
+    sheet.innerHTML = `<div style="color:var(--s-stop);">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+    sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  }
 }
