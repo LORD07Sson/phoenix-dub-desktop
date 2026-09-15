@@ -17,10 +17,19 @@ jobs:
   build:
     # Только Windows — раньше собирали под 3 ОС параллельно, но
     # одновременные джобы регулярно ловили гонку при создании релиза.
-    # Один джоб — гонки просто неоткуда взяться.
     permissions:
       contents: write
     runs-on: windows-latest
+    # Одна группа с build-alpha.yml: «один джоб — гонки неоткуда взяться»
+    # верно только внутри этого workflow. Push, меняющий VERSION, — это
+    # push в main, то есть build-alpha.yml стартует на него ТОЖЕ, и оба
+    # запуска одновременно делают `vpk upload github` в один репозиторий
+    # (а он читает и дописывает общий список релизов). Очередь вместо
+    # параллели; не отменяем уже идущую публикацию — оборваться на
+    # середине заливки хуже, чем подождать.
+    concurrency:
+      group: velopack-publish
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v7
@@ -42,17 +51,15 @@ jobs:
         shell: bash
         run: echo "PKG_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
 
-      # VERSION — единственный источник версии; tauri.conf.json/Cargo.toml/
-      # src/app/settings.js (APP_VERSION, показывается в диалоге
-      # "Настройки" — раньше жил в dist/app.js, файл раздроблен на модули,
-      # см. src/app/*.js) подставляются отсюда прямо перед сборкой, чтобы
-      # номер в самих именах файлов установщиков и в самом приложении
-      # никогда не расходился с тегом релиза (однажды уже разъехалось —
-      # v0.3.0 собрал файлы "...0.2.0...", а APP_VERSION вообще не
-      # патчился и годами показывал версию последней ручной правки).
-      # Патчим ИСХОДНИК (src/), не dist/ — dist/ теперь собирает Vite
-      # ниже, у собранного бандла уже нет файла с таким именем.
-      - name: Подставить версию в tauri.conf.json/Cargo.toml/settings.js
+      # VERSION — единственный источник версии. tauri.conf.json/Cargo.toml
+      # подставляются отсюда прямо перед сборкой, чтобы номер в именах
+      # файлов установщиков не расходился с тегом релиза (однажды уже
+      # разъехалось — v0.3.0 собрал файлы "...0.2.0...").
+      # Номер, который приложение показывает в «Настройках», больше здесь
+      # не патчится: его подставляет сам Vite (define __APP_VERSION__ в
+      # vite.config.js читает VERSION, а в CI — переменную PKG_VERSION
+      # ниже), поэтому и локальная сборка показывает правду.
+      - name: Подставить версию в tauri.conf.json/Cargo.toml
         shell: bash
         run: |
           set -e
@@ -65,19 +72,21 @@ jobs:
           "
           sed -i.bak -E 's/^version = \"[0-9.]+\"/version = \"${{ env.PKG_VERSION }}\"/' src-tauri/Cargo.toml
           rm -f src-tauri/Cargo.toml.bak
-          sed -i.bak -E 's/const APP_VERSION = \"[0-9.]+\"/const APP_VERSION = \"${{ env.PKG_VERSION }}\"/' src/app/settings.js
-          rm -f src/app/settings.js.bak
 
       # Фронтенд теперь собирается Vite (src/ -> dist/, см. историю
       # миграции vanilla JS -> Vite/Solid) — раньше dist/ был готовыми
       # файлами прямо в git, отдельного шага сборки не требовалось.
       # Обязательно ПОСЛЕ подстановки версии выше — иначе в собранный
       # бандл попадёт версия из settings.js как она лежит в git.
-      - name: npm ci && vite build
+      # PKG_VERSION виден Vite как process.env.PKG_VERSION — см.
+      # vite.config.js, define __APP_VERSION__.
+      - name: npm ci, lint && vite build
         shell: bash
         run: |
           npm ci
+          npm run lint
           npm run build
+          npm run verify
 
       # ffmpeg нужен для локального QC звука — раньше требовался в PATH
       # у пользователя, теперь кладём готовый статичный бинарник прямо

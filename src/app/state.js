@@ -25,3 +25,24 @@ export const state = {
   titleSeasonId: null,
   isDeveloper: null, // null = ещё не запрашивали /api/me
 };
+
+// Выход из аккаунта. Раньше logout чистил только token и selected —
+// loadedTabs оставался полным, а loadActiveTab() пропускает уже
+// «загруженную» вкладку, поэтому следующий вошедший на этой машине
+// видел в Списке/Доске/Ленте отчёты предыдущего, пока сам не нажмёт
+// «Обновить». Всё, что относится к конкретному человеку, сбрасываем
+// здесь одним местом (statusOptions/sort/activeTab — настройки самого
+// интерфейса, они переживают смену пользователя).
+export function resetSessionState() {
+  state.token = null;
+  state.telegramId = null;
+  state.name = null;
+  state.reports = [];
+  state.total = 0;
+  state.selected.clear();
+  state.users = [];
+  state.quickFilter = null;
+  state.loadedTabs.clear();
+  state.titleSeasonId = null;
+  state.isDeveloper = null;
+}

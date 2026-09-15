@@ -12,7 +12,7 @@
 - `API_BASE` в `src/app/api.js` — `https://minitg.shitstudent.com:8443/api`
 - Все запросы (кроме `/desktop/pair`) несут заголовок
   `X-Init-Data: dsk_<токен>` — desktop-токен, полученный при входе по коду
-  (см. [README](../README.md#-как-войти)). Сервер отличает его от
+  (см. [README](../README.md#вход)). Сервер отличает его от
   Telegram initData по префиксу `dsk_` (`_validate_desktop_token` в
   `miniapp/server.py`)
 - Токен хранится в нативном хранилище учётных данных ОС
@@ -23,7 +23,12 @@
 | Метод | Путь | Тело | Ответ |
 |---|---|---|---|
 | POST | `/desktop/pair` | `{code, label}` | `{token, telegram_id, name}` — код из `/desktop` в боте, одноразовый, 5 минут |
-| GET | `/whoami` | — | `{telegram_id, is_admin}` — используется при восстановлении сессии, чтобы проверить, что токен ещё не отозван |
+| GET | `/whoami` | — | `{telegram_id, is_admin}` — используется при восстановлении сессии, чтобы проверить, что токен ещё не отозван. Имени тут нет: для шапки клиент отдельно дёргает `/me` (см. `hydrateIdentity` в `src/app/auth.js`) |
+
+Любой ответ `401`/`403` на запрос с токеном клиент трактует как
+«сессию отозвали»: чистит токен из хранилища ОС и возвращает на экран
+входа (`session-expired` в `src/app/api.js`). Исключение — сам
+`/desktop/pair`, где `401` значит просто «неверный код».
 
 ## Обзор и профиль
 
@@ -66,7 +71,7 @@
 | POST | `/report/{public_id}/notes` | `{text}` | Добавить заметку |
 | GET | `/report/{public_id}/files` | — | Файлы отчёта (для карточки) |
 | POST | `/report/{public_id}/files/{file_id}/qc` | — | Серверная AI-проверка звука (Silero VAD — точнее локальной эвристики клиента) |
-| GET | `/report/{public_id}/files/{file_id}/download` | `init_data, view` | Скачать/просмотреть файл — `init_data` в query (не в заголовке, как у остальных): ссылка открывается напрямую, а не через `fetch()` |
+| GET | `/report/{public_id}/files/{file_id}/download` | — | Скачать файл. Запрос делает Rust (`download_report_file` в `main.rs`) с обычным заголовком `X-Init-Data`, путь сохранения выбирает нативный диалог. Раньше это была ссылка `<a target="_blank">` с `init_data` в query — она и не работала (webview не открывает новых окон), и уносила токен в URL |
 
 ## Dev-режим (только owner)
 

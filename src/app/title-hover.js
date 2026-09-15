@@ -7,9 +7,8 @@
 // атрибут, что используется для клика — voteCardHtml/voteBentoHtml в
 // titles.js), новый атрибут заводить не нужно.
 
-import { API_BASE, apiGet } from "./api.js";
+import { apiGet, mediaUrl } from "./api.js";
 import { esc } from "./utils.js";
-import { state } from "./state.js";
 
 const HOVER_DELAY_MS = 320;
 const HIDE_DELAY_MS = 120;
@@ -23,8 +22,7 @@ let hideTimer = null;
 let currentId = null;
 
 function imgProxy(url) {
-  if (!url) return "";
-  return `${API_BASE}/img_proxy?url=${encodeURIComponent(url)}&init_data=${encodeURIComponent(state.token)}`;
+  return url ? mediaUrl("/img_proxy", { url }) : "";
 }
 
 function ensurePopover() {
@@ -51,7 +49,7 @@ function renderPopover(anchor, d) {
   // массивом, если их ещё не заполнили — тот же нормализующий
   // прищур, что в titles.js:openTitleDetail.
   const det = d.details && !Array.isArray(d.details) ? d.details : null;
-  const poster = d.poster_url ? imgProxy(d.poster_url) : "";
+  const poster = imgProxy(d.poster_url);
   const epLine = det && det.episodes_total
     ? (det.episodes_aired != null ? `${det.episodes_aired} из ${det.episodes_total} эп.` : `${det.episodes_total} эп.`)
     : "";

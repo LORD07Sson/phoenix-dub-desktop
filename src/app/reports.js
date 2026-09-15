@@ -11,13 +11,24 @@ import { apiGet, apiPost, openSheet, toast } from "./api.js";
 import { $, $all, esc, initials, isOverdue, STATUS_DOT_CLASS, PRIORITY_LABELS } from "./utils.js";
 import { openReportDetail } from "./report-detail.js";
 
+// page_size=100 — сервер отдаёт максимум одну страницу, offset для
+// /reports в API не предусмотрен (см. docs/API.md), поэтому при
+// большем числе отчётов работает фильтр, а не листание; статусбар
+// теперь говорит об этом прямо, а не рисует «100 из 350» без объяснений.
+export const PAGE_SIZE = 100;
+
 export function currentFilters() {
   const params = {
+    // Сортировку по колонкам делает sortLocally() ниже — на сервер уходит
+    // только то значение, которое он точно понимает ("new", как в
+    // командной палитре). Раньше сюда улетало имя колонки
+    // ("title"/"deadline"/...), не описанное в контракте, а направление
+    // сортировки не уходило вообще.
     q: $("#search-input").value.trim(),
     status: $("#status-filter").value,
     priority: $("#priority-filter").value,
-    sort: state.sort.field === "public_id" ? "new" : state.sort.field,
-    page_size: 100,
+    sort: "new",
+    page_size: PAGE_SIZE,
   };
   if (state.quickFilter === "mine") params.assignee = "me";
   if (state.quickFilter === "overdue") params.overdue = 1;
@@ -37,6 +48,7 @@ export async function loadReports() {
     requestAnimationFrame(() => skeleton.classList.add("visible"));
   }, 100);
   table.classList.add("loading");
+  let ok = true;
   try {
     const r = await apiGet("/reports", currentFilters());
     state.reports = r.reports || [];
@@ -44,6 +56,7 @@ export async function loadReports() {
     sortLocally();
     renderReports();
   } catch (e) {
+    ok = false;
     toast(`Не удалось загрузить список: ${e.message}`, "error");
     statusbar.textContent = "Ошибка загрузки.";
   } finally {
@@ -52,6 +65,7 @@ export async function loadReports() {
     setTimeout(() => { skeleton.hidden = true; }, 180); // DevSkim: ignore DS172411 — функция, не строка
     table.classList.remove("loading");
   }
+  return ok;
 }
 
 export function sortLocally() {
@@ -117,15 +131,19 @@ export function renderReports() {
     });
     tr.querySelector("[data-quick-status]").addEventListener("click", e => {
       e.stopPropagation();
-      changeStatusDialog([r.public_id], () => loadReports());
+      changeStatusDialog([r.public_id], () => loadReports(), r.status);
     });
     tr.addEventListener("click", () => openReportDetail(r.public_id));
     tbody.appendChild(tr);
   });
 
+  const truncated = state.total > state.reports.length;
   $("#statusbar").textContent =
-    `Отчётов: ${state.reports.length} из ${state.total} · клик по строке — открыть карточку, ` +
-    `чекбоксы — массовые операции · Ctrl+Shift+P — показать/скрыть окно из любого места`;
+    (truncated
+      ? `Показаны первые ${state.reports.length} из ${state.total} — уточните фильтр или поиск, чтобы увидеть остальные · `
+      : `Отчётов: ${state.reports.length} · `) +
+    `клик по строке — открыть карточку, чекбоксы — массовые операции · ` +
+    `Ctrl+Shift+P — показать/скрыть окно из любого места`;
 
   $("#select-all").checked = state.reports.length > 0 && state.reports.every(r => state.selected.has(r.public_id));
   updateBulkBar();
@@ -178,16 +196,18 @@ $all(".qf-chip").forEach(chip => {
   });
 });
 
-// Ctrl+F — фокус на поиск; Escape — закрыть верхнюю модалку.
+// Ctrl+F — фокус на поиск по списку. Только когда вкладка «Список»
+// действительно открыта и поверх неё нет модалки: раньше сочетание
+// перехватывалось всегда и уводило фокус в поле под оверлеем — прямо
+// посреди набора заметки в карточке отчёта.
+// (Escape, закрывающий верхнюю модалку, живёт теперь в api.js — рядом
+// с openSheet, к вкладке «Список» он отношения не имел.)
 document.addEventListener("keydown", e => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
-    e.preventDefault();
-    $("#search-input").focus();
-    $("#search-input").select();
-  } else if (e.key === "Escape") {
-    const overlays = $all(".overlay");
-    if (overlays.length) overlays[overlays.length - 1].remove();
-  }
+  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "f") return;
+  if (state.activeTab !== "list" || document.querySelector(".overlay")) return;
+  e.preventDefault();
+  $("#search-input").focus();
+  $("#search-input").select();
 });
 
 $all("thead th[data-sort]").forEach(th => {
@@ -208,8 +228,13 @@ $all("thead th[data-sort]").forEach(th => {
 
 // ---------- смена статуса / назначение / приоритет / срок ----------
 
+// selected === undefined (массовая операция — у отчётов статусы разные)
+// показывает пустой пункт-заглушку вместо молчаливого выбора первого в
+// списке: раньше диалог всегда открывался на «Черновик», и случайное
+// «Применить» откатывало завершённый отчёт в черновик.
 function statusOptionsHtml(selected) {
-  return state.statusOptions.map(([v, label]) =>
+  const placeholder = selected === undefined ? `<option value="" selected>— выберите статус —</option>` : "";
+  return placeholder + state.statusOptions.map(([v, label]) =>
     `<option value="${v}" ${v === selected ? "selected" : ""}>${esc(label)}</option>`).join("");
 }
 
@@ -218,10 +243,10 @@ function usersOptionsHtml() {
   return state.users.map(u => `<option value="${u.telegram_id}">${esc(u.name)}</option>`).join("");
 }
 
-export function changeStatusDialog(publicIds, onDone) {
+export function changeStatusDialog(publicIds, onDone, currentStatus) {
   const overlay = openSheet(`
     <h2>Сменить статус — ${publicIds.length > 1 ? publicIds.length + " отчётов" : publicIds[0]}</h2>
-    <div class="row"><select id="dlg-status">${statusOptionsHtml()}</select></div>
+    <div class="row"><select id="dlg-status">${statusOptionsHtml(publicIds.length === 1 ? currentStatus : undefined)}</select></div>
     <div class="sheet-actions">
       <button class="btn ghost" data-close>Отмена</button>
       <button class="btn primary" id="dlg-apply">Применить</button>
@@ -230,6 +255,7 @@ export function changeStatusDialog(publicIds, onDone) {
   overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
   overlay.querySelector("#dlg-apply").addEventListener("click", async () => {
     const status = overlay.querySelector("#dlg-status").value;
+    if (!status) { toast("Выберите статус.", "error"); return; }
     try {
       if (publicIds.length === 1) {
         await apiPost(`/report/${publicIds[0]}/status`, { status, comment: "" });
@@ -277,10 +303,10 @@ export function assignDialog(publicIds, onDone) {
   });
 }
 
-export function priorityDialog(publicId, onDone) {
+export function priorityDialog(publicId, onDone, current) {
   const overlay = openSheet(`
     <h2>Приоритет — ${publicId}</h2>
-    <div class="row"><select id="dlg-priority">${Object.entries(PRIORITY_LABELS).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("")}</select></div>
+    <div class="row"><select id="dlg-priority">${Object.entries(PRIORITY_LABELS).map(([v, l]) => `<option value="${v}" ${v === current ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
     <div class="sheet-actions">
       <button class="btn ghost" data-close>Отмена</button>
       <button class="btn primary" id="dlg-apply">Применить</button>

@@ -69,6 +69,24 @@ body {
   color: var(--ink);
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overflow: hidden;
+  /* Интерфейсный хром (кнопки, вкладки, заголовки колонок) выделять
+     мышью незачем — иначе драг карточки на доске начинает таскать
+     выделение текста. Но сами данные выделять надо: номер отчёта,
+     текст заметки, сообщение об ошибке — их переносят в переписку
+     руками. Раньше user-select: none стоял на body без единого
+     исключения, и скопировать нельзя было вообще ничего. */
+  user-select: none;
+}
+
+/* Содержательный текст — выделяется и копируется как обычно. */
+.content, .sheet, .statusbar, .feed-list, .note-item, .detail-section,
+.profile-bio, .status-quote, .bento, .mini-list, .td-body, .toast-text,
+#auth-error, .auth-card p, code {
+  user-select: text;
+}
+/* ...кроме кнопок и полей выбора внутри них — там выделение только мешает. */
+.sheet .btn, .sheet .icon-btn, .sheet .chip, .content .btn, .content .icon-btn,
+.bento .btn, .mini-list .btn {
   user-select: none;
 }
 
@@ -1137,7 +1155,7 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 .vote-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 4px; }
 .vote-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; transition: opacity .15s ease, border-color .15s ease; animation: row-in .22s ease both; }
 .vote-card:hover { border-color: var(--fire); }
-.vote-card.vote-pending { opacity: .55; pointer-events: none; }
+.vote-card.vote-pending, .vote-actions.vote-pending, .td-vote-cta.vote-pending { opacity: .55; pointer-events: none; }
 .vote-card-tap { display: contents; cursor: pointer; }
 .vote-poster { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; background: var(--surface-2); }
 .vote-poster-ph { display: flex; align-items: center; justify-content: center; font-size: 28px; color: var(--ink-dim); aspect-ratio: 2/3; background: var(--surface-2); }

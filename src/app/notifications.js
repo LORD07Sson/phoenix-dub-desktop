@@ -8,6 +8,13 @@ import { apiGet } from "./api.js";
 let knownAssigned = null; // Set — null значит «ещё не было первого опроса»
 const POLL_INTERVAL_MS = 60_000;
 
+// Вызывается при выходе из аккаунта: иначе первый же опрос после входа
+// другим человеком считает ВЕСЬ его список новым (id-то другие) и
+// вываливает системное уведомление «Вам назначено N новых отчётов».
+export function resetAssignmentsBaseline() {
+  knownAssigned = null;
+}
+
 async function pollAssignments() {
   if (!state.token) return;
   try {

@@ -17,7 +17,15 @@ updates:
     open-pull-requests-limit: 5
     labels: ["dependencies", "python", "legacy"]
 
-  # Сам workflow (actions/checkout, tauri-action и т.д.)
+  # Фронтенд десктоп-клиента (package.json — Vite, SolidJS, @tauri-apps/*)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "javascript"]
+
+  # Сам workflow (actions/checkout, actions/setup-node и т.д.)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

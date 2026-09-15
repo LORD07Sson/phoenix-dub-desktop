@@ -44,8 +44,13 @@ function feedItemHtml(ev) {
     </div>`;
 }
 
+// :not([data-wired]) — «Показать ещё» дописывает события в тот же
+// список и снова зовёт wireFeedList на весь контейнер: без фильтра
+// старым элементам доставался второй обработчик, и клик по ним
+// открывал две шторки отчёта одна поверх другой.
 function wireFeedList(root) {
-  root.querySelectorAll(".feed-body[data-open]").forEach(el => {
+  root.querySelectorAll(".feed-body[data-open]:not([data-wired])").forEach(el => {
+    el.dataset.wired = "1";
     el.addEventListener("click", () => openReportDetail(el.dataset.open));
   });
 }
@@ -60,8 +65,9 @@ export async function loadFeed() {
     d = await apiGet("/feed", { offset: 0, page_size: FEED_PAGE_SIZE });
   } catch (e) {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить ленту: ${esc(e.message)}</div>`;
-    return;
+    return false;
   }
+  d.events = d.events || [];
   markFeedSeen(d.events[0]?.created_at);
   if (!d.events.length) {
     root.innerHTML = `<div class="empty-state"><div style="font-size:34px; margin-bottom:8px;">🕓</div>Пока тихо<div class="sub" style="margin-top:4px;">как только кто-то что-то сделает с отчётом — появится здесь</div></div>`;
@@ -80,12 +86,13 @@ export async function loadFeed() {
     loadMoreBtn.textContent = "Загрузка…";
     try {
       const res = await apiGet("/feed", { offset, page_size: FEED_PAGE_SIZE });
-      list.insertAdjacentHTML("beforeend", res.events.map(feedItemHtml).join(""));
-      list.dataset.count = offset + res.events.length;
+      const fresh = res.events || [];
+      list.insertAdjacentHTML("beforeend", fresh.map(feedItemHtml).join(""));
+      list.dataset.count = offset + fresh.length;
       wireFeedList(root);
       if (res.has_more) {
         loadMoreBtn.disabled = false;
-        loadMoreBtn.textContent = `Показать ещё (${res.total - offset - res.events.length})`;
+        loadMoreBtn.textContent = `Показать ещё (${res.total - offset - fresh.length})`;
       } else {
         loadMoreBtn.remove();
       }
