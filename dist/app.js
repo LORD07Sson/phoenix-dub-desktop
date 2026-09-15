@@ -828,7 +828,7 @@ $("#open-settings").addEventListener("click", openSettings);
 
 // ---------- автообновление ----------
 
-const APP_VERSION = "0.4.2"; // держим в паре с VERSION/tauri.conf.json — только для показа в настройках
+const APP_VERSION = "0.5.0"; // подставляется автоматически из VERSION при сборке в CI (build.yml)
 
 async function checkForUpdates(silent) {
   try {
