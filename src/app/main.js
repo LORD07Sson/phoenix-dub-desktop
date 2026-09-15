@@ -1,8 +1,8 @@
-// PHOENIX DUB Desktop — точка входа. Обычный vanilla JS с ES-модулями,
-// без сборщика (никакого webpack/vite/esbuild в проекте нет и не будет —
-// ходит напрямую в тот же REST API, что и мини-апп, через fetch()).
+// PHOENIX DUB Desktop — точка входа. В основном vanilla JS с ES-модулями
+// (Overview.jsx — первый компонент на SolidJS, см. историю миграции на
+// Vite) — ходит напрямую в тот же REST API, что и мини-апп, через fetch().
 //
-// Раздроблено на dist/app/*.js по темам (было — один файл на ~2000 строк,
+// Раздроблено на src/app/*.js по темам (было — один файл на ~2000 строк,
 // см. историю git) — каждый модуль явно импортирует то, что ему нужно,
 // вместо общей области видимости одного <script>. Порядок import'ов ниже
 // не имеет значения для графа зависимостей (ES-модули резолвятся сами),
@@ -23,6 +23,8 @@ import "./presence.js";
 import "./command-palette.js";
 import "./file-drop.js";
 import "./avatar-hover.js";
+import "./feed-badge.js";
+import "./title-hover.js";
 
 tryRestoreSession();
 setTimeout(() => appWindow.show(), 0); // DevSkim: ignore DS172411 — функция, не строка

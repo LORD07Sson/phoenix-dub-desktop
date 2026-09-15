@@ -5,6 +5,7 @@
 import { apiGet, toast, dialogSkeletonHtml } from "./api.js";
 import { $, esc, relTime } from "./utils.js";
 import { openReportDetail } from "./report-detail.js";
+import { markFeedSeen } from "./feed-badge.js";
 
 function feedMeta(ev) {
   if (ev.kind === "admin") return { ic: "🛡️", c: "var(--sakura)" };
@@ -61,6 +62,7 @@ export async function loadFeed() {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить ленту: ${esc(e.message)}</div>`;
     return;
   }
+  markFeedSeen(d.events[0]?.created_at);
   if (!d.events.length) {
     root.innerHTML = `<div class="empty-state"><div style="font-size:34px; margin-bottom:8px;">🕓</div>Пока тихо<div class="sub" style="margin-top:4px;">как только кто-то что-то сделает с отчётом — появится здесь</div></div>`;
     return;
