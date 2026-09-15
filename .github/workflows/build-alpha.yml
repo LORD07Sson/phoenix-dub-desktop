@@ -129,5 +129,6 @@ jobs:
             --token "${{ secrets.GITHUB_TOKEN }}" \
             --channel alpha \
             --publish \
+            --pre \
             --tag alpha-latest \
             --releaseName "PHOENIX DUB alpha (${{ env.SHORT_SHA }})"
