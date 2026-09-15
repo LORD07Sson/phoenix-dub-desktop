@@ -31,6 +31,11 @@ async function openSettings() {
   try { autostartOn = await invoke("is_autostart"); } catch (_) {}
   let updateChannel = "stable";
   try { updateChannel = await invoke("get_update_channel"); } catch (_) {}
+  // Требования студии к дорожке — те самые пороги, по которым QC выносит
+  // «принято / на доработку» (см. audio_qc.rs). Раньше это были
+  // константы в коде, одни на всех и невидимые из приложения.
+  let qc = null;
+  try { qc = await invoke("get_qc_standard"); } catch (_) {}
 
   // Переключатель dev-режима виден только реальным разработчикам студии
   // (state.isDeveloper — из /api/me, is_developer сервер сам проверяет
@@ -79,6 +84,25 @@ async function openSettings() {
         <code id="s-commit-latest">—</code>
       </div>
     </div>
+    ${qc ? `
+    <div class="qc-standard">
+      <div class="row" style="align-items:center; justify-content:space-between;">
+        <span>🎚 Стандарт приёмки звука</span>
+        <span style="color:var(--ink-dim); font-size:11.5px;">по нему QC выносит вердикт</span>
+      </div>
+      <div class="qc-standard-grid">
+        <label>Пик не выше, дБФС<input type="number" id="qc-peak" step="0.1" min="-60" max="0" value="${qc.peak_max_dbfs}"></label>
+        <label>Громкость не ниже, дБФС<input type="number" id="qc-rms-min" step="1" min="-60" max="0" value="${qc.rms_min_dbfs}"></label>
+        <label>Громкость не выше, дБФС<input type="number" id="qc-rms-max" step="1" min="-60" max="0" value="${qc.rms_max_dbfs}" title="0 — верхней границы нет"></label>
+        <label>Пауза считается длинной от, с<input type="number" id="qc-pause-len" step="0.1" min="0.1" max="30" value="${qc.min_silence_seconds}"></label>
+        <label>Длинных пауз допускается<input type="number" id="qc-pause-max" step="1" min="0" max="99" value="${qc.max_long_pauses}"></label>
+        <label class="qc-standard-check"><input type="checkbox" id="qc-allow-clip" ${qc.allow_clipping ? "checked" : ""}>Клиппинг допускается</label>
+      </div>
+      <div class="qc-standard-foot">
+        <span id="qc-standard-msg"></span>
+        <button class="btn" id="qc-standard-save">Сохранить стандарт</button>
+      </div>
+    </div>` : ""}
     <div class="row" style="align-items:center; justify-content:space-between;">
       <span>Доступ участников и состояние системы</span>
       <button class="btn" id="s-open-admin" style="padding:5px 12px; font-size:12.5px;">🔐 Админ-панель</button>
@@ -148,6 +172,36 @@ async function openSettings() {
       await refreshAlphaBlock(channel);
     } catch (err) {
       toast(`Не удалось сменить канал: ${err}`, "error");
+    }
+  });
+  const qcSaveBtn = overlay.querySelector("#qc-standard-save");
+  if (qcSaveBtn) qcSaveBtn.addEventListener("click", async () => {
+    const msg = overlay.querySelector("#qc-standard-msg");
+    const standard = {
+      peak_max_dbfs: Number(overlay.querySelector("#qc-peak").value),
+      rms_min_dbfs: Number(overlay.querySelector("#qc-rms-min").value),
+      rms_max_dbfs: Number(overlay.querySelector("#qc-rms-max").value),
+      min_silence_seconds: Number(overlay.querySelector("#qc-pause-len").value),
+      max_long_pauses: Math.max(0, Math.round(Number(overlay.querySelector("#qc-pause-max").value))),
+      allow_clipping: overlay.querySelector("#qc-allow-clip").checked,
+    };
+    if (Object.values(standard).some(v => typeof v === "number" && !Number.isFinite(v))) {
+      msg.textContent = "Все поля должны быть числами.";
+      msg.style.color = "var(--s-stop)";
+      return;
+    }
+    qcSaveBtn.disabled = true;
+    try {
+      // Проверку диапазонов делает Rust (set_qc_standard) — он же
+      // единственный, кто этими числами пользуется.
+      await invoke("set_qc_standard", { standard });
+      msg.textContent = "Сохранено — применится со следующего прогона QC.";
+      msg.style.color = "var(--s-done)";
+    } catch (e) {
+      msg.textContent = String(e);
+      msg.style.color = "var(--s-stop)";
+    } finally {
+      qcSaveBtn.disabled = false;
     }
   });
   overlay.querySelector("#s-open-admin").addEventListener("click", openAdminPanel);

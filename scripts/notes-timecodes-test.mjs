@@ -56,7 +56,11 @@ setGlobal("fetch", async (url, opts) => {
 });
 
 const QC_REPORT = {
-  duration: 700, peak_dbfs: -0.1, rms_dbfs: -14.2,
+  duration: 700, peak_dbfs: -0.1, rms_dbfs: -14.2, passed: false,
+  checks: [
+    { key: "peak", label: "Пиковый уровень", requirement: "≤ -1.0 дБФС", actual: "-0.1", ok: false },
+    { key: "clipping", label: "Клиппинг", requirement: "нет", actual: "1 уч.", ok: false },
+  ],
   findings: [
     { kind: "clipping", start: 252, end: 253, severity: "error", message: "Клиппинг — сигнал упирается в потолок шкалы." },
     { kind: "silence", start: 708, end: 711, severity: "warn", message: "Пауза без звука 3.0 с." },
@@ -134,6 +138,9 @@ sheet4.querySelector("#note-time").value = "";
 sheet4.querySelector("#note-new").value = "";
 click(sheet4.querySelector("#btn-qc-track"));
 await wait(400);
+const verdict = document.querySelector(".overlay .qc-verdict");
+check("QC из карточки показывает вердикт", verdict && verdict.classList.contains("bad") && /На доработку/.test(verdict.textContent),
+  verdict ? verdict.textContent.trim() : "нет блока вердикта");
 const qcBtn = Array.from(document.querySelectorAll(".overlay .btn")).find(b => /В заметки отчёта/.test(b.textContent));
 check("после QC из карточки есть кнопка «в заметки»", !!qcBtn, "");
 if (qcBtn) {

@@ -35,6 +35,7 @@ const UPDATE_REPO_URL: &str = "https://github.com/LORD07Sson/phoenix-dub-desktop
 const SETTINGS_STORE: &str = "settings.json";
 const UPDATE_CHANNEL_KEY: &str = "update_channel";
 const ALPHA_CHANNEL: &str = "alpha";
+const QC_STANDARD_KEY: &str = "qc_standard";
 
 #[tauri::command]
 fn get_update_channel(app: tauri::AppHandle) -> Result<String, String> {
@@ -139,11 +140,49 @@ fn download_and_apply_update(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// Требования студии к дорожке. Лежат в том же settings.json, что и канал
+// обновлений; читаются на каждый прогон QC, чтобы правка в Настройках
+// применялась сразу, без перезапуска.
+fn read_qc_standard(app: &tauri::AppHandle) -> audio_qc::QcStandard {
+    app.store(SETTINGS_STORE)
+        .ok()
+        .and_then(|store| store.get(QC_STANDARD_KEY))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn get_qc_standard(app: tauri::AppHandle) -> audio_qc::QcStandard {
+    read_qc_standard(&app)
+}
+
+#[tauri::command]
+fn set_qc_standard(app: tauri::AppHandle, standard: audio_qc::QcStandard) -> Result<(), String> {
+    // Без проверки можно сохранить стандарт, которому не удовлетворяет
+    // ни одна дорожка в мире, и потом долго искать, почему всё «на
+    // доработку».
+    if !(-60.0..=0.0).contains(&standard.peak_max_dbfs) {
+        return Err("Пиковый уровень должен быть от -60 до 0 дБФС.".into());
+    }
+    if !(-60.0..=0.0).contains(&standard.rms_min_dbfs) || !(-60.0..=0.0).contains(&standard.rms_max_dbfs) {
+        return Err("Громкость должна быть от -60 до 0 дБФС.".into());
+    }
+    if standard.rms_max_dbfs < 0.0 && standard.rms_max_dbfs <= standard.rms_min_dbfs {
+        return Err("Верхняя граница громкости должна быть выше нижней.".into());
+    }
+    if !(0.1..=30.0).contains(&standard.min_silence_seconds) {
+        return Err("Длина паузы должна быть от 0.1 до 30 секунд.".into());
+    }
+    let store = app.store(SETTINGS_STORE).map_err(|e| e.to_string())?;
+    store.set(QC_STANDARD_KEY, serde_json::to_value(standard).map_err(|e| e.to_string())?);
+    store.save().map_err(|e| e.to_string())
+}
+
 // ffmpeg на большом файле работает секундами — в главном потоке это
 // замороженное окно на всё время анализа.
 #[tauri::command(async)]
-fn qc_analyze(path: String) -> Result<audio_qc::QcReport, String> {
-    audio_qc::analyze(&path)
+fn qc_analyze(app: tauri::AppHandle, path: String) -> Result<audio_qc::QcReport, String> {
+    audio_qc::analyze(&path, read_qc_standard(&app))
 }
 
 // Обращение к хранилищу учётных данных ОС тоже блокирующее (на Linux —
@@ -412,6 +451,8 @@ fn main() {
             download_report_file,
             get_update_channel,
             set_update_channel,
+            get_qc_standard,
+            set_qc_standard,
         ])
         .setup(|app| {
             // Глобальная горячая клавиша — свернуть/показать окно из любого

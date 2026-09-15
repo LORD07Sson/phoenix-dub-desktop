@@ -12,7 +12,7 @@
 //! шаг `vpk pack` в CI: он копирует и сам бинарник, и ffmpeg.exe в одну
 //! директорию pack_dir/ (см. build.yml).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
@@ -50,6 +50,56 @@ pub struct QcReport {
     pub findings: Vec<QcFinding>,
     pub peak_dbfs: f64,
     pub rms_dbfs: f64,
+    /// Сверка с требованиями студии — «норма / факт / сошлось».
+    pub checks: Vec<QcCheck>,
+    /// true, если сошлось всё. Ради этого одного поля всё и затевалось:
+    /// человеку у микрофона нужен ответ «принято / на доработку», а не
+    /// четыре числа, которые надо уметь читать.
+    pub passed: bool,
+}
+
+#[derive(Serialize, Clone)]
+pub struct QcCheck {
+    pub key: String,
+    pub label: String,
+    pub requirement: String,
+    pub actual: String,
+    pub ok: bool,
+}
+
+/// Требования студии к дорожке. Раньше эти числа были константами в этом
+/// файле — одни на всех и не видимые из приложения. Теперь они лежат в
+/// settings.json (tauri-plugin-store, тот же, где канал обновлений) и
+/// правятся в Настройках; значения по умолчанию ровно те, что были
+/// зашиты, чтобы у существующих прогонов ничего не поехало.
+#[derive(Deserialize, Serialize, Clone, Copy, Debug)]
+#[serde(default)]
+pub struct QcStandard {
+    /// Пик не выше этого уровня, дБФС.
+    pub peak_max_dbfs: f64,
+    /// Средняя громкость не ниже, дБФС.
+    pub rms_min_dbfs: f64,
+    /// ...и не выше. 0.0 — верхней границы фактически нет.
+    pub rms_max_dbfs: f64,
+    /// Допускается ли клиппинг вообще.
+    pub allow_clipping: bool,
+    /// Сколько длинных пауз считается нормой.
+    pub max_long_pauses: u32,
+    /// От какой длины пауза считается длинной, секунды.
+    pub min_silence_seconds: f64,
+}
+
+impl Default for QcStandard {
+    fn default() -> Self {
+        Self {
+            peak_max_dbfs: -0.3,
+            rms_min_dbfs: -38.0,
+            rms_max_dbfs: 0.0,
+            allow_clipping: false,
+            max_long_pauses: 0,
+            min_silence_seconds: MIN_SILENCE_SECONDS,
+        }
+    }
 }
 
 const SAMPLE_RATE: u32 = 16_000;
@@ -58,9 +108,9 @@ const SILENCE_RMS_THRESHOLD: f64 = 0.006; // линейная амплитуда
 const MIN_SILENCE_SECONDS: f64 = 1.2;
 const WINDOW_SECONDS: f64 = 0.05;
 
-pub fn analyze(path: &str) -> Result<QcReport, String> {
+pub fn analyze(path: &str, standard: QcStandard) -> Result<QcReport, String> {
     let samples = decode_pcm(path)?;
-    analyze_samples(&samples)
+    analyze_samples(&samples, standard)
 }
 
 /// Путь к ffmpeg рядом с исполняемым файлом приложения, если он там
@@ -109,7 +159,7 @@ fn resolve_ffmpeg_uncached() -> String {
 /// Собственно анализ — вынесена из `analyze` отдельно от decode_pcm, чтобы
 /// её можно было юнит-тестировать на синтетических сэмплах без реального
 /// аудиофайла и без запуска ffmpeg (см. тесты внизу файла).
-fn analyze_samples(samples: &[i16]) -> Result<QcReport, String> {
+fn analyze_samples(samples: &[i16], standard: QcStandard) -> Result<QcReport, String> {
     if samples.is_empty() {
         return Err("Не удалось прочитать аудио — файл пуст или повреждён.".into());
     }
@@ -132,6 +182,7 @@ fn analyze_samples(samples: &[i16]) -> Result<QcReport, String> {
     let rms_dbfs = amplitude_to_dbfs(rms / 32768.0);
 
     // Клиппинг — ищем подряд идущие сэмплы на пределе шкалы.
+    let mut clipping_runs = 0usize;
     let mut clip_run_start: Option<usize> = None;
     for (i, &s) in samples.iter().enumerate() {
         let clipped = (s as i32).abs() >= CLIP_THRESHOLD;
@@ -140,6 +191,7 @@ fn analyze_samples(samples: &[i16]) -> Result<QcReport, String> {
             (false, Some(start)) => {
                 let run_len = i - start;
                 if run_len >= 3 {
+                    clipping_runs += 1;
                     findings.push(QcFinding {
                         kind: "clipping".into(),
                         start: start as f64 / SAMPLE_RATE as f64,
@@ -154,6 +206,7 @@ fn analyze_samples(samples: &[i16]) -> Result<QcReport, String> {
         }
     }
     if let Some(start) = clip_run_start {
+        clipping_runs += 1;
         findings.push(QcFinding {
             kind: "clipping".into(),
             start: start as f64 / SAMPLE_RATE as f64,
@@ -175,7 +228,7 @@ fn analyze_samples(samples: &[i16]) -> Result<QcReport, String> {
             (true, None) => silence_start = Some(i),
             (false, Some(start)) => {
                 let dur = (i - start) as f64 / SAMPLE_RATE as f64;
-                if dur >= MIN_SILENCE_SECONDS {
+                if dur >= standard.min_silence_seconds {
                     findings.push(QcFinding {
                         kind: "silence".into(),
                         start: start as f64 / SAMPLE_RATE as f64,
@@ -192,7 +245,7 @@ fn analyze_samples(samples: &[i16]) -> Result<QcReport, String> {
     }
     if let Some(start) = silence_start {
         let dur = (samples.len() - start) as f64 / SAMPLE_RATE as f64;
-        if dur >= MIN_SILENCE_SECONDS {
+        if dur >= standard.min_silence_seconds {
             findings.push(QcFinding {
                 kind: "silence".into(),
                 start: start as f64 / SAMPLE_RATE as f64,
@@ -203,7 +256,7 @@ fn analyze_samples(samples: &[i16]) -> Result<QcReport, String> {
         }
     }
 
-    if rms_dbfs < -38.0 {
+    if rms_dbfs < standard.rms_min_dbfs {
         findings.insert(
             0,
             QcFinding {
@@ -214,7 +267,7 @@ fn analyze_samples(samples: &[i16]) -> Result<QcReport, String> {
                 message: format!("Общая громкость низкая ({:.1} дБФС) — возможно, дорожку стоит поднять.", rms_dbfs),
             },
         );
-    } else if peak_dbfs > -0.3 {
+    } else if peak_dbfs > standard.peak_max_dbfs {
         findings.insert(
             0,
             QcFinding {
@@ -229,12 +282,71 @@ fn analyze_samples(samples: &[i16]) -> Result<QcReport, String> {
 
     findings.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap());
 
+    let long_pauses = findings.iter().filter(|f| f.kind == "silence").count() as u32;
+    let checks = build_checks(&standard, peak_dbfs, rms_dbfs, clipping_runs as u32, long_pauses);
+    let passed = checks.iter().all(|c| c.ok);
+
     Ok(QcReport {
         duration,
         findings,
         peak_dbfs,
         rms_dbfs,
+        checks,
+        passed,
     })
+}
+
+/// Табличка «требование — норма — факт». Тексты собираются здесь, а не
+/// на фронте: числа и пороги уже тут, а разъезжаться двум форматированиям
+/// одного и того же незачем.
+fn build_checks(
+    standard: &QcStandard,
+    peak_dbfs: f64,
+    rms_dbfs: f64,
+    clipping_runs: u32,
+    long_pauses: u32,
+) -> Vec<QcCheck> {
+    let mut checks = vec![QcCheck {
+        key: "peak".into(),
+        label: "Пиковый уровень".into(),
+        requirement: format!("≤ {:.1} дБФС", standard.peak_max_dbfs),
+        actual: format!("{:.1}", peak_dbfs),
+        ok: peak_dbfs <= standard.peak_max_dbfs,
+    }];
+
+    // Верхняя граница громкости не у всех студий вообще есть: 0.0
+    // означает «сверху не ограничиваем», и тогда в требовании нет смысла
+    // писать диапазон.
+    let has_upper = standard.rms_max_dbfs < 0.0;
+    checks.push(QcCheck {
+        key: "rms".into(),
+        label: "Средняя громкость".into(),
+        requirement: if has_upper {
+            format!("{:.0}…{:.0} дБФС", standard.rms_min_dbfs, standard.rms_max_dbfs)
+        } else {
+            format!("≥ {:.0} дБФС", standard.rms_min_dbfs)
+        },
+        actual: format!("{:.1}", rms_dbfs),
+        ok: rms_dbfs >= standard.rms_min_dbfs && (!has_upper || rms_dbfs <= standard.rms_max_dbfs),
+    });
+
+    checks.push(QcCheck {
+        key: "clipping".into(),
+        label: "Клиппинг".into(),
+        requirement: if standard.allow_clipping { "допускается".into() } else { "нет".into() },
+        actual: if clipping_runs == 0 { "нет".into() } else { format!("{clipping_runs} уч.") },
+        ok: standard.allow_clipping || clipping_runs == 0,
+    });
+
+    checks.push(QcCheck {
+        key: "pauses".into(),
+        label: format!("Паузы длиннее {:.1} с", standard.min_silence_seconds),
+        requirement: if standard.max_long_pauses == 0 { "нет".into() } else { format!("до {}", standard.max_long_pauses) },
+        actual: long_pauses.to_string(),
+        ok: long_pauses <= standard.max_long_pauses,
+    });
+
+    checks
 }
 
 fn rms_amplitude(samples: &[i16]) -> f64 {
@@ -306,7 +418,7 @@ mod tests {
 
     #[test]
     fn empty_input_is_an_error() {
-        assert!(analyze_samples(&[]).is_err());
+        assert!(analyze_samples(&[], QcStandard::default()).is_err());
     }
 
     #[test]
@@ -314,7 +426,7 @@ mod tests {
         // Умеренная громкость, без клиппинга и без длинных пауз —
         // чистая дорожка не должна порождать ни одной находки.
         let samples = tone(3.0, 8000);
-        let report = analyze_samples(&samples).unwrap();
+        let report = analyze_samples(&samples, QcStandard::default()).unwrap();
         assert!(
             report.findings.is_empty(),
             "ожидали пустой список находок, получили: {:?}",
@@ -331,7 +443,7 @@ mod tests {
         for s in samples.iter_mut().skip(1000).take(50) {
             *s = 32767;
         }
-        let report = analyze_samples(&samples).unwrap();
+        let report = analyze_samples(&samples, QcStandard::default()).unwrap();
         assert!(
             report.findings.iter().any(|f| f.kind == "clipping"),
             "клиппинг на 50 сэмплах подряд должен быть найден"
@@ -344,7 +456,7 @@ mod tests {
         let mut samples = tone(0.5, 8000);
         samples[1000] = 32767;
         samples[1001] = 32767;
-        let report = analyze_samples(&samples).unwrap();
+        let report = analyze_samples(&samples, QcStandard::default()).unwrap();
         assert!(!report.findings.iter().any(|f| f.kind == "clipping"));
     }
 
@@ -355,7 +467,7 @@ mod tests {
         let mut samples = tone(0.5, 8000);
         samples.extend(silence(2.0));
         samples.extend(tone(0.5, 8000));
-        let report = analyze_samples(&samples).unwrap();
+        let report = analyze_samples(&samples, QcStandard::default()).unwrap();
         let sil = report.findings.iter().find(|f| f.kind == "silence");
         assert!(sil.is_some(), "пауза 2с должна быть найдена");
         let sil = sil.unwrap();
@@ -369,7 +481,7 @@ mod tests {
         let mut samples = tone(0.5, 8000);
         samples.extend(silence(0.5));
         samples.extend(tone(0.5, 8000));
-        let report = analyze_samples(&samples).unwrap();
+        let report = analyze_samples(&samples, QcStandard::default()).unwrap();
         assert!(!report.findings.iter().any(|f| f.kind == "silence"));
     }
 
@@ -378,7 +490,7 @@ mod tests {
         // Вся дорожка тихая (не путать с точечной паузой) — попадает под
         // summary-находку "quiet" по итоговому RMS, а не под "silence".
         let samples = silence(2.0);
-        let report = analyze_samples(&samples).unwrap();
+        let report = analyze_samples(&samples, QcStandard::default()).unwrap();
         assert!(report.findings.iter().any(|f| f.kind == "quiet"));
         assert!(report.rms_dbfs < -38.0);
     }
@@ -388,8 +500,91 @@ mod tests {
         // Громко, но не настолько долго на пределе, чтобы засчитаться
         // клиппингом — предупреждение "loud" по пиковому уровню.
         let samples = tone(1.0, 32000);
-        let report = analyze_samples(&samples).unwrap();
+        let report = analyze_samples(&samples, QcStandard::default()).unwrap();
         assert!(report.findings.iter().any(|f| f.kind == "loud" || f.kind == "clipping"));
+    }
+
+    fn check<'a>(report: &'a QcReport, key: &str) -> &'a QcCheck {
+        report.checks.iter().find(|c| c.key == key).expect("нет такой проверки")
+    }
+
+    #[test]
+    fn clean_track_passes_by_default() {
+        let report = analyze_samples(&tone(3.0, 8000), QcStandard::default()).unwrap();
+        assert!(report.passed, "чистая дорожка должна проходить приёмку");
+        assert!(report.checks.iter().all(|c| c.ok));
+    }
+
+    #[test]
+    fn stricter_peak_fails_a_track_that_default_accepts() {
+        // -6 дБФС при амплитуде 8000 (~-12 дБФС) проходит, -18 — уже нет.
+        let samples = tone(1.0, 8000);
+        let lenient = QcStandard { peak_max_dbfs: -6.0, ..Default::default() };
+        let strict = QcStandard { peak_max_dbfs: -18.0, ..Default::default() };
+        assert!(analyze_samples(&samples, lenient).unwrap().passed);
+        let report = analyze_samples(&samples, strict).unwrap();
+        assert!(!report.passed);
+        assert!(!check(&report, "peak").ok, "провалиться должен именно пик");
+        assert!(check(&report, "rms").ok, "громкость тут ни при чём");
+    }
+
+    #[test]
+    fn upper_loudness_bound_is_optional() {
+        let samples = tone(1.0, 8000); // ~-12.2 дБФС RMS
+        let no_upper = analyze_samples(&samples, QcStandard::default()).unwrap();
+        assert!(check(&no_upper, "rms").requirement.starts_with("≥"), "без верхней границы диапазон не пишем");
+        assert!(check(&no_upper, "rms").ok);
+
+        let with_upper = QcStandard { rms_min_dbfs: -30.0, rms_max_dbfs: -20.0, ..Default::default() };
+        let report = analyze_samples(&samples, with_upper).unwrap();
+        assert!(!check(&report, "rms").ok, "-12 дБФС громче верхней границы -20");
+        assert!(check(&report, "rms").requirement.contains('…'));
+    }
+
+    #[test]
+    fn clipping_can_be_allowed_by_the_standard() {
+        let mut samples = tone(0.5, 8000);
+        for s in samples.iter_mut().skip(1000).take(50) {
+            *s = 32767;
+        }
+        let strict = analyze_samples(&samples, QcStandard::default()).unwrap();
+        assert!(!strict.passed);
+        assert!(!check(&strict, "clipping").ok);
+
+        // Находка о клиппинге остаётся — меняется только вердикт: студия
+        // сказала, что переживёт.
+        let lenient = QcStandard { allow_clipping: true, peak_max_dbfs: 0.0, ..Default::default() };
+        let report = analyze_samples(&samples, lenient).unwrap();
+        assert!(check(&report, "clipping").ok);
+        assert!(report.findings.iter().any(|f| f.kind == "clipping"));
+    }
+
+    #[test]
+    fn pause_budget_is_respected() {
+        let mut samples = tone(0.5, 8000);
+        samples.extend(silence(2.0));
+        samples.extend(tone(0.5, 8000));
+        let zero_budget = analyze_samples(&samples, QcStandard::default()).unwrap();
+        assert!(!check(&zero_budget, "pauses").ok, "по умолчанию длинных пауз быть не должно");
+
+        let one_allowed = QcStandard { max_long_pauses: 1, ..Default::default() };
+        let report = analyze_samples(&samples, one_allowed).unwrap();
+        assert!(check(&report, "pauses").ok);
+        assert_eq!(check(&report, "pauses").actual, "1");
+    }
+
+    #[test]
+    fn pause_length_threshold_comes_from_the_standard() {
+        let mut samples = tone(0.5, 8000);
+        samples.extend(silence(1.5));
+        samples.extend(tone(0.5, 8000));
+        // 1.5 с — длинная пауза при пороге 1.2 и обычная при пороге 3.0.
+        let tight = analyze_samples(&samples, QcStandard::default()).unwrap();
+        assert_eq!(check(&tight, "pauses").actual, "1");
+        let loose = QcStandard { min_silence_seconds: 3.0, ..Default::default() };
+        let report = analyze_samples(&samples, loose).unwrap();
+        assert_eq!(check(&report, "pauses").actual, "0");
+        assert!(check(&report, "pauses").label.contains("3.0"));
     }
 
     #[test]
@@ -397,7 +592,7 @@ mod tests {
         let mut samples = silence(1.5); // long silence -> finding at start=0
         samples.extend(tone(0.5, 8000));
         samples.extend(silence(1.5)); // another long silence later
-        let report = analyze_samples(&samples).unwrap();
+        let report = analyze_samples(&samples, QcStandard::default()).unwrap();
         let starts: Vec<f64> = report.findings.iter().map(|f| f.start).collect();
         let mut sorted = starts.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());

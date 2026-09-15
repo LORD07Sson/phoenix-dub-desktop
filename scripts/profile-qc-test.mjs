@@ -76,14 +76,30 @@ setGlobal("fetch", async (url) => {
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 });
 
+// checks/passed приходят из Rust (build_checks в audio_qc.rs) — стабы
+// повторяют форму настоящего ответа.
 const CLIPPED = {
-  duration: 62.5, peak_dbfs: -0.1, rms_dbfs: -14.2,
+  duration: 62.5, peak_dbfs: -0.1, rms_dbfs: -14.2, passed: false,
+  checks: [
+    { key: "peak", label: "Пиковый уровень", requirement: "≤ -1.0 дБФС", actual: "-0.1", ok: false },
+    { key: "rms", label: "Средняя громкость", requirement: "≥ -38 дБФС", actual: "-14.2", ok: true },
+    { key: "clipping", label: "Клиппинг", requirement: "нет", actual: "1 уч.", ok: false },
+    { key: "pauses", label: "Паузы длиннее 1.2 с", requirement: "нет", actual: "1", ok: false },
+  ],
   findings: [
     { kind: "clipping", start: 3.2, end: 3.6, severity: "error", message: "Клиппинг — сигнал упирается в потолок шкалы." },
     { kind: "silence", start: 40, end: 43, severity: "warn", message: "Пауза без звука 3.0 с." },
   ],
 };
-const CLEAN = { duration: 58.0, peak_dbfs: -3.8, rms_dbfs: -18.1, findings: [] };
+const CLEAN = {
+  duration: 58.0, peak_dbfs: -3.8, rms_dbfs: -18.1, findings: [], passed: true,
+  checks: [
+    { key: "peak", label: "Пиковый уровень", requirement: "≤ -1.0 дБФС", actual: "-3.8", ok: true },
+    { key: "rms", label: "Средняя громкость", requirement: "≥ -38 дБФС", actual: "-18.1", ok: true },
+    { key: "clipping", label: "Клиппинг", requirement: "нет", actual: "нет", ok: true },
+    { key: "pauses", label: "Паузы длиннее 1.2 с", requirement: "нет", actual: "0", ok: true },
+  ],
+};
 
 let qcCalls = 0;
 w.__TAURI_INTERNALS__ = {
@@ -164,11 +180,15 @@ check("два файла — одна таблица, а не две модал�
   rows.length === 2 && document.querySelectorAll(".overlay").length === 1,
   `строк=${rows.length}, модалок=${document.querySelectorAll(".overlay").length}`);
 check("обе дорожки посчитаны", qcCalls === 2, `вызовов qc_analyze: ${qcCalls}`);
-check("проблемная дорожка помечена как error", rows[0] && rows[0].classList.contains("error"), rows[0] ? rows[0].className : "");
-check("чистая дорожка помечена как ok", rows[1] && rows[1].classList.contains("ok"), rows[1] ? rows[1].className : "");
+check("не прошедшая стандарт помечена как error", rows[0] && rows[0].classList.contains("error"), rows[0] ? rows[0].className : "");
+check("принятая помечена как ok", rows[1] && rows[1].classList.contains("ok"), rows[1] ? rows[1].className : "");
+const verdicts = rows.map(r => r.querySelector(".st").textContent.replace(/\s+/g, " ").trim());
+check("в колонке вердикт, а не счётчик находок",
+  /^на доработку/.test(verdicts[0]) && /пиковый уровень/.test(verdicts[0]) && verdicts[1] === "принято",
+  JSON.stringify(verdicts));
 check("пик и RMS в строке", rows[0] && rows[0].querySelector(".pk").textContent === "-0.1", rows[0] ? rows[0].querySelector(".pk").textContent : "");
 const progress = document.querySelector("#qc-progress");
-check("итог по всем файлам", progress && /1 с замечаниями/.test(progress.textContent), progress ? progress.textContent : "");
+check("итог по всем файлам", progress && /1 на доработку/.test(progress.textContent), progress ? progress.textContent : "");
 check("сортировка «сначала проблемные» доступна", !!document.querySelector("#qc-sort:not([hidden])"), "");
 
 let bad = 0;

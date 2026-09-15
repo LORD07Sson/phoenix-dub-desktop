@@ -18,6 +18,27 @@ function baseName(path) {
   return String(path).split(/[\\/]/).pop() || path;
 }
 
+// Вердикт по стандарту студии. Раньше QC отвечал числами — «пик -0.1,
+// RMS -14.2, три клиппинга», — и решение «годится или переписывать»
+// человек принимал сам, каждый раз по памяти. Теперь пороги живут в
+// настройках, а сравнение с ними приходит из Rust (build_checks в
+// audio_qc.rs) уже готовой табличкой.
+function verdictHtml(report) {
+  if (!report.checks || !report.checks.length) return "";
+  const failed = report.checks.filter(c => !c.ok).length;
+  const head = report.passed
+    ? `<div class="qc-verdict ok">✓ Принято — все требования выполнены</div>`
+    : `<div class="qc-verdict bad">✕ На доработку — ${failed} из ${report.checks.length} требований не выполнены</div>`;
+  const rows = report.checks.map(c => `
+    <div class="qc-check${c.ok ? "" : " bad"}">
+      <span class="lb">${esc(c.label)}</span>
+      <span class="rq">${esc(c.requirement)}</span>
+      <span class="ac">${esc(c.actual)}</span>
+      <span class="mk">${c.ok ? "✓" : "✕"}</span>
+    </div>`).join("");
+  return head + `<div class="qc-checks">${rows}</div>`;
+}
+
 function findingsHtml(findings) {
   return findings.map(f => `
     <div class="qc-finding ${f.severity}">
@@ -48,14 +69,13 @@ export async function runQcAnalysis(path, opts = {}) {
   try {
     const report = await invoke("qc_analyze", { path });
     const body = overlay.querySelector("#qc-body");
-    if (!report.findings.length) {
-      body.innerHTML = `<div style="color:var(--s-done);">✓ Замечаний не найдено. Пик ${report.peak_dbfs.toFixed(1)} дБФС, RMS ${report.rms_dbfs.toFixed(1)} дБФС, длительность ${formatTime(report.duration)}.</div>`;
-      return;
-    }
     body.innerHTML =
-      `<div style="color:var(--ink-soft); font-size:12.5px; margin-bottom:10px;">Длительность ${formatTime(report.duration)} · Пик ${report.peak_dbfs.toFixed(1)} дБФС · RMS ${report.rms_dbfs.toFixed(1)} дБФС</div>` +
-      findingsHtml(report.findings);
-    if (opts.reportId) wireAddToNotes(overlay, opts.reportId, report.findings);
+      verdictHtml(report) +
+      `<div class="qc-meta">Длительность ${formatTime(report.duration)} · Пик ${report.peak_dbfs.toFixed(1)} дБФС · RMS ${report.rms_dbfs.toFixed(1)} дБФС</div>` +
+      (report.findings.length
+        ? findingsHtml(report.findings)
+        : `<div style="color:var(--s-done); font-size:12.5px;">Замечаний по дорожке нет.</div>`);
+    if (opts.reportId && report.findings.length) wireAddToNotes(overlay, opts.reportId, report.findings);
   } catch (e) {
     overlay.querySelector("#qc-body").innerHTML = `<div style="color:var(--s-stop);">${esc(e)}</div>`;
   }
@@ -101,21 +121,26 @@ function wireAddToNotes(overlay, reportId, findings) {
 
 const SEVERITY_RANK = { error: 0, warn: 1, ok: 2, fail: 3 };
 
+// Вердикт стандарта важнее находок: дорожка с парой длинных пауз может
+// быть принята, если студия их допускает, а безупречная по находкам —
+// не пройти по громкости.
 function rowSeverity(report) {
   if (!report) return "fail";
-  if (report.findings.some(f => f.severity === "error")) return "error";
+  if (!report.passed) return "error";
   if (report.findings.length) return "warn";
   return "ok";
 }
 
 function summaryHtml(report) {
-  const errors = report.findings.filter(f => f.severity === "error").length;
-  const warns = report.findings.length - errors;
-  if (!report.findings.length) return `<span style="color:var(--s-done);">чисто</span>`;
-  const parts = [];
-  if (errors) parts.push(`<span style="color:var(--s-stop);">${errors} ${errors === 1 ? "ошибка" : "ошибок"}</span>`);
-  if (warns) parts.push(`<span style="color:var(--s-work);">${warns} ${warns === 1 ? "замечание" : "замечаний"}</span>`);
-  return parts.join(" · ");
+  if (!report.passed) {
+    const what = (report.checks || []).filter(c => !c.ok).map(c => c.label.toLowerCase()).join(", ");
+    return `<span style="color:var(--s-stop);">на доработку</span><span class="why"> · ${esc(what)}</span>`;
+  }
+  if (report.findings.length) {
+    const n = report.findings.length;
+    return `<span style="color:var(--s-done);">принято</span><span class="why"> · ${n} ${n === 1 ? "замечание" : "замечаний"}</span>`;
+  }
+  return `<span style="color:var(--s-done);">принято</span>`;
 }
 
 export async function runQcBatch(paths) {
@@ -189,11 +214,11 @@ export async function runQcBatch(paths) {
   }
 
   const done = results.filter(Boolean);
-  const bad = done.filter(r => r.severity === "error" || r.severity === "warn").length;
+  const bad = done.filter(r => r.report && !r.report.passed).length;
   const broken = done.filter(r => r.severity === "fail").length;
   progressEl.innerHTML = bad || broken
-    ? `Готово: <span style="color:var(--s-stop);">${bad} с замечаниями</span>${broken ? ` · ${broken} не прочитано` : ""} из ${done.length}`
-    : `Готово: замечаний нет ни в одном из ${done.length}`;
+    ? `Готово: <span style="color:var(--s-stop);">${bad} на доработку</span>${broken ? ` · ${broken} не прочитано` : ""} из ${done.length}`
+    : `Готово: приняты все ${done.length}`;
 
   // Сортировка — только когда есть что сортировать.
   const sortBtn = overlay.querySelector("#qc-sort");
