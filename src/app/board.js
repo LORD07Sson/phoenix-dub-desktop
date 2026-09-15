@@ -159,6 +159,10 @@ function wireBoardScroll(boardEl) {
     startX = e.clientX;
     startScroll = boardEl.scrollLeft;
     boardEl.classList.add("panning");
+    // scroll-behavior:smooth (CSS) — только для колеса мыши; во время
+    // ручного драга доска должна 1:1 следовать за курсором без
+    // задержки на анимацию, иначе будет ощутимо отставать от руки.
+    boardEl.style.scrollBehavior = "auto";
     // Захват указателя на самой доске — без него в реальном WebView2
     // pointermove/pointerup (были на window) иногда не доставлялись
     // надёжно, если курсор хоть на миг ушёл не над тем элементом (тот
@@ -174,6 +178,7 @@ function wireBoardScroll(boardEl) {
     if (e.pointerId !== panPointerId) return;
     panning = false;
     boardEl.classList.remove("panning");
+    boardEl.style.scrollBehavior = "smooth"; // вернуть плавность для колеса мыши
     if (boardEl.hasPointerCapture(panPointerId)) boardEl.releasePointerCapture(panPointerId);
   }
   boardEl.addEventListener("pointerup", endPan);
