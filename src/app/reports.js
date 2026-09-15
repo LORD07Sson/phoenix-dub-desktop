@@ -187,11 +187,18 @@ $("#search-input").addEventListener("keydown", e => { if (e.key === "Enter") { c
 $("#status-filter").addEventListener("change", loadReports);
 $("#priority-filter").addEventListener("change", loadReports);
 
+// Установка быстрого фильтра без загрузки — списку её зовёт обработчик
+// ниже, а профилю («на руках пусто → посмотреть свободные серии») важно
+// сначала переключить вкладку и только потом решать, нужен ли запрос.
+export function setQuickFilter(key) {
+  state.quickFilter = key;
+  $all(".qf-chip").forEach(c => c.classList.toggle("active", c.dataset.qf === key));
+}
+
 $all(".qf-chip").forEach(chip => {
   chip.addEventListener("click", () => {
     const key = chip.dataset.qf;
-    state.quickFilter = state.quickFilter === key ? null : key;
-    $all(".qf-chip").forEach(c => c.classList.toggle("active", c.dataset.qf === state.quickFilter));
+    setQuickFilter(state.quickFilter === key ? null : key);
     loadReports();
   });
 });

@@ -6,11 +6,17 @@
 
 import { state } from "./state.js";
 import { apiGet, apiPost, apiDelete, openSheet, toast, dialogSkeletonHtml, mediaUrl } from "./api.js";
-import { $, esc, MONTHS_RU, STATUS_COLOR_VAR, BADGE_RARITY_ORDER, pluralColleagues, showContextMenu } from "./utils.js";
+import { $, esc, isOverdue, MONTHS_RU, STATUS_COLOR_VAR, BADGE_RARITY_ORDER, pluralColleagues, showContextMenu } from "./utils.js";
+import { setQuickFilter, loadReports } from "./reports.js";
+import { switchTab } from "./tabs.js";
 import { donutHtml, donutLegendHtml, playDonutIntro } from "./charts.js";
 import { devModeActive, devPanelHtml, wireDevPanel } from "./devmode.js";
 import { openReportDetail } from "./report-detail.js";
 import { openExternal, sendNotification } from "./tauri.js";
+// Тот же маскот, что на экране загрузки (index.html) — Vite отдаёт
+// готовый URL собранного ассета. Больше ему показаться негде, хотя он
+// уже лежит в каждой сборке.
+import mascotUrl from "../assets/ayaya-club-ayaya.gif";
 
 export function avatarHtml(telegramId, name, size) {
   const initial = esc((name || "?").trim().charAt(0).toUpperCase() || "?");
@@ -52,12 +58,53 @@ function loadProfileBanner(el, telegramId) {
 }
 
 // Кольцо аватара по стажу в команде — те же пороги, что в мини-аппе.
+// Раньше кольцо просто меняло цвет на 30/180/365 днях и молчало: человек
+// не знал ни что оно означает, ни сколько осталось до следующего. Теперь
+// пороги живут одним списком — из него и цвет кольца, и полоска прогресса.
+const TENURE_STEPS = [
+  { at: 30, tier: "bronze", label: "Бронза", color: "#b0774a" },
+  { at: 180, tier: "silver", label: "Серебро", color: "#b9c2cc" },
+  { at: 365, tier: "gold", label: "Золото", color: "var(--gold)" },
+];
+
 function tenureTier(days) {
   if (days == null) return null;
-  if (days >= 365) return "gold";
-  if (days >= 180) return "silver";
-  if (days >= 30) return "bronze";
+  for (let i = TENURE_STEPS.length - 1; i >= 0; i--) {
+    if (days >= TENURE_STEPS[i].at) return TENURE_STEPS[i].tier;
+  }
   return null;
+}
+
+function pluralDays(n) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "день";
+  if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return "дня";
+  return "дней";
+}
+
+// Полоска «где я между порогами» + сколько до следующего кольца.
+function tenureProgressHtml(days) {
+  if (days == null) return "";
+  const nextIdx = TENURE_STEPS.findIndex(st => days < st.at);
+  const current = nextIdx === -1 ? TENURE_STEPS[TENURE_STEPS.length - 1] : TENURE_STEPS[nextIdx - 1];
+  const next = nextIdx === -1 ? null : TENURE_STEPS[nextIdx];
+  const from = current ? current.at : 0;
+  const pct = next ? Math.max(0, Math.min(100, Math.round(((days - from) / (next.at - from)) * 100))) : 100;
+  const color = current ? current.color : "var(--ink-dim)";
+  const title = current ? current.label : "Новичок";
+  const left = next ? next.at - days : 0;
+
+  return `
+    <div class="tenure">
+      <div class="tenure-lbl">
+        <b style="color:${color};">${esc(title)}</b> · ${days} ${pluralDays(days)} в команде
+        ${next ? `<span>${left} ${pluralDays(left)} до «${esc(next.label)}»</span>` : `<span>высший ранг</span>`}
+      </div>
+      <div class="tenure-track"><i style="width:${pct}%; background:${color};"></i></div>
+      <div class="tenure-ticks">
+        ${TENURE_STEPS.map(st => `<span class="${days >= st.at ? "on" : ""}" style="${days >= st.at ? `color:${st.color};` : ""}">${st.at}</span>`).join("")}
+      </div>
+    </div>`;
 }
 
 function roleMeta(role) {
@@ -73,7 +120,9 @@ function roleMeta(role) {
 }
 
 function rankTagHtml(rank) {
-  if (!rank) return "";
+  // «#1 из 1» — не достижение, а следствие того, что серии закрывал
+  // только один человек. Пока в таблице меньше двоих, места нет.
+  if (!rank || !rank.total || rank.total < 2) return "";
   const medals = { 1: "🥇", 2: "🥈", 3: "🥉" };
   const medal = medals[rank.place] || "🏅";
   return `<span class="rank-tag rank-${rank.place <= 3 ? rank.place : "other"}">${medal} #${rank.place} из ${rank.total}</span>`;
@@ -110,9 +159,18 @@ function loadStructureHtml(me) {
   const hasReports = me.reports && me.reports.length;
   const hasRoles = me.role_breakdown && me.role_breakdown.length;
   if (!hasReports && !hasRoles) {
+    // Раньше тут был статичный текст «пока нечего показать» во всю
+    // ширину экрана. Пустые руки — это повод предложить работу, а не
+    // сообщить о пустоте: свободные серии дозагружаются в fillIdleSlot().
     return `
       <div class="sec-title">📊 Структура загрузки</div>
-      <div class="stat-donut-card stat-donut-empty">🕊️ Пока нечего показать — нет ни одного активного отчёта на руках</div>
+      <div class="idle-card" id="idle-slot">
+        <img class="idle-mascot" src="${mascotUrl}" alt="">
+        <div class="idle-text">
+          <div class="t">На руках пусто</div>
+          <div class="d">смотрю, есть ли свободные серии…</div>
+        </div>
+      </div>
     `;
   }
   const statusCounts = {};
@@ -180,6 +238,7 @@ function profileHeaderHtml(d, isSelf, asParts) {
       <span class="role-tag" style="--tag-c:${rMeta.c}">${rMeta.ic} ${roleLabel}</span>
     </div>
 
+    ${tenureProgressHtml(d.member_since_days)}
     ${teamTeaserHtml(d)}
     ${isSelf ? `<div style="display:flex; justify-content:flex-end;"><button class="icon-btn" id="btn-edit-profile" title="Изменить статус и о себе">✏️</button></div>` : ""}
   `;
@@ -197,20 +256,42 @@ function profileHeaderHtml(d, isSelf, asParts) {
 }
 
 // Достижения — общий бенто-блок, тоже переиспользуется для «Я» и чужого профиля.
+//
+// Полученные и неполученные раньше выглядели почти одинаково, а прогресс
+// (current/target сервер присылает по каждой награде) был спрятан в
+// атрибуте title — то есть виден, только если задержать мышь на иконке.
+// Теперь полученные идут чипами сверху, а остальные — строкой с остатком
+// и полоской: «50+ закрыто — 1 / 50» честнее серой иконки без объяснений.
 function badgesBentoHtml(d, delayMs) {
-  const unlocked = (d.badges || []).slice().sort((a, b) => (BADGE_RARITY_ORDER[a.rarity] ?? 9) - (BADGE_RARITY_ORDER[b.rarity] ?? 9));
+  const all = (d.badges || []).slice().sort((a, b) => (BADGE_RARITY_ORDER[a.rarity] ?? 9) - (BADGE_RARITY_ORDER[b.rarity] ?? 9));
+  const unlocked = all.filter(b => b.unlocked);
+  const locked = all.filter(b => !b.unlocked);
+
+  const wonHtml = unlocked.map(b => `
+    <span class="badge-chip" title="${esc(b.label)}">
+      ${esc(b.icon)} ${esc(b.label)}
+      ${b.custom && devModeActive() ? `<button class="icon-btn badge-revoke" data-revoke-badge="${b.id}" title="Отозвать награду">✕</button>` : ""}
+    </span>`).join("");
+
+  const lockedHtml = locked.map(b => {
+    const has = b.target ? Math.max(0, Math.min(b.target, b.current || 0)) : null;
+    const pct = b.target ? Math.round((has / b.target) * 100) : 0;
+    return `
+      <div class="badge-todo${b.target ? "" : " no-data"}">
+        <div class="lbl">
+          <span>${esc(b.icon)} ${esc(b.label)}</span>
+          <span class="val">${b.target ? `${has} / ${b.target}` : "нет данных"}</span>
+        </div>
+        <div class="badge-track"><i style="width:${pct}%;"></i></div>
+      </div>`;
+  }).join("");
+
   return `
     <div class="bcell wide" style="animation-delay:${delayMs}ms;">
-      <h3>Достижения</h3>
-      <div class="badge-grid">
-        ${unlocked.map(b => `
-          <div class="badge-item ${b.unlocked ? "unlocked" : ""}" title="${esc(b.label)}${!b.unlocked && b.target ? ` — ${b.current}/${b.target}` : ""}">
-            <div>${esc(b.icon)}</div>
-            <span class="lbl">${esc(b.label)}</span>
-            ${b.custom && devModeActive() ? `<button class="icon-btn badge-revoke" data-revoke-badge="${b.id}" title="Отозвать награду">✕</button>` : ""}
-          </div>
-        `).join("")}
-      </div>
+      <h3>Достижения ${all.length ? `<span style="color:var(--ink-dim); font-weight:400; font-size:12px;">${unlocked.length} из ${all.length}</span>` : ""}</h3>
+      ${wonHtml ? `<div class="badge-chips">${wonHtml}</div>` : ""}
+      ${lockedHtml ? `<div class="badge-todos">${lockedHtml}</div>` : ""}
+      ${!all.length ? `<div class="no-assignee">Пока пусто</div>` : ""}
     </div>`;
 }
 
@@ -271,6 +352,7 @@ export async function loadProfile() {
     <div class="bcell wide goal-card" id="goal-card">
       <h3>Цель месяца</h3>
       <div class="goal-hint" style="margin-top:4px;">🎯 Цель на месяц не задана — нажмите, чтобы поставить себе план.</div>
+      <div class="goal-hint" id="goal-pace" hidden></div>
     </div>
   `;
 
@@ -289,8 +371,10 @@ export async function loadProfile() {
           </div>
           <div class="bcell" style="animation-delay:100ms;">
             <h3>Вовремя</h3>
-            <div class="big-num">${me.on_time_pct != null ? me.on_time_pct + "%" : "—"}</div>
-            <div class="sub">${me.avg_days != null ? `в среднем ${me.avg_days.toFixed(1)} дн. на отчёт` : ""}</div>
+            <div class="big-num${me.on_time_pct == null ? " muted" : ""}">${me.on_time_pct != null ? me.on_time_pct + "%" : "—"}</div>
+            <div class="sub">${me.on_time_pct != null
+              ? (me.avg_days != null ? `в среднем ${me.avg_days.toFixed(1)} дн. на отчёт` : "")
+              : "считается по отчётам со сроком — их пока нет"}</div>
           </div>
           ${badgesBentoHtml(me, 140)}
           <div class="bcell wide" id="activity-card" style="animation-delay:180ms; cursor:pointer;">
@@ -303,11 +387,77 @@ export async function loadProfile() {
     </div>
   `;
   wireProfileCommon(root, me.telegram_id, () => loadProfile());
-  root.querySelector("#goal-card").addEventListener("click", () => monthlyGoalDialog(me.monthly_goal));
+  // Обе догрузки — без await: профиль уже отрисован, и ждать ради
+  // подсказки в одном блоке незачем (иначе на них ждала бы и кнопка
+  // «Обновить», которая дожидается loadProfile).
+  fillIdleSlot(root);
+  let suggested = null;
+  if (!goalSet) suggestGoal(root).then(v => { suggested = v; });
+  root.querySelector("#goal-card").addEventListener("click", () => monthlyGoalDialog(me.monthly_goal || suggested));
   root.querySelector("#btn-edit-profile").addEventListener("click", () => editProfileDialog(me));
   root.querySelector("#activity-card").addEventListener("click", () => openMyActivitySheet());
   if (devModeActive()) wireDevPanel(root, me.telegram_id, () => loadProfile(), me.role);
   notifyGoalReachedIfNeeded(me, goalSet, goalOver, goalDone);
+}
+
+// Свободные серии для пустого профиля — тот же быстрый фильтр
+// «без исполнителя», что и на вкладке «Список». Отдельным запросом
+// после отрисовки: профиль не должен ждать его, чтобы показаться.
+async function fillIdleSlot(root) {
+  const slot = root.querySelector("#idle-slot");
+  if (!slot) return;
+  let d;
+  try {
+    d = await apiGet("/reports", { unassigned: 1, page_size: 100 });
+  } catch (_) {
+    slot.querySelector(".d").textContent = "свободные серии сейчас не посмотреть — нет связи";
+    return;
+  }
+  if (!slot.isConnected) return;
+  const free = d.reports || [];
+  const total = d.total || free.length;
+  if (!total) {
+    slot.querySelector(".d").textContent = "свободных серий тоже нет — всё разобрано";
+    return;
+  }
+  const hot = free.filter(isOverdue).length;
+  slot.querySelector(".d").innerHTML =
+    `${total} ${total === 1 ? "серия" : "серий"} без исполнителя` +
+    (hot ? ` · <span style="color:var(--s-stop);">${hot} просрочено</span>` : "");
+  const btn = document.createElement("button");
+  btn.className = "btn primary idle-go";
+  btn.textContent = "Посмотреть";
+  btn.addEventListener("click", () => {
+    // Если «Список» уже был загружен, switchTab его не перечитает
+    // (loadedTabs) — перечитываем сами, иначе фильтр применится только
+    // визуально, к чипу.
+    const wasLoaded = state.loadedTabs.has("list");
+    setQuickFilter("unassigned");
+    switchTab("list");
+    if (wasLoaded) loadReports();
+  });
+  slot.appendChild(btn);
+}
+
+// Сколько закрывают остальные — чтобы «поставьте себе план» не был
+// вопросом в пустоту. Берём уже существующий рейтинг месяца (тот же
+// эндпоинт дёргает «Обзор»), считаем средний темп по тем, кто вообще
+// закрывал. Не вышло — просто не показываем подсказку.
+async function suggestGoal(root) {
+  const el = root.querySelector("#goal-pace");
+  if (!el) return null;
+  try {
+    const d = await apiGet("/overview/monthly-top");
+    const done = (d.top || []).map(p => p.completed || 0).filter(n => n > 0);
+    if (!done.length) return null;
+    const avg = Math.max(1, Math.round(done.reduce((a, b) => a + b, 0) / done.length));
+    if (!el.isConnected) return avg;
+    el.hidden = false;
+    el.textContent = `Темп студии за месяц — ${avg} ${avg === 1 ? "серия" : "серий"} на человека.`;
+    return avg;
+  } catch (_) {
+    return null;
+  }
 }
 
 // Системный тост при первом заходе после того, как цель месяца

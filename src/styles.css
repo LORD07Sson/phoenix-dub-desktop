@@ -1077,6 +1077,89 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 .app-splash-status { font-size: 12.5px; color: var(--ink-soft); font-weight: 600; animation: splash-dots-fade 1.6s ease-in-out infinite; }
 @keyframes splash-dots-fade { 0%, 100% { opacity: .65; } 50% { opacity: 1; } }
 
+/* ---------- Профиль: прогресс стажа, награды, пустые руки ---------- */
+
+/* Полоска «где я между порогами колец» под карточкой человека. Цвет
+   берётся инлайном из TENURE_STEPS (profile.js) — один источник и для
+   свечения кольца, и для этой полоски. */
+.tenure { margin: 12px 0 2px; }
+.tenure-lbl { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; color: var(--ink-soft); }
+.tenure-lbl b { font-weight: 700; }
+.tenure-lbl span { margin-left: auto; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.tenure-track { height: 3px; border-radius: 99px; background: var(--surface-3); margin: 6px 0 5px; overflow: hidden; }
+.tenure-track i { display: block; height: 100%; border-radius: 99px; transition: width .5s ease; }
+.tenure-ticks { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.tenure-ticks .on { font-weight: 700; }
+
+/* Полученные награды — чипами, остальные — строкой с остатком. */
+.badge-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.badge-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; padding: 4px 10px; border-radius: 99px;
+  background: var(--surface-3); color: var(--ink);
+}
+.badge-chip .badge-revoke { padding: 0 2px; border: none; }
+.badge-todos { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 9px 16px; }
+.badge-todo .lbl { display: flex; gap: 8px; font-size: 11.5px; color: var(--ink-soft); margin-bottom: 4px; }
+.badge-todo .lbl > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge-todo .lbl .val { margin-left: auto; color: var(--ink-dim); font-variant-numeric: tabular-nums; flex: none; }
+.badge-todo.no-data { opacity: .6; }
+.badge-track { height: 3px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.badge-track i { display: block; height: 100%; border-radius: 99px; background: var(--ink-dim); transition: width .5s ease; }
+
+/* Пустые руки: вместо сообщения о пустоте — предложение работы. */
+.idle-card {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--surface); border: 1px solid var(--fire); border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.idle-mascot { width: 40px; height: 40px; border-radius: 10px; object-fit: cover; flex: none; }
+.idle-text { min-width: 0; }
+.idle-text .t { font-size: 13.5px; font-weight: 600; }
+.idle-text .d { font-size: 12px; color: var(--ink-soft); }
+.idle-go { margin-left: auto; flex: none; }
+
+.big-num.muted { color: var(--ink-dim); }
+
+/* ---------- Пакетный QC (сводная таблица по нескольким дорожкам) ---------- */
+
+.qc-batch-head {
+  display: flex; align-items: center; gap: 10px;
+  margin: -4px 0 10px; font-size: 12.5px; color: var(--ink-soft);
+}
+.qc-batch-head #qc-sort { margin-left: auto; flex: none; }
+
+.qc-table { display: flex; flex-direction: column; gap: 4px; }
+
+/* Сетка одна на всю таблицу: имя тянется, числа и итог — фиксированной
+   ширины, чтобы колонки не плясали по мере того, как строки досчитываются. */
+.qc-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px 58px minmax(120px, 170px);
+  align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 10px;
+  background: var(--surface-2); border-left: 3px solid var(--line);
+  font-size: 12.5px;
+}
+.qc-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qc-row .pk, .qc-row .rm { font-variant-numeric: tabular-nums; color: var(--ink-soft); text-align: right; }
+.qc-row .st { color: var(--ink-soft); }
+.qc-row.pending { opacity: .5; }
+.qc-row.running { border-left-color: var(--ember); }
+.qc-row.ok { border-left-color: var(--s-done); }
+.qc-row.warn { border-left-color: var(--s-work); }
+.qc-row.error { border-left-color: var(--s-stop); }
+.qc-row.fail { border-left-color: var(--s-stop); opacity: .75; }
+.qc-row.expandable { cursor: pointer; }
+.qc-row.expandable:hover { background: var(--surface-3); }
+/* Находки раскрываются под строкой во всю её ширину — отсюда
+   grid-column: 1 / -1, иначе блок встал бы в первую колонку. */
+.qc-row-findings {
+  grid-column: 1 / -1;
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line-soft);
+}
+
 /* ---------- Доска (канбан по статусам, /api/board) ---------- */
 
 /* scroll-behavior: smooth — колесо мыши едет с анимацией, а не скачком
