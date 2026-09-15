@@ -5,6 +5,7 @@
 import { state } from "./state.js";
 import { API_BASE, apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
 import { $, esc } from "./utils.js";
+import { openSeasonsAdminSheet } from "./titles-admin.js";
 
 function imgProxy(url) {
   if (!url) return "";
@@ -201,8 +202,11 @@ export async function loadTitlesTab() {
 function renderTitlesForSeason(seasons) {
   const root = $("#titles-body");
   root.innerHTML = `
-    <div class="chip-row">
-      ${seasons.map(s => `<button class="qchip${s.id === state.titleSeasonId ? " on" : ""}" data-season="${s.id}">${esc(s.name)}</button>`).join("")}
+    <div class="chip-row" style="justify-content:space-between;">
+      <div class="chip-row" style="padding:0;">
+        ${seasons.map(s => `<button class="qchip${s.id === state.titleSeasonId ? " on" : ""}" data-season="${s.id}">${esc(s.name)}</button>`).join("")}
+      </div>
+      <button class="btn ghost" id="titles-admin-btn" style="font-size:12px; padding:6px 10px;">🛠 Управление</button>
     </div>
     <div id="titles-grid">${dialogSkeletonHtml(3)}</div>
   `;
@@ -211,6 +215,9 @@ function renderTitlesForSeason(seasons) {
       state.titleSeasonId = parseInt(btn.dataset.season, 10);
       renderTitlesForSeason(seasons);
     });
+  });
+  root.querySelector("#titles-admin-btn").addEventListener("click", () => {
+    openSeasonsAdminSheet(() => loadTitlesTab());
   });
 
   apiGet(`/public/seasons/${state.titleSeasonId}/titles`).then(d => {
