@@ -1,0 +1,37 @@
+name: Cleanup Caches
+
+# Актуальных кэшей actions/cache в проекте сейчас нет (build.yml/
+# build-alpha.yml собирают с нуля каждый раз), но раз потребуется —
+# лимит места на кэши общий для репозитория, и без чистки старые
+# просроченные записи просто копятся. Дешевле завести сразу, чем
+# вспоминать об этом потом, когда лимит внезапно упрётся.
+on:
+  schedule:
+    - cron: "0 3 * * *" # каждый день
+  workflow_dispatch: {}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Удалить кэши старше 1 дня
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CUTOFF_DATE=$(date -d "1 days ago" -Ins --utc | sed 's/+0000/Z/')
+          echo "Удаляю кэши старше: $CUTOFF_DATE"
+
+          CACHE_IDS=$(gh api --paginate repos/${{ github.repository }}/actions/caches \
+            --jq ".actions_caches[] | select(.last_accessed_at < \"$CUTOFF_DATE\") | .id" 2>/dev/null)
+
+          if [ -z "$CACHE_IDS" ]; then
+            echo "Старых кэшей не найдено."
+          else
+            echo "$CACHE_IDS" | while read CACHE_ID; do
+              echo "Удаляю кэш: $CACHE_ID"
+              gh api -X DELETE repos/${{ github.repository }}/actions/caches/$CACHE_ID
+            done
+            echo "Старые кэши удалены."
+          fi
