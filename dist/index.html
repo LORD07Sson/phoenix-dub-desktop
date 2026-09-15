@@ -177,6 +177,17 @@
   </div>
 </template>
 
-<script src="app.js"></script>
+<!-- Резолвит бэйр-спецификаторы ("@tauri-apps/api/core") на vendored ESM-
+     файлы (dist/vendor/, см. README там) — withGlobalTauri выключен в
+     tauri.conf.json, поэтому window.__TAURI__ больше нет, только явные
+     import'ы. Внешний файл (не инлайн-JSON), а не для красоты: CSP тут
+     без 'unsafe-inline' в script-src (default-src 'self' сюда же), и
+     инлайновый <script type="importmap"> с JSON-содержимым им бы просто
+     молча блокировался — внешний .json того же происхождения проходит
+     как любой другой ресурс. Нужен WebView, понимающий external import
+     maps (Chromium/WebView2 105+, у нас он и так evergreen) — без
+     бандлера тут его нативная замена. -->
+<script type="importmap" src="importmap.json"></script>
+<script type="module" src="app/main.js"></script>
 </body>
 </html>
