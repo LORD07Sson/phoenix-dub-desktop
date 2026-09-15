@@ -15,21 +15,24 @@ function imgProxy(url) {
   return `${API_BASE}/img_proxy?url=${encodeURIComponent(url)}&init_data=${encodeURIComponent(state.token)}`;
 }
 
+// Экспортируются — те же кэши переиспользует редактор пайплайна в
+// report-detail.js (тот же список ролей/исполнителей, дважды его
+// заводить незачем).
 let META_ROLES_CACHE = null;
-async function loadRoles() {
+export async function loadRoles() {
   if (META_ROLES_CACHE) return META_ROLES_CACHE;
   try { META_ROLES_CACHE = (await apiGet("/meta")).roles || []; } catch (_) { META_ROLES_CACHE = []; }
   return META_ROLES_CACHE;
 }
 
 let ASSIGNABLE_CACHE = null;
-async function loadAssignable() {
+export async function loadAssignable() {
   if (ASSIGNABLE_CACHE) return ASSIGNABLE_CACHE;
   try { ASSIGNABLE_CACHE = (await apiGet("/assignable-users")).users || []; } catch (_) { ASSIGNABLE_CACHE = []; }
   return ASSIGNABLE_CACHE;
 }
 
-function userOptionsHtml(users, selectedTelegramId) {
+export function userOptionsHtml(users, selectedTelegramId) {
   return `<option value="">— не назначен —</option>` + users.map(u =>
     `<option value="${u.telegram_id}" ${String(u.telegram_id) === String(selectedTelegramId) ? "selected" : ""}>${esc(u.username ? "@" + u.username : u.name)}</option>`
   ).join("");
