@@ -9,13 +9,15 @@ const FINDING_LABELS = {
   clipping: "Клиппинг", silence: "Пауза", quiet: "Тихо", loud: "Громко",
 };
 
-async function openQcDialog() {
-  const path = await openDialog({
-    multiple: false,
-    filters: [{ name: "Аудио/видео", extensions: ["wav", "mp3", "flac", "m4a", "aac", "ogg", "mp4", "mkv", "mov"] }],
-  });
-  if (!path) return;
+// Список расширений, которые умеет разбирать qc_analyze — общий и для
+// диалога выбора файла ниже, и для file-drop.js (перетащить файл на
+// окно без открытой карточки отчёта — тоже запускает этот же QC).
+export const QC_EXTENSIONS = ["wav", "mp3", "flac", "m4a", "aac", "ogg", "mp4", "mkv", "mov"];
 
+// Сам прогон QC + отрисовка результата — вынесено отдельной функцией,
+// чтобы её могли звать и обычный диалог выбора файла (ниже), и
+// file-drop.js напрямую с уже известным путём (без диалога).
+export async function runQcAnalysis(path) {
   const overlay = openSheet(`
     <h2>QC звука</h2>
     <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-8px;">${esc(path)}</p>
@@ -45,6 +47,15 @@ async function openQcDialog() {
   } catch (e) {
     overlay.querySelector("#qc-body").innerHTML = `<div style="color:var(--s-stop);">${esc(e)}</div>`;
   }
+}
+
+async function openQcDialog() {
+  const path = await openDialog({
+    multiple: false,
+    filters: [{ name: "Аудио/видео", extensions: QC_EXTENSIONS }],
+  });
+  if (!path) return;
+  await runQcAnalysis(path);
 }
 
 $("#open-qc").addEventListener("click", openQcDialog);
