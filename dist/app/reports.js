@@ -70,7 +70,7 @@ export function sortLocally() {
 export function assigneesHtml(list) {
   if (!list || !list.length) return `<span class="no-assignee">не назначен</span>`;
   const shown = list.slice(0, 3);
-  const bubbles = shown.map(a => `<span class="avatar-bubble" title="${esc(a.name)}">${esc(initials(a.name))}</span>`).join("");
+  const bubbles = shown.map(a => `<span class="avatar-bubble" data-avatar-for="${a.telegram_id}" title="${esc(a.name)}">${esc(initials(a.name))}</span>`).join("");
   const more = list.length > 3 ? `<span class="avatar-more">+${list.length - 3}</span>` : "";
   return `<span class="avatar-stack">${bubbles}</span>${more}`;
 }

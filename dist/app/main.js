@@ -22,6 +22,7 @@ import "./notifications.js";
 import "./presence.js";
 import "./command-palette.js";
 import "./file-drop.js";
+import "./avatar-hover.js";
 
 tryRestoreSession();
 setTimeout(() => appWindow.show(), 0); // DevSkim: ignore DS172411 — функция, не строка

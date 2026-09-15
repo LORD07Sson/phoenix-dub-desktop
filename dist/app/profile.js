@@ -6,10 +6,11 @@
 
 import { state } from "./state.js";
 import { API_BASE, apiGet, apiPost, apiDelete, openSheet, toast, dialogSkeletonHtml } from "./api.js";
-import { $, esc, MONTHS_RU, STATUS_COLOR_VAR, BADGE_RARITY_ORDER, pluralColleagues } from "./utils.js";
+import { $, esc, MONTHS_RU, STATUS_COLOR_VAR, BADGE_RARITY_ORDER, pluralColleagues, showContextMenu } from "./utils.js";
 import { donutHtml, donutLegendHtml, playDonutIntro } from "./charts.js";
 import { devModeActive, devPanelHtml, wireDevPanel } from "./devmode.js";
 import { openReportDetail } from "./report-detail.js";
+import { invoke, sendNotification } from "./tauri.js";
 
 export function avatarHtml(telegramId, name, size) {
   const initial = esc((name || "?").trim().charAt(0).toUpperCase() || "?");
@@ -142,7 +143,13 @@ function loadStructureHtml(me) {
 // загрузки» — общая часть между своей «Я» и карточкой коллеги.
 // isSelf — показать карандаш редактирования статуса/био (только на
 // собственном профиле, /api/me/profile правит только СВОЙ профиль).
-function profileHeaderHtml(d, isSelf) {
+//
+// asParts=true — вернуть { left, right } отдельно, а не склеенной
+// строкой: на широком окне ПК своя «Я» кладёт карточку человека в левую
+// колонку (прилипает при скролле), а статус/био/структуру загрузки —
+// в правую, пошире (см. loadProfile). Карточка коллеги (sheet, узкая)
+// продолжает звать без asParts и получает прежнюю плоскую разметку.
+function profileHeaderHtml(d, isSelf, asParts) {
   const tier = tenureTier(d.member_since_days);
   const rMeta = roleMeta(d.role);
   const roleLabel = d.role ? esc(d.role) : "Участник PHOENIX";
@@ -155,7 +162,7 @@ function profileHeaderHtml(d, isSelf) {
     }
   }
 
-  return `
+  const left = `
     <div class="profile-banner-wrap" data-role="profile-banner"></div>
     <div class="profile-head-card">
       <span class="avatar-ring${tier ? " tier-" + tier : ""}">${avatarHtml(d.telegram_id, d.display_name || d.name, "xl")}</span>
@@ -171,6 +178,9 @@ function profileHeaderHtml(d, isSelf) {
 
     ${teamTeaserHtml(d)}
     ${isSelf ? `<div style="display:flex; justify-content:flex-end;"><button class="icon-btn" id="btn-edit-profile" title="Изменить статус и о себе">✏️</button></div>` : ""}
+  `;
+
+  const right = `
     ${d.status_text ? `<div class="status-quote">💬 ${esc(d.status_text)}</div>` : ""}
     ${d.bio ? `<div class="profile-bio">${esc(d.bio)}</div>` : ""}
 
@@ -178,6 +188,8 @@ function profileHeaderHtml(d, isSelf) {
 
     ${loadStructureHtml(d)}
   `;
+
+  return asParts ? { left, right } : left + right;
 }
 
 // Достижения — общий бенто-блок, тоже переиспользуется для «Я» и чужого профиля.
@@ -258,33 +270,60 @@ export async function loadProfile() {
     </div>
   `;
 
+  const header = profileHeaderHtml(me, true, true);
   root.innerHTML = `
-    ${profileHeaderHtml(me, true)}
-    <div class="bento">
-      ${goalCardHtml}
-      <div class="bcell" style="animation-delay:60ms;">
-        <h3>Закрыто</h3>
-        <div class="big-num">${me.completed_total}</div>
-        <div class="sub">${me.completed_week} за неделю · ${me.completed_month} за месяц</div>
-      </div>
-      <div class="bcell" style="animation-delay:100ms;">
-        <h3>Вовремя</h3>
-        <div class="big-num">${me.on_time_pct != null ? me.on_time_pct + "%" : "—"}</div>
-        <div class="sub">${me.avg_days != null ? `в среднем ${me.avg_days.toFixed(1)} дн. на отчёт` : ""}</div>
-      </div>
-      ${badgesBentoHtml(me, 140)}
-      <div class="bcell wide" id="activity-card" style="animation-delay:180ms; cursor:pointer;">
-        <h3>Моя активность →</h3>
-        <div class="sub">последние действия по отчётам</div>
+    <div class="profile-head-grid">
+      <div class="profile-head-left">${header.left}</div>
+      <div class="profile-head-right">
+        ${header.right}
+        <div class="bento">
+          ${goalCardHtml}
+          <div class="bcell" style="animation-delay:60ms;">
+            <h3>Закрыто</h3>
+            <div class="big-num">${me.completed_total}</div>
+            <div class="sub">${me.completed_week} за неделю · ${me.completed_month} за месяц</div>
+          </div>
+          <div class="bcell" style="animation-delay:100ms;">
+            <h3>Вовремя</h3>
+            <div class="big-num">${me.on_time_pct != null ? me.on_time_pct + "%" : "—"}</div>
+            <div class="sub">${me.avg_days != null ? `в среднем ${me.avg_days.toFixed(1)} дн. на отчёт` : ""}</div>
+          </div>
+          ${badgesBentoHtml(me, 140)}
+          <div class="bcell wide" id="activity-card" style="animation-delay:180ms; cursor:pointer;">
+            <h3>Моя активность →</h3>
+            <div class="sub">последние действия по отчётам</div>
+          </div>
+        </div>
+        ${devModeActive() ? devPanelHtml(me) : ""}
       </div>
     </div>
-    ${devModeActive() ? devPanelHtml(me) : ""}
   `;
   wireProfileCommon(root, me.telegram_id, () => loadProfile());
   root.querySelector("#goal-card").addEventListener("click", () => monthlyGoalDialog(me.monthly_goal));
   root.querySelector("#btn-edit-profile").addEventListener("click", () => editProfileDialog(me));
   root.querySelector("#activity-card").addEventListener("click", () => openMyActivitySheet());
   if (devModeActive()) wireDevPanel(root, me.telegram_id, () => loadProfile());
+  notifyGoalReachedIfNeeded(me, goalSet, goalOver, goalDone);
+}
+
+// Системный тост при первом заходе после того, как цель месяца
+// выполнена — а не только цвет кольца, который увидишь лишь если сам
+// зашёл на вкладку «Я». Флаг «уже уведомляли в этом месяце» — в
+// localStorage (per-machine, не критично разделять между устройствами
+// одного человека), ключ включает telegram_id и месяц, чтобы новый
+// месяц с той же целью снова мог уведомить.
+function notifyGoalReachedIfNeeded(me, goalSet, goalOver, goalDone) {
+  if (!goalSet || !goalOver) return;
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const flagKey = `phoenix_goal_notified_${me.telegram_id}_${monthKey}`;
+  try {
+    if (localStorage.getItem(flagKey)) return;
+    localStorage.setItem(flagKey, "1");
+  } catch (_) { return; } // приватный режим/запрет хранилища — не критично, просто без уведомления
+  sendNotification({
+    title: "PHOENIX DUB",
+    body: `Цель месяца выполнена — ${goalDone} из ${me.monthly_goal} отчётов закрыто. 🎯`,
+  });
 }
 
 function editProfileDialog(me) {
@@ -378,7 +417,7 @@ async function openTeamSheet() {
     return;
   }
   const rows = (d.users || []).map(u => `
-    <div class="team-row" data-open-user="${u.telegram_id}">
+    <div class="team-row" data-open-user="${u.telegram_id}" data-username="${esc(u.username || "")}">
       ${avatarHtml(u.telegram_id, u.name, "sm")}
       <span class="online-dot${u.online ? "" : " off"}"></span>
       <div class="nm"><div class="n">${esc(u.name)}${u.is_owner ? ` <span class="dev-pill">DEV</span>` : ""}</div><div class="r">${esc(u.role || "без роли")}</div></div>
@@ -394,8 +433,39 @@ async function openTeamSheet() {
   loadAvatars(sheet);
   sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
   sheet.querySelectorAll("[data-open-user]").forEach(row => {
-    row.addEventListener("click", () => openUserProfile(parseInt(row.dataset.openUser, 10)));
+    const telegramId = parseInt(row.dataset.openUser, 10);
+    row.addEventListener("click", () => openUserProfile(telegramId));
+    // Правый клик — быстрые действия без открытия целого профиля:
+    // привычка из проводника/почты, а не только «клик = открыть».
+    row.addEventListener("contextmenu", e => {
+      e.preventDefault();
+      const username = row.dataset.username;
+      const items = [{ label: "Открыть профиль", action: () => openUserProfile(telegramId) }];
+      if (username) {
+        items.push({ label: "Написать в Telegram", action: () => openTelegramProfile(username) });
+      }
+      items.push({
+        label: "Скопировать Telegram ID",
+        action: () => {
+          navigator.clipboard.writeText(String(telegramId))
+            .then(() => toast("ID скопирован."))
+            .catch(() => toast("Не удалось скопировать.", "error"));
+        },
+      });
+      showContextMenu(e.clientX, e.clientY, items);
+    });
   });
+}
+
+// Открыть личный чат в Telegram — во внешнем приложении/браузере
+// (plugin:shell|open), а не внутри окна PHOENIX DUB: это desktop-клиент
+// студии, не браузер, встраивать чужой веб-клиент Telegram сюда незачем.
+async function openTelegramProfile(username) {
+  try {
+    await invoke("plugin:shell|open", { path: `https://t.me/${username}` });
+  } catch (e) {
+    toast(`Не удалось открыть Telegram: ${e}`, "error");
+  }
 }
 
 async function openUserProfile(telegramId) {
