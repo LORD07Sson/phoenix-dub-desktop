@@ -741,6 +741,29 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .sheet-wide { width: min(620px, 94vw); }
 
+/* Настройки — блок альфа-канала (предупреждение + текущий/последний
+   коммит), см. settings.js: refreshAlphaBlock. */
+.alpha-warn {
+  /* Обычный rgba, не color-mix() — тот же принцип, что и везде в этом
+     проекте: не полагаться на CSS-фичи новее самого необходимого (см.
+     историю с внешним import map, не подхватившимся в реальном WebView2). */
+  background: rgba(232, 188, 85, .12);
+  border: 1px solid var(--s-work);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+#s-alpha-block code {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
 /* ---------- Командная палитра (Ctrl+K) ---------- */
 /* Сверху, а не по центру экрана, как обычные диалоги — привычнее для
    command palette (VS Code/Linear), да и не перекрывает взгляд на то,

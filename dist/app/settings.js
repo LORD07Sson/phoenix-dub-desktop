@@ -10,6 +10,15 @@ import { openAdminPanel } from "./admin.js";
 
 const APP_VERSION = "0.5.0"; // подставляется автоматически из VERSION при сборке в CI (build.yml)
 
+// Альфа-сборки несут короткий коммит как SemVer build-metadata —
+// "0.5.8-alpha.90+78ab7a92" (см. build-alpha.yml) — само сравнение
+// версий Velopack'ом на него не смотрит (SemVer build-metadata в
+// приоритет не участвует), тут его просто вытаскиваем для отображения.
+function commitFromVersion(version) {
+  const m = /\+([0-9a-f]{6,40})$/i.exec(version || "");
+  return m ? m[1] : null;
+}
+
 async function openSettings() {
   let autostartOn = false;
   try { autostartOn = await invoke("is_autostart"); } catch (_) {}
@@ -52,6 +61,17 @@ async function openSettings() {
         <option value="alpha" ${updateChannel === "alpha" ? "selected" : ""}>Альфа (тестовые сборки)</option>
       </select>
     </div>
+    <div id="s-alpha-block" hidden>
+      <div class="alpha-warn">⚠️ Альфа-сборки собираются на каждый коммит в main и не являются стабильными релизами — автоматического отката нет.</div>
+      <div class="row" style="align-items:center; justify-content:space-between;">
+        <span>Текущий коммит</span>
+        <code id="s-commit-current">—</code>
+      </div>
+      <div class="row" style="align-items:center; justify-content:space-between;">
+        <span>Последний коммит</span>
+        <code id="s-commit-latest">—</code>
+      </div>
+    </div>
     <div class="row" style="align-items:center; justify-content:space-between;">
       <span>Доступ участников и состояние системы</span>
       <button class="btn" id="s-open-admin" style="padding:5px 12px; font-size:12.5px;">🔐 Админ-панель</button>
@@ -60,7 +80,6 @@ async function openSettings() {
       Ctrl+Shift+P — показать/скрыть окно из любого места, даже когда оно свёрнуто в трей.<br>
       Крестик у окна сворачивает в трей — опрос новых назначений продолжает идти в фоне.
       ${state.isDeveloper ? "<br>Режим разработчика открывает правку чужих ролей/профиля/даты вступления/наград — на карточке коллеги (клик по тизеру команды)." : ""}
-      <br>Альфа-канал — тестовые сборки чаще, без ожидания «настоящего» релиза, но менее стабильные. Переключение применяется со следующей проверки обновлений.
     </p>
     <div class="sheet-actions"><button class="btn primary" data-close>Готово</button></div>
   `);
@@ -77,11 +96,36 @@ async function openSettings() {
   const devToggle = overlay.querySelector("#s-dev-mode");
   if (devToggle) devToggle.addEventListener("change", e => setDevModeOn(e.target.checked));
   overlay.querySelector("#s-check-update").addEventListener("click", () => checkForUpdates(false));
+
+  // Блок "текущий/последний коммит" — только для альфа-канала (у
+  // стабильных сборок нет вшитого коммита, см. commitFromVersion).
+  // "Последний" узнаём тем же check_for_update, которым пользуется
+  // обычная проверка обновлений — лишнего эндпоинта не нужно, только
+  // здесь мы его не открываем диалогом, а просто вытаскиваем коммит.
+  async function refreshAlphaBlock(channel) {
+    const block = overlay.querySelector("#s-alpha-block");
+    block.hidden = channel !== "alpha";
+    if (channel !== "alpha") return;
+
+    const currentSha = commitFromVersion(APP_VERSION) || "?";
+    overlay.querySelector("#s-commit-current").textContent = currentSha;
+    overlay.querySelector("#s-commit-latest").textContent = "…";
+    try {
+      const update = await invoke("check_for_update");
+      const latestSha = update ? (commitFromVersion(update.version) || "?") : currentSha;
+      overlay.querySelector("#s-commit-latest").textContent = latestSha;
+    } catch (_) {
+      overlay.querySelector("#s-commit-latest").textContent = "?";
+    }
+  }
+  refreshAlphaBlock(updateChannel);
+
   overlay.querySelector("#s-update-channel").addEventListener("change", async e => {
     const channel = e.target.value;
     try {
       await invoke("set_update_channel", { channel });
       toast(channel === "alpha" ? "Альфа-канал включён." : "Возвращено на стабильный канал.");
+      await refreshAlphaBlock(channel);
     } catch (err) {
       toast(`Не удалось сменить канал: ${err}`, "error");
     }

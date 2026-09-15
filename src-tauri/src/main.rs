@@ -54,15 +54,20 @@ fn set_update_channel(app: tauri::AppHandle, channel: String) -> Result<(), Stri
 fn velopack_update_manager(app: &tauri::AppHandle) -> Result<velopack::UpdateManager, String> {
     let source = velopack::sources::GithubSource::new(UPDATE_REPO_URL, None, false);
     let channel = get_update_channel(app.clone())?;
-    let options = if channel == ALPHA_CHANNEL {
-        Some(velopack::UpdateOptions {
-            ExplicitChannel: Some(ALPHA_CHANNEL.to_string()),
-            ..Default::default()
-        })
-    } else {
-        None
+    // AllowVersionDowngrade — иначе переключение обратно на stable
+    // после альфы не увидело бы стабильную версию как обновление:
+    // "0.5.8-alpha.90" по SemVer СТАРШЕ "0.5.8" (у прешрелиза ниже
+    // приоритет, чем у финальной версии с теми же числами), а стабильный
+    // канал вообще может не успеть обогнать номер, до которого дошла
+    // альфа. Ровно тот сценарий "хочу вернуться на stable без
+    // переустановки", который описывает сам ExplicitChannel в докстринге
+    // Velopack.
+    let options = velopack::UpdateOptions {
+        AllowVersionDowngrade: true,
+        ExplicitChannel: if channel == ALPHA_CHANNEL { Some(ALPHA_CHANNEL.to_string()) } else { None },
+        ..Default::default()
     };
-    velopack::UpdateManager::new(source, options, None).map_err(|e| e.to_string())
+    velopack::UpdateManager::new(source, Some(options), None).map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize)]

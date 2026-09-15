@@ -10,6 +10,9 @@ name: Build desktop client (alpha channel)
 # из build.yml этими сборками не затрагивается вообще: они живут в
 # releases.alpha.json, стабильный клиент продолжает читать
 # releases.win.json и их не увидит.
+#
+# Один rolling-релиз (тег alpha-latest), не новый релиз на каждый
+# push — старый alpha-latest удаляется перед публикацией нового.
 on:
   push:
     branches: [main]
@@ -30,13 +33,20 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      # Версия альфа-сборки — VERSION + "-alpha.<номер запуска>"
-      # (валидный SemVer prerelease-суффикс) — не пересекается с
-      # версиями настоящих релизов из build.yml, даже если VERSION
-      # между ними не менялся: номер запуска всегда растёт.
+      # Версия альфа-сборки — VERSION + "-alpha.<номер запуска>+<короткий
+      # коммит>". Хвост "-alpha.N" — то, по чему Velopack реально сравнивает
+      # версии (номер запуска монотонно растёт, поэтому каждая альфа-сборка
+      # гарантированно "новее" предыдущей даже если VERSION между ними не
+      # менялся); "+sha" — SemVer build-metadata, в сравнение версий не
+      # участвует (SemVer это буквально не учитывает), только для
+      # отображения "текущий/последний коммит" в Настройках (settings.js
+      # достаёт его из APP_VERSION regex'ом по "+").
       - name: Версия альфа-сборки
         shell: bash
-        run: echo "PKG_VERSION=$(cat VERSION)-alpha.${{ github.run_number }}" >> "$GITHUB_ENV"
+        run: |
+          short_sha="$(echo "${{ github.sha }}" | cut -c1-8)"
+          echo "SHORT_SHA=$short_sha" >> "$GITHUB_ENV"
+          echo "PKG_VERSION=$(cat VERSION)-alpha.${{ github.run_number }}+$short_sha" >> "$GITHUB_ENV"
 
       - name: Подставить версию в tauri.conf.json/Cargo.toml/settings.js
         shell: bash
@@ -97,6 +107,18 @@ jobs:
             --channel alpha \
             --outputDir release_output
 
+      # Тег alpha-latest — один и тот же на каждый запуск (rolling
+      # release), поэтому старый релиз под этим тегом удаляем перед
+      # публикацией нового — иначе vpk upload наткнётся на уже
+      # существующий тег. "|| true" — на самом первом запуске такого
+      # релиза ещё нет, gh обычным образом вернёт ошибку, которую тут
+      # можно спокойно проигнорировать.
+      - name: Убрать предыдущий alpha-latest
+        shell: bash
+        run: gh release delete alpha-latest --yes --cleanup-tag || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Опубликовать альфа-релиз на GitHub
         shell: bash
         run: |
@@ -107,5 +129,5 @@ jobs:
             --token "${{ secrets.GITHUB_TOKEN }}" \
             --channel alpha \
             --publish \
-            --tag "alpha-v${{ env.PKG_VERSION }}" \
-            --releaseName "PHOENIX DUB alpha ${{ env.PKG_VERSION }}"
+            --tag alpha-latest \
+            --releaseName "PHOENIX DUB alpha (${{ env.SHORT_SHA }})"
