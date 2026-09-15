@@ -8,6 +8,19 @@
 </head>
 <body>
 
+<!-- ===================== Экран загрузки при старте (та же
+     анимация-маскот, что и в мини-аппе) ===================== -->
+<div class="app-splash" id="app-splash">
+  <div class="app-splash-mascot-wrap">
+    <div class="app-splash-glow"></div>
+    <div class="app-splash-mascot"><img src="assets/ayaya-club-ayaya.gif" alt=""></div>
+  </div>
+  <div class="app-splash-brand">PHOENIX <b>DUB</b></div>
+  <div class="app-splash-tagline">студия дубляжа аниме</div>
+  <div class="app-splash-bar-track"><div class="app-splash-bar-fill"></div></div>
+  <div class="app-splash-status">Загружаем данные…</div>
+</div>
+
 <!-- ===================== Экран входа ===================== -->
 <div id="auth-screen">
   <div class="auth-card">
@@ -41,6 +54,7 @@
   <div class="tabstrip" id="tabstrip">
     <button class="tab-btn active" data-tab="overview">📊 Обзор</button>
     <button class="tab-btn" data-tab="list">📋 Список</button>
+    <button class="tab-btn" data-tab="feed">🕘 Лента</button>
     <button class="tab-btn" data-tab="profile">👤 Я</button>
   </div>
 
@@ -116,6 +130,13 @@
     </div>
 
     <div class="statusbar" id="statusbar">Отчётов: 0 · клик по строке — открыть карточку, чекбоксы — массовые операции · Ctrl+Shift+P — показать/скрыть окно из любого места</div>
+  </div>
+
+  <!-- ===== Лента ===== -->
+  <div class="tab-panel" data-panel="feed">
+    <div class="scroll-panel" id="feed-panel">
+      <div id="feed-body"></div>
+    </div>
   </div>
 
   <!-- ===== Я ===== -->

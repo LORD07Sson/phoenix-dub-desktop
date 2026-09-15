@@ -20,6 +20,7 @@ module.exports = [
         requestAnimationFrame: "readonly",
         URLSearchParams: "readonly",
         Promise: "readonly",
+        Image: "readonly",
       },
     },
     rules: {
