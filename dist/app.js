@@ -242,6 +242,7 @@ function loadActiveTab(force) {
   state.loadedTabs.add(name);
   if (name === "overview") loadOverview();
   else if (name === "list") loadReports();
+  else if (name === "board") loadBoard();
   else if (name === "feed") loadFeed();
   else if (name === "profile") loadProfile();
 }
@@ -1088,6 +1089,20 @@ function loadAvatars(root) {
   });
 }
 
+// Своя картинка баннера профиля (/api/banner/{id}) — 204, если её нет
+// (пресет/пусто), тогда молча остаёмся на градиенте из CSS.
+function loadProfileBanner(el, telegramId) {
+  if (!el || !telegramId) return;
+  const img = new Image();
+  img.onload = () => {
+    el.style.backgroundImage = `url(${img.src})`;
+    el.style.backgroundSize = "cover";
+    el.style.backgroundPosition = "center";
+  };
+  img.onerror = () => {};
+  img.src = `${API_BASE}/banner/${telegramId}?init_data=${encodeURIComponent(state.token)}`;
+}
+
 // Кольцо аватара по стажу в команде — те же пороги, что в мини-аппе.
 function tenureTier(days) {
   if (days == null) return null;
@@ -1224,7 +1239,7 @@ async function loadProfile() {
   `;
 
   root.innerHTML = `
-    <div class="profile-banner-wrap"></div>
+    <div class="profile-banner-wrap" id="profile-banner"></div>
     <div class="profile-head-card">
       <span class="avatar-ring${tier ? " tier-" + tier : ""}">${avatarHtml(me.telegram_id, me.display_name || me.name, "xl")}</span>
       <div class="nm-row">
@@ -1271,6 +1286,7 @@ async function loadProfile() {
     </div>
   `;
   loadAvatars(root);
+  loadProfileBanner(root.querySelector("#profile-banner"), me.telegram_id);
   playDonutIntro(root);
   root.querySelectorAll(".role-bar-fill").forEach(el => {
     requestAnimationFrame(() => requestAnimationFrame(() => { el.style.width = el.dataset.pct + "%"; }));
@@ -1310,6 +1326,84 @@ function pluralColleagues(n) {
   if (mod10 === 1 && mod100 !== 11) return "коллега";
   if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return "коллеги";
   return "коллег";
+}
+
+// ---------- Доска (канбан по статусам, /api/board) ----------
+// Список статусов и их порядок приходят прямо в ответе /api/board
+// (d.statuses) — не дублируем их отдельной константой на клиенте.
+
+function boardCardHtml(r) {
+  const overdue = isOverdue(r);
+  return `
+    <div class="board-card" data-open="${esc(r.public_id)}">
+      <div class="id">${esc(r.public_id)}</div>
+      <div class="ttl">${esc(r.title)}</div>
+      <div class="foot">
+        ${assigneesHtml(r.assignees)}
+        <span class="deadline ${overdue ? "overdue" : ""}">${overdue ? "⏰ " : ""}${esc(r.deadline || "—")}</span>
+      </div>
+    </div>`;
+}
+
+function wireBoardCards(root) {
+  root.querySelectorAll(".board-card[data-open]").forEach(el => {
+    el.addEventListener("click", () => openReportDetail(el.dataset.open));
+  });
+}
+
+async function loadBoard() {
+  const root = $("#board-body");
+  root.innerHTML = dialogSkeletonHtml(4);
+  let d;
+  try {
+    d = await apiGet("/board");
+  } catch (e) {
+    root.innerHTML = `<div class="bento-empty">Не удалось загрузить доску: ${esc(e.message)}</div>`;
+    return;
+  }
+  root.innerHTML = `
+    <div class="board">
+      ${d.statuses.map(col => `
+        <div class="board-col" data-status="${esc(col.status)}">
+          <div class="board-col-head">
+            <span class="lb"><span class="dot ${STATUS_DOT_CLASS[col.status] || "draft"}"></span>${esc(col.label)}</span>
+            <span class="cnt">${col.total}</span>
+          </div>
+          <div class="board-cards" data-count="${col.reports.length}">
+            ${col.reports.length ? col.reports.map(boardCardHtml).join("") : `<div class="board-col-empty">пусто</div>`}
+          </div>
+          ${col.has_more ? `<button class="btn ghost board-col-more" data-loadmore="${esc(col.status)}">Показать ещё (${col.total - col.reports.length})</button>` : ""}
+        </div>
+      `).join("")}
+    </div>
+  `;
+  wireBoardCards(root);
+  root.querySelectorAll("[data-loadmore]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const status = btn.dataset.loadmore;
+      const colEl = root.querySelector(`.board-col[data-status="${status}"]`);
+      const cardsEl = colEl.querySelector(".board-cards");
+      const offset = parseInt(cardsEl.dataset.count, 10) || 0;
+      btn.disabled = true;
+      btn.textContent = "Загрузка…";
+      try {
+        const res = await apiGet(`/board/column/${status}`, { offset, limit: 60 });
+        cardsEl.querySelector(".board-col-empty")?.remove();
+        cardsEl.insertAdjacentHTML("beforeend", res.reports.map(boardCardHtml).join(""));
+        cardsEl.dataset.count = offset + res.reports.length;
+        wireBoardCards(cardsEl);
+        if (res.has_more) {
+          btn.disabled = false;
+          btn.textContent = `Показать ещё (${res.total - offset - res.reports.length})`;
+        } else {
+          btn.remove();
+        }
+      } catch (e) {
+        toast(`Не удалось догрузить колонку: ${e.message}`, "error");
+        btn.disabled = false;
+      }
+    });
+  });
 }
 
 // ---------- Лента (история изменений по отчётам + админ-лог) ----------
