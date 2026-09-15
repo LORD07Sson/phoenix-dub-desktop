@@ -27,25 +27,33 @@
 Нужны Rust (stable), Node.js 20+ и системные зависимости Tauri для
 вашей ОС (см. [официальный гайд по установке](https://tauri.app/start/prerequisites/)).
 
+Проект не использует `cargo-tauri` CLI (собирается напрямую `cargo
+build`/`cargo run`, см. build.yml) — поэтому переключение
+devUrl/frontendDist, которое CLI обычно делает само, здесь ручное:
+Cargo-фича `custom-protocol` **обязательна** при любом запуске без
+работающего `npm run dev` — без неё бинарник (в любом профиле, включая
+`--release`) пытается открыть `http://localhost:1420` и падает с
+`ERR_CONNECTION_REFUSED`, если там никто не слушает.
+
+Разработка с hot-reload (два терминала):
+
 ```bash
-npm install
-npm run dev        # только фронтенд, hot-reload — для правок вёрстки
+npm install && npm run dev          # терминал 1 — Vite dev-сервер
+cd src-tauri && cargo run           # терминал 2 — без --features custom-protocol
 ```
 
-Полный запуск приложения (Rust + фронтенд, требует `npm run build` заранее):
+Запуск как у обычного пользователя (без dev-сервера):
 
 ```bash
-npm install
-npm run build
-cd src-tauri
-cargo run
+npm install && npm run build
+cargo run --manifest-path src-tauri/Cargo.toml --features custom-protocol
 ```
 
-Для сборки релизного бинарника (без установщика):
+Сборка релизного бинарника (без установщика):
 
 ```bash
 npm run build
-cargo build --release --manifest-path src-tauri/Cargo.toml
+cargo build --release --manifest-path src-tauri/Cargo.toml --features custom-protocol
 ```
 
 Установщики (`Setup.exe`, `Portable.zip`, `.nupkg`) собирает CI —

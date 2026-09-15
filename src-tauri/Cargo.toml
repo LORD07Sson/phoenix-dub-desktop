@@ -4,6 +4,18 @@ version = "0.4.2"
 description = "PHOENIX DUB Desktop — клиент студии дубляжа"
 edition = "2021"
 
+# Без этой фичи tauri сам решает, что грузить, по debug/release-сборке —
+# а точнее НЕ решает: без custom-protocol он всегда пытается открыть
+# tauri.conf.json -> build.devUrl (Vite dev-сервер), даже в --release,
+# если сборка идёт напрямую cargo build (как в build.yml/build-alpha.yml),
+# а не через cargo-tauri CLI (тот сам подставляет этот флаг под капотом
+# для `tauri build`, но не для `tauri dev` — тут именно так и нужно).
+# Без флага собранный .exe у пользователя пытается открыть
+# http://localhost:1420 и падает с ERR_CONNECTION_REFUSED — там же нет
+# никакого Vite dev-сервера, это не окно разработчика.
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
