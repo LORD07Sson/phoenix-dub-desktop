@@ -114,7 +114,7 @@ jobs:
 
       - name: cargo build --release
         shell: bash
-        run: cargo build --release --manifest-path src-tauri/Cargo.toml
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
       # Velopack вместо tauri-action+NSIS: GithubSource на клиенте читает
       # релизы репозитория напрямую (репозиторий публичный), тихая
