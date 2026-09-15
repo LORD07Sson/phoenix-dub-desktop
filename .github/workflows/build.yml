@@ -1,4 +1,4 @@
-name: Build desktop client (Tauri)
+name: Build desktop client (Tauri + Velopack)
 
 on:
   # Раньше собирали под все 3 ОС на каждый push — GitHub Actions даёт
@@ -16,11 +16,8 @@ on:
 jobs:
   build:
     # Только Windows — раньше собирали под 3 ОС параллельно, но
-    # одновременные джобы регулярно ловили гонку при создании релиза
-    # (tauri-action issue: несколько джобов одновременно бьют GitHub
-    # release API "create release", один получает 403). Один джоб —
-    # гонки просто неоткуда взяться. macOS/Linux можно вернуть в матрицу
-    # позже, если понадобится — просто раскомментировать.
+    # одновременные джобы регулярно ловили гонку при создании релиза.
+    # Один джоб — гонки просто неоткуда взяться.
     permissions:
       contents: write
     runs-on: windows-latest
@@ -30,17 +27,22 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # vpk (упаковщик Velopack) — .NET-инструмент, windows-latest
+      # обычно уже несёт нужный SDK, но явный setup надёжнее, чем
+      # рассчитывать на то, что осталось в образе раннера сейчас.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
       - name: Версия релиза из VERSION
         shell: bash
         run: echo "PKG_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
 
       # VERSION — единственный источник версии; tauri.conf.json/Cargo.toml/
       # dist/app.js (APP_VERSION, показывается в диалоге "Настройки")
-      # подставляются отсюда прямо перед сборкой, чтобы номер в самих
-      # именах файлов установщиков и в самом приложении никогда не
-      # расходился с тегом релиза (однажды уже разъехалось — v0.3.0
-      # собрал файлы "...0.2.0...", а APP_VERSION вообще не патчился
-      # и годами показывал версию последней ручной правки).
+      # подставляются отсюда прямо перед сборкой, чтобы номер нигде не
+      # расходился (однажды уже разъехалось — v0.3.0 собрал файлы
+      # "...0.2.0...", а APP_VERSION вообще не патчился годами).
       - name: Подставить версию в tauri.conf.json/Cargo.toml/app.js
         shell: bash
         run: |
@@ -59,10 +61,13 @@ jobs:
 
       # ffmpeg нужен для локального QC звука — раньше требовался в PATH
       # у пользователя, теперь кладём готовый статичный бинарник прямо
-      # в установщик (src-tauri/binaries/ffmpeg.exe, см. tauri.conf.json
-      # bundle.resources и audio_qc.rs). В git лежит только текстовый
+      # в установщик (src-tauri/binaries/ffmpeg.exe рядом с .exe в
+      # pack_dir/, см. шаг vpk pack ниже). В git лежит только текстовый
       # плейсхолдер (иначе даже `cargo check` падает — resources
-      # проверяются на каждой сборке) — тут подменяем его настоящим.
+      # tauri.conf.json проверялись на каждой сборке, пока модуль не
+      # ушёл на Velopack-упаковку — плейсхолдер оставлен и сейчас, чтобы
+      # не плодить разные версии файла между ветками) — тут подменяем
+      # его настоящим.
       #
       # Источник — закреплённый (не "latest", иммутабельный) релиз
       # BtbN/FFmpeg-Builds, статичная LGPL-сборка (без GPL-кодеков —
@@ -87,17 +92,46 @@ jobs:
           rm -rf ffmpeg.zip ffmpeg_extracted
           test -s src-tauri/binaries/ffmpeg.exe || { echo "::error::ffmpeg.exe не найден в архиве"; exit 1; }
 
-      - uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          projectPath: .
-          tagName: v${{ env.PKG_VERSION }}
-          releaseName: "PHOENIX DUB v${{ env.PKG_VERSION }}"
-          releaseBody: |
-            Автосборка из main (commit ${{ github.sha }}).
-          releaseDraft: false
-          prerelease: false
-          uploadUpdaterJson: true
+      - name: cargo build --release
+        shell: bash
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml
+
+      # Velopack вместо tauri-action+NSIS: GithubSource на клиенте читает
+      # релизы репозитория напрямую (репозиторий публичный), тихая
+      # установка без UAC, задел на дельта-патчи между версиями. Пакуем
+      # в чистую директорию — Cargo кладёт рядом с .exe в target/release
+      # служебные файлы сборки (deps/, build/, .fingerprint/ и т.п.),
+      # которые vpk пытался бы упаковать вместе с приложением, если
+      # указать target/release как есть. ffmpeg.exe — тем же способом,
+      # рядом с главным .exe (см. audio_qc.rs: resolve_ffmpeg() ищет
+      # его именно рядом с исполняемым файлом приложения).
+      - name: Собрать релиз через vpk
+        shell: bash
+        run: |
+          set -e
+          dotnet tool update -g vpk
+          mkdir -p pack_dir
+          cp src-tauri/target/release/phoenix-dub-desktop.exe pack_dir/
+          cp src-tauri/binaries/ffmpeg.exe pack_dir/
+          echo "Автосборка из main (commit ${{ github.sha }})." > release_notes.md
+          vpk pack \
+            --packId PhoenixDubDesktop \
+            --packVersion "${{ env.PKG_VERSION }}" \
+            --packDir pack_dir \
+            --mainExe phoenix-dub-desktop.exe \
+            --packTitle "PHOENIX DUB Desktop" \
+            --icon src-tauri/icons/icon.ico \
+            --releaseNotes release_notes.md \
+            --outputDir release_output
+
+      - name: Опубликовать релиз на GitHub
+        shell: bash
+        run: |
+          set -e
+          vpk upload github \
+            --outputDir release_output \
+            --repoUrl "https://github.com/${{ github.repository }}" \
+            --token "${{ secrets.GITHUB_TOKEN }}" \
+            --publish \
+            --tag "v${{ env.PKG_VERSION }}" \
+            --releaseName "PHOENIX DUB v${{ env.PKG_VERSION }}"

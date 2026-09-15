@@ -16,6 +16,61 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+// Репозиторий публичный — GithubSource читает releases напрямую через
+// GitHub API (без токена, лимит 60 запросов/час на IP — с запасом для
+// студийного инструмента), прокси на своём сервере не нужен.
+const UPDATE_REPO_URL: &str = "https://github.com/LORD07Sson/phoenix-dub-desktop";
+
+fn velopack_update_manager() -> Result<velopack::UpdateManager, String> {
+    let source = velopack::sources::GithubSource::new(UPDATE_REPO_URL, None, false);
+    velopack::UpdateManager::new(source, None, None).map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct UpdateInfoOut {
+    version: String,
+    notes: String,
+}
+
+#[tauri::command]
+fn check_for_update() -> Result<Option<UpdateInfoOut>, String> {
+    let um = velopack_update_manager()?;
+    match um.check_for_updates().map_err(|e| e.to_string())? {
+        velopack::UpdateCheck::UpdateAvailable(info) => Ok(Some(UpdateInfoOut {
+            version: info.TargetFullRelease.Version.clone(),
+            notes: info.TargetFullRelease.NotesMarkdown.clone(),
+        })),
+        _ => Ok(None),
+    }
+}
+
+/// Качает и сразу ставит обновление, перезапуская приложение —
+/// `apply_updates_and_restart` завершает текущий процесс сам, эта
+/// команда наружу успевает вернуться только в случае ошибки.
+/// Прогресс скачивания (0..100) шлётся в JS событием "update-progress",
+/// чтобы прогресс-бар в диалоге обновления не стоял на месте на большом
+/// файле (сейчас ffmpeg внутри — установщик тяжёлый).
+#[tauri::command]
+fn download_and_apply_update(app: tauri::AppHandle) -> Result<(), String> {
+    let um = velopack_update_manager()?;
+    let info = match um.check_for_updates().map_err(|e| e.to_string())? {
+        velopack::UpdateCheck::UpdateAvailable(info) => *info,
+        _ => return Err("Обновление больше не доступно — кто-то уже обновился раньше вас?".into()),
+    };
+
+    let (tx, rx) = std::sync::mpsc::channel::<i16>();
+    let progress_app = app.clone();
+    std::thread::spawn(move || {
+        for pct in rx {
+            let _ = progress_app.emit("update-progress", pct);
+        }
+    });
+
+    um.download_updates(&info, Some(tx)).map_err(|e| e.to_string())?;
+    um.apply_updates_and_restart(&info.TargetFullRelease).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn qc_analyze(path: String) -> Result<audio_qc::QcReport, String> {
     audio_qc::analyze(&path)
@@ -54,6 +109,12 @@ async fn is_autostart(app: tauri::AppHandle) -> Result<bool, String> {
 }
 
 fn main() {
+    // Должен быть самой первой инструкцией в main() — Velopack иногда
+    // перезапускает/завершает процесс сам для служебных операций
+    // (первичная установка, применение обновления и т.п.), до того как
+    // остальной код приложения вообще успеет пойти.
+    velopack::VelopackApp::build().run();
+
     tauri::Builder::default()
         // Второй запуск (ярлык, автозапуск + ручной старт и т.п.) не должен
         // плодить второй процесс — вместо этого просто разворачиваем уже
@@ -69,8 +130,6 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -98,6 +157,8 @@ fn main() {
             token_clear,
             set_autostart,
             is_autostart,
+            check_for_update,
+            download_and_apply_update,
         ])
         .setup(|app| {
             // Глобальная горячая клавиша — свернуть/показать окно из любого места (Ctrl+Shift+P).
