@@ -43,9 +43,13 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      # Node 24 — активная LTS (поддержка до апреля 2028). На 20 CI стоять
+      # больше не может: линия EOL с апреля 2026, а devDependency jsdom
+      # (его использует scripts/verify-modules.mjs) с 30.x требует
+      # ^22.22.2 || ^24.15.0 || >=26.
       - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Версия релиза из VERSION
         shell: bash

@@ -43,17 +43,25 @@ const dom = new JSDOM(html, {
   pretendToBeVisual: true,
 });
 
-globalThis.window = dom.window;
-globalThis.document = dom.window.document;
-globalThis.localStorage = dom.window.localStorage;
-globalThis.navigator = dom.window.navigator;
-globalThis.Image = dom.window.Image;
+// Часть этих имён у самого Node — встроенные глобалы, причём
+// определённые только геттером (navigator появился в Node 21): простое
+// присваивание там падает с "Cannot set property ... which has only a
+// getter". Поэтому кладём через defineProperty, а не через =.
+function setGlobal(name, value) {
+  Object.defineProperty(globalThis, name, { value, writable: true, configurable: true });
+}
+
+setGlobal("window", dom.window);
+setGlobal("document", dom.window.document);
+setGlobal("localStorage", dom.window.localStorage);
+setGlobal("navigator", dom.window.navigator);
+setGlobal("Image", dom.window.Image);
 // Vite сам вставляет в бандл IIFE-полифилл modulepreload, который
 // создаёт MutationObserver сразу при импорте чанка (см. верх собранного
 // файла) — без этого глобала import ниже падает ещё до нашего кода.
-globalThis.MutationObserver = dom.window.MutationObserver;
-globalThis.requestAnimationFrame = dom.window.requestAnimationFrame || (cb => setTimeout(cb, 0));
-globalThis.fetch = async () => { throw new Error("fetch недоступен в проверке — это нормально, сеть не нужна для проверки импортов"); };
+setGlobal("MutationObserver", dom.window.MutationObserver);
+setGlobal("requestAnimationFrame", dom.window.requestAnimationFrame || (cb => setTimeout(cb, 0)));
+setGlobal("fetch", async () => { throw new Error("fetch недоступен в проверке — это нормально, сеть не нужна для проверки импортов"); });
 
 // Минимальная заглушка Tauri-бэкенда — ровно то же самое, что и в
 // Playwright-тестах этого проекта (см. summary методологии): достаточно,

@@ -39,7 +39,7 @@
 ## Разработка
 
 Нужны Rust (stable, не ниже 1.88 — см. `rust-version` в
-`src-tauri/Cargo.toml`), Node.js 20.19+ и системные зависимости Tauri для
+`src-tauri/Cargo.toml`), Node.js 24+ (столько же требует CI, см. `engines` в `package.json`) и системные зависимости Tauri для
 вашей ОС (см. [официальный гайд по установке](https://tauri.app/start/prerequisites/)).
 
 Проект не использует `cargo-tauri` CLI (собирается напрямую `cargo
