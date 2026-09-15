@@ -1066,7 +1066,14 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
    drag'а (board.js: wireBoardScroll) переключается на auto — иначе
    доска отставала бы от курсора, плавность там не нужна, нужна
    мгновенная 1:1 привязка к пальцу/курсору. */
-.board { display: flex; gap: 12px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; cursor: grab; scroll-behavior: smooth; }
+/* touch-action: none — без него браузер может сам забрать жест
+   панорамирования нативно (тач/перо, а иногда и обычная мышь в
+   некоторых конфигурациях WebView2) ДО того, как его увидит наш
+   pointerdown/pointermove в board.js:wireBoardScroll — самодельный
+   drag тогда просто не запускается, хотя код сам по себе верный.
+   Тот же недостающий кусок нужен и карточкам (перенос между
+   колонками, wireCardDrag) — см. .board-card ниже. */
+.board { display: flex; gap: 12px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; cursor: grab; scroll-behavior: smooth; touch-action: none; }
 .board.panning { cursor: grabbing; }
 .board.panning .board-card { cursor: grabbing; }
 .board-col {
@@ -1082,6 +1089,7 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
   padding: 10px 12px; cursor: pointer; animation: row-in .22s ease both;
   transition: border-color .15s ease, transform .15s ease, opacity .15s ease;
+  touch-action: none; /* тот же самодельный drag, см. .board выше — карточка тоже тащится вручную (wireCardDrag) */
 }
 /* border-top/right/bottom-color, а не border-color целиком — иначе
    перекрывает цветную левую полоску статуса (border-left, инлайн-стиль
