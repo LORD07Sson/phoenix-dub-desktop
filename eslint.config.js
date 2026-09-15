@@ -27,6 +27,8 @@ module.exports = [
         Promise: "readonly",
         Image: "readonly",
         confirm: "readonly",
+        prompt: "readonly",
+        MutationObserver: "readonly",
       },
     },
     rules: {
