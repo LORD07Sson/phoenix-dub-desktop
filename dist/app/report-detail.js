@@ -6,6 +6,7 @@ import { API_BASE, apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from 
 import { state } from "./state.js";
 import { esc, initials, STATUS_DOT_CLASS, isOverdue } from "./utils.js";
 import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
+import { loadRoles, loadAssignable, userOptionsHtml } from "./titles-admin.js";
 
 const QC_FINDING_LABELS_RU = { clipping: "Клиппинг", silence: "Пауза", noise: "Шум", loud: "Громко", quiet: "Тихо" };
 const FILE_ICONS = { photo: "🖼", video: "🎬", audio: "🎵", voice: "🎙", document: "📄" };
@@ -17,19 +18,28 @@ export async function openReportDetail(publicId) {
   `, "wide");
 
   async function render() {
-    let detail, notes, checklist, files;
+    let detail, notes, checklist, files, roles, assignable;
     try {
-      [detail, notes, checklist, files] = await Promise.all([
+      [detail, notes, checklist, files, roles, assignable] = await Promise.all([
         apiGet(`/report/${publicId}`),
         apiGet(`/report/${publicId}/notes`),
         apiGet(`/report/${publicId}/checklist`),
         apiGet(`/report/${publicId}/files`),
+        loadRoles(),
+        loadAssignable(),
       ]);
     } catch (e) {
       overlay.querySelector(".sheet").innerHTML = `<div style="color:var(--s-stop);">Не удалось загрузить карточку: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
       overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
       return;
     }
+
+    // Черновик цепочки пайплайна — правится локально до нажатия
+    // «Сохранить», как и в мини-аппе (pipelineDraft): полный список
+    // шагов уходит на /pipeline разом, PATCH одного шага сервер не
+    // умеет. Сбрасывается при каждом render() (в т.ч. после сохранения
+    // заметки/чек-листа отчёта) — то же поведение, что и там.
+    let pipelineDraft = (detail.pipeline || []).map(s => ({ role: s.role, telegram_id: s.telegram_id || null, name: s.user_name || null }));
 
     const dotClass = STATUS_DOT_CLASS[detail.status] || "draft";
     const overdue = isOverdue(detail);
@@ -82,6 +92,21 @@ export async function openReportDetail(publicId) {
         <h3>Файлы (${files.files.length})</h3>
         <div id="files-list">${files.files.map(f => fileHtml(f, publicId)).join("")}</div>
       </div>` : ""}
+
+      <div class="detail-section">
+        <h3>Пайплайн ${detail.pipeline && detail.pipeline.length ? `<span style="color:var(--ink-dim); font-weight:400; font-size:12px;">${detail.pipeline.map(s => esc(s.role)).join(" → ")}</span>` : ""}</h3>
+        ${pipelineChainHtml(detail.pipeline, assignable)}
+        <div id="pipeline-draft-list"></div>
+        <div class="add-row">
+          <select id="pipeline-role-pick" class="field-input"><option value="">+ роль…</option>${roles.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("")}</select>
+          <select id="pipeline-user-pick" class="field-input">${userOptionsHtml(assignable, null)}</select>
+          <button class="btn" id="pipeline-add-step">+</button>
+        </div>
+        <div class="sheet-actions" style="margin-top:8px;">
+          <button class="btn primary" id="btn-pipeline-save">🔗 Сохранить пайплайн</button>
+          ${detail.pipeline && detail.pipeline.length ? `<button class="btn danger" id="btn-pipeline-clear">✕ Снять</button>` : ""}
+        </div>
+      </div>
 
       <div class="detail-section">
         <div style="display:flex; gap:8px;">
@@ -157,6 +182,62 @@ export async function openReportDetail(publicId) {
     });
     sheet.querySelector("#btn-history").addEventListener("click", () => openReportLogSheet(publicId, "history"));
     sheet.querySelector("#btn-activity").addEventListener("click", () => openReportLogSheet(publicId, "activity"));
+
+    function renderPipelineDraft() {
+      const host = sheet.querySelector("#pipeline-draft-list");
+      if (!host) return;
+      host.innerHTML = pipelineDraft.length
+        ? `<div class="chip-row" style="margin-bottom:8px;">${pipelineDraft.map((s, i) =>
+            `<span class="chip">${i + 1}. ${esc(s.role)}${s.name ? ` — ${esc(s.name)}` : ""} <button class="icon-btn" data-remove-step="${i}" style="padding:0 2px; border:none;">✕</button></span>`
+          ).join("")}</div>`
+        : `<div class="no-assignee">Пока пусто — добавьте первый этап</div>`;
+      host.querySelectorAll("[data-remove-step]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          pipelineDraft.splice(parseInt(btn.dataset.removeStep, 10), 1);
+          renderPipelineDraft();
+        });
+      });
+    }
+    renderPipelineDraft();
+
+    sheet.querySelector("#pipeline-add-step").addEventListener("click", () => {
+      const roleSel = sheet.querySelector("#pipeline-role-pick");
+      const userSel = sheet.querySelector("#pipeline-user-pick");
+      const role = roleSel.value;
+      if (!role) { toast("Выберите роль.", "error"); return; }
+      const telegram_id = userSel.value || null;
+      const name = telegram_id ? userSel.options[userSel.selectedIndex].textContent : null;
+      pipelineDraft.push({ role, telegram_id, name });
+      roleSel.value = "";
+      userSel.value = "";
+      renderPipelineDraft();
+    });
+    sheet.querySelector("#btn-pipeline-save").addEventListener("click", async () => {
+      try {
+        await apiPost(`/report/${publicId}/pipeline`, { steps: pipelineDraft.map(s => ({ role: s.role, telegram_id: s.telegram_id })) });
+        toast(pipelineDraft.length ? "Пайплайн сохранён." : "Пайплайн снят.");
+        await render();
+      } catch (e) { toast(`Не удалось сохранить пайплайн: ${e.message}`, "error"); }
+    });
+    const clearBtn = sheet.querySelector("#btn-pipeline-clear");
+    if (clearBtn) clearBtn.addEventListener("click", async () => {
+      if (!confirm("Снять пайплайн с отчёта?")) return;
+      try {
+        await apiPost(`/report/${publicId}/pipeline`, { steps: [] });
+        toast("Пайплайн снят.");
+        await render();
+      } catch (e) { toast(`Не удалось снять пайплайн: ${e.message}`, "error"); }
+    });
+    const advanceBtn = sheet.querySelector("#btn-pipeline-advance");
+    if (advanceBtn) advanceBtn.addEventListener("click", async () => {
+      const userSel = sheet.querySelector("#pipeline-next-user");
+      advanceBtn.disabled = true;
+      try {
+        const res = await apiPost(`/report/${publicId}/pipeline/advance`, { telegram_id: userSel ? (userSel.value || null) : null });
+        if (res.advanced) { toast(`Передано: ${res.role}.`); await render(); }
+        else { toast(res.detail || "Не удалось передать.", "error"); advanceBtn.disabled = false; }
+      } catch (e) { toast(`Не удалось передать этап: ${e.message}`, "error"); advanceBtn.disabled = false; }
+    });
     sheet.querySelector("#checklist-add").addEventListener("click", async () => {
       const input = sheet.querySelector("#checklist-new");
       const text = input.value.trim();
@@ -213,6 +294,25 @@ function noteHtml(n) {
     <div class="meta">${esc(n.author)} · ${esc(n.created_at || "")}</div>
     <div>${esc(n.text)}</div>
   </div>`;
+}
+
+// Текущая цепочка пайплайна (только чтение) + «передать дальше», если
+// есть следующий этап — отдельно от черновика-билдера ниже (тот
+// пересобирает цепочку целиком, этот просто двигает текущий указатель).
+function pipelineChainHtml(pipeline, assignable) {
+  if (!pipeline || !pipeline.length) return "";
+  const curIdx = pipeline.findIndex(s => s.current);
+  const hasNext = curIdx !== -1 && curIdx < pipeline.length - 1;
+  const chain = `<div class="chip-row" style="margin-bottom:8px;">${pipeline.map(s =>
+    `<span class="chip" style="${s.done ? "opacity:.55;" : (s.current ? "border-color:var(--fire); color:var(--fire);" : "")}">${esc(s.role)}${s.user_name ? ` — ${esc(s.user_name)}` : ""}</span>`
+  ).join("")}</div>`;
+  const advanceRow = hasNext
+    ? `<div class="add-row" style="margin-bottom:8px;">
+        <select id="pipeline-next-user" class="field-input">${userOptionsHtml(assignable, null)}</select>
+        <button class="btn" id="btn-pipeline-advance">🔥 Передать дальше</button>
+      </div>`
+    : "";
+  return chain + advanceRow;
 }
 
 function fileHtml(f, publicId) {
