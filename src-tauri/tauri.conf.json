@@ -4,7 +4,10 @@
   "version": "0.4.2",
   "identifier": "com.phoenixdub.desktop",
   "build": {
-    "frontendDist": "../dist"
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "withGlobalTauri": false,
@@ -19,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://minitg.shitstudent.com:8443; font-src 'self'"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://minitg.shitstudent.com:8443 ws://localhost:1420; font-src 'self'"
     },
     "trayIcon": {
       "iconPath": "icons/icon.png",

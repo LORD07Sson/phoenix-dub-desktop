@@ -12,8 +12,10 @@
 
 ## Стек
 
-- **Tauri v2** (Rust + обычный vanilla JS/HTML во фронтенде, без
-  сборщика — `dist/` раздаётся как есть)
+- **Tauri v2** (Rust) + **Vite** во фронтенде — большинство вкладок на
+  обычном vanilla JS, `Overview.jsx` — на [SolidJS](https://solidjs.com)
+  (первый пример частичной миграции, см. CHANGELOG; остальные вкладки
+  переносятся постепенно, не одним махом)
 - **Автообновление** — [Velopack](https://velopack.io), рассылка через
   GitHub Releases, отдельные stable/alpha-каналы
 - **Токены** — в системном keyring ОС, не в localStorage/файле
@@ -22,11 +24,19 @@
 
 ## Разработка
 
-Нужны Rust (stable) и системные зависимости Tauri для вашей ОС (см.
-[официальный гайд по установке](https://tauri.app/start/prerequisites/)).
-Фронтенд не собирается — `dist/` уже готовые статические файлы.
+Нужны Rust (stable), Node.js 20+ и системные зависимости Tauri для
+вашей ОС (см. [официальный гайд по установке](https://tauri.app/start/prerequisites/)).
 
 ```bash
+npm install
+npm run dev        # только фронтенд, hot-reload — для правок вёрстки
+```
+
+Полный запуск приложения (Rust + фронтенд, требует `npm run build` заранее):
+
+```bash
+npm install
+npm run build
 cd src-tauri
 cargo run
 ```
@@ -34,6 +44,7 @@ cargo run
 Для сборки релизного бинарника (без установщика):
 
 ```bash
+npm run build
 cargo build --release --manifest-path src-tauri/Cargo.toml
 ```
 
@@ -48,7 +59,8 @@ cargo build --release --manifest-path src-tauri/Cargo.toml
 | Путь | Что там |
 |---|---|
 | `src-tauri/` | Rust-бэкенд (команды, трей, автообновление, QC звука) |
-| `dist/` | Фронтенд — HTML/CSS/JS, раздроблен по темам в `dist/app/*.js` |
+| `src/` | Фронтенд-исходники — HTML/CSS/JS, раздроблен по темам в `src/app/*.js`; `Overview.jsx` — на SolidJS, остальные вкладки на vanilla JS (частичная миграция, см. CHANGELOG) |
+| `dist/` | Собранный фронтенд (`npm run build`, Vite) — не в git, пересобирается всегда |
 | `docs/API.md` | Список эндпоинтов сервера, которые дёргает клиент |
 | `legacy_python_client/` | Старый клиент на Python/Tk, до миграции на Tauri — оставлен для истории, не используется и не поддерживается |
 

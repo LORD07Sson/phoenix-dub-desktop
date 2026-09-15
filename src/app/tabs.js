@@ -3,7 +3,7 @@
 import { state } from "./state.js";
 import { apiGet } from "./api.js";
 import { $, $all } from "./utils.js";
-import { loadOverview } from "./overview.js";
+import { loadOverview } from "./Overview.jsx";
 import { loadReports } from "./reports.js";
 import { loadBoard } from "./board.js";
 import { loadTitlesTab } from "./titles.js";

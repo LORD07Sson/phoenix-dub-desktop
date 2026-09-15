@@ -1,20 +1,20 @@
-// Разовый скрипт проверки: реально ли резолвится граф ES-модулей
-// dist/app/*.js (совпадают ли имена export/import между файлами — то,
-// что node --check в принципе не видит, так как не резолвит модули).
-// Не часть рантайма приложения, не грузится в проде — только для
-// ручной/CI-проверки после правок в dist/app|vendor. Проект принципиально
-// без package.json (никакого npm build/bundler в дереве) — jsdom для
-// этого скрипта ставится разово и не сохраняется:
-//   cd desktop_client && npm install --no-save jsdom && node scripts/verify-modules.mjs
+// Разовый скрипт проверки: реально ли резолвится и выполняется собранный
+// Vite-бандл (dist/assets/*.js) — импортирует ли себя без ошибок, что
+// node --check в принципе не видит (он не резолвит модули). Раньше
+// (до перехода на Vite/Solid, см. историю миграции) импортировал
+// dist/app/main.js напрямую — все импорты были относительными путями,
+// без сборки. Теперь src/app/*.js(x) держит бэйр-специфи-каторы
+// ("@tauri-apps/api/core") и JSX, которые сам Node не резолвит —
+// поэтому проверяем УЖЕ СОБРАННЫЙ бандл (там всё уже инлайнено Vite,
+// внешних импортов не остаётся, обычный self-contained ES-модуль):
+//   cd desktop_client && npm run build && node scripts/verify-modules.mjs
 //
-// Поднимает jsdom с реальным index.html, стабит window.__TAURI_INTERNALS__
-// (иначе синхронный getCurrentWindow() в vendor/tauri-api/window.js
-// бросает исключение прямо на этапе импорта — в реальном приложении его
-// подставляет сам Tauri) и импортирует dist/app/main.js напрямую — все
-// импорты в dist/app|vendor относительные (никаких бэйр-спецификаторов
-// вроде "@tauri-apps/api/core" и import map — на реальном WebView2
-// пользователя внешний import map не подхватился, см. app/tauri.js),
-// поэтому Node резолвит их сам, без кастомных loader-хуков.
+// Поднимает jsdom с реальным dist/index.html, стабит
+// window.__TAURI_INTERNALS__ (иначе синхронный getCurrentWindow() в
+// @tauri-apps/api/window бросает исключение прямо на этапе импорта —
+// в реальном приложении его подставляет сам Tauri) и импортирует тот
+// же JS-чанк, что подключает index.html (имя с хэшем — не хардкодим,
+// вычитываем из <script> в HTML).
 
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
@@ -22,7 +22,20 @@ import { pathToFileURL } from "node:url";
 import path from "node:path";
 
 const distDir = path.resolve(import.meta.dirname, "..", "dist");
-const html = readFileSync(path.join(distDir, "index.html"), "utf8");
+let html;
+try {
+  html = readFileSync(path.join(distDir, "index.html"), "utf8");
+} catch {
+  console.error("dist/index.html не найден — сначала соберите: npm run build");
+  process.exit(1);
+}
+
+const scriptMatch = html.match(/<script[^>]*type="module"[^>]*src="([^"]+)"/);
+if (!scriptMatch) {
+  console.error("В dist/index.html не нашёлся <script type=\"module\" src=\"...\">.");
+  process.exit(1);
+}
+const entryPath = path.join(distDir, scriptMatch[1].replace(/^\.\//, ""));
 
 const dom = new JSDOM(html, {
   url: "http://localhost/",
@@ -35,14 +48,17 @@ globalThis.document = dom.window.document;
 globalThis.localStorage = dom.window.localStorage;
 globalThis.navigator = dom.window.navigator;
 globalThis.Image = dom.window.Image;
+// Vite сам вставляет в бандл IIFE-полифилл modulepreload, который
+// создаёт MutationObserver сразу при импорте чанка (см. верх собранного
+// файла) — без этого глобала import ниже падает ещё до нашего кода.
+globalThis.MutationObserver = dom.window.MutationObserver;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame || (cb => setTimeout(cb, 0));
 globalThis.fetch = async () => { throw new Error("fetch недоступен в проверке — это нормально, сеть не нужна для проверки импортов"); };
 
 // Минимальная заглушка Tauri-бэкенда — ровно то же самое, что и в
-// Playwright-тестах этого проекта (см. summary методологии), только
-// теперь на уровне window.__TAURI_INTERNALS__, а не window.__TAURI__:
-// достаточно, чтобы модули импортировались и выполнили свой
-// top-level код (навешивание обработчиков), не более.
+// Playwright-тестах этого проекта (см. summary методологии): достаточно,
+// чтобы модули импортировались и выполнили свой top-level код
+// (навешивание обработчиков, root.render() и т.п.), не более.
 dom.window.__TAURI_INTERNALS__ = {
   invoke: async () => null,
   transformCallback: () => 0,
@@ -51,9 +67,8 @@ dom.window.__TAURI_INTERNALS__ = {
   metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
 };
 
-const mainUrl = pathToFileURL(path.join(distDir, "app", "main.js")).href;
-await import(mainUrl);
+await import(pathToFileURL(entryPath).href);
 
-console.log("OK: граф модулей dist/app/*.js резолвится без ошибок (import/export совпадают).");
+console.log(`OK: собранный бандл (${path.relative(distDir, entryPath)}) импортируется и выполняется без ошибок.`);
 // notifications.js вешает setInterval, который держал бы процесс открытым вечно.
 process.exit(0);

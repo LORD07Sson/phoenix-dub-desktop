@@ -34,18 +34,24 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Версия релиза из VERSION
         shell: bash
         run: echo "PKG_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
 
       # VERSION — единственный источник версии; tauri.conf.json/Cargo.toml/
-      # dist/app/settings.js (APP_VERSION, показывается в диалоге
+      # src/app/settings.js (APP_VERSION, показывается в диалоге
       # "Настройки" — раньше жил в dist/app.js, файл раздроблен на модули,
-      # см. dist/app/*.js) подставляются отсюда прямо перед сборкой, чтобы
+      # см. src/app/*.js) подставляются отсюда прямо перед сборкой, чтобы
       # номер в самих именах файлов установщиков и в самом приложении
       # никогда не расходился с тегом релиза (однажды уже разъехалось —
       # v0.3.0 собрал файлы "...0.2.0...", а APP_VERSION вообще не
       # патчился и годами показывал версию последней ручной правки).
+      # Патчим ИСХОДНИК (src/), не dist/ — dist/ теперь собирает Vite
+      # ниже, у собранного бандла уже нет файла с таким именем.
       - name: Подставить версию в tauri.conf.json/Cargo.toml/settings.js
         shell: bash
         run: |
@@ -59,8 +65,19 @@ jobs:
           "
           sed -i.bak -E 's/^version = \"[0-9.]+\"/version = \"${{ env.PKG_VERSION }}\"/' src-tauri/Cargo.toml
           rm -f src-tauri/Cargo.toml.bak
-          sed -i.bak -E 's/const APP_VERSION = \"[0-9.]+\"/const APP_VERSION = \"${{ env.PKG_VERSION }}\"/' dist/app/settings.js
-          rm -f dist/app/settings.js.bak
+          sed -i.bak -E 's/const APP_VERSION = \"[0-9.]+\"/const APP_VERSION = \"${{ env.PKG_VERSION }}\"/' src/app/settings.js
+          rm -f src/app/settings.js.bak
+
+      # Фронтенд теперь собирается Vite (src/ -> dist/, см. историю
+      # миграции vanilla JS -> Vite/Solid) — раньше dist/ был готовыми
+      # файлами прямо в git, отдельного шага сборки не требовалось.
+      # Обязательно ПОСЛЕ подстановки версии выше — иначе в собранный
+      # бандл попадёт версия из settings.js как она лежит в git.
+      - name: npm ci && vite build
+        shell: bash
+        run: |
+          npm ci
+          npm run build
 
       # ffmpeg нужен для локального QC звука — раньше требовался в PATH
       # у пользователя, теперь кладём готовый статичный бинарник прямо

@@ -33,6 +33,10 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       # Версия альфа-сборки — VERSION + "-alpha.<номер запуска>+<короткий
       # коммит>". Хвост "-alpha.N" — то, по чему Velopack реально сравнивает
       # версии (номер запуска монотонно растёт, поэтому каждая альфа-сборка
@@ -61,8 +65,16 @@ jobs:
           "
           sed -i.bak -E 's/^version = \"[0-9.]+\"/version = \"${{ env.PKG_VERSION }}\"/' src-tauri/Cargo.toml
           rm -f src-tauri/Cargo.toml.bak
-          sed -i.bak -E 's/const APP_VERSION = \"[0-9.]+\"/const APP_VERSION = \"${{ env.PKG_VERSION }}\"/' dist/app/settings.js
-          rm -f dist/app/settings.js.bak
+          sed -i.bak -E 's/const APP_VERSION = \"[0-9.]+\"/const APP_VERSION = \"${{ env.PKG_VERSION }}\"/' src/app/settings.js
+          rm -f src/app/settings.js.bak
+
+      # Фронтенд теперь собирается Vite (src/ -> dist/) — обязательно
+      # ПОСЛЕ подстановки версии выше, см. build.yml за тем же самым.
+      - name: npm ci && vite build
+        shell: bash
+        run: |
+          npm ci
+          npm run build
 
       # Тот же закреплённый ffmpeg.exe, что и в build.yml — держать в
       # синхроне руками при обновлении URL/SHA256 там.
