@@ -39,11 +39,14 @@ jobs:
         run: echo "PKG_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
 
       # VERSION — единственный источник версии; tauri.conf.json/Cargo.toml/
-      # dist/app.js (APP_VERSION, показывается в диалоге "Настройки")
-      # подставляются отсюда прямо перед сборкой, чтобы номер нигде не
-      # расходился (однажды уже разъехалось — v0.3.0 собрал файлы
-      # "...0.2.0...", а APP_VERSION вообще не патчился годами).
-      - name: Подставить версию в tauri.conf.json/Cargo.toml/app.js
+      # dist/app/settings.js (APP_VERSION, показывается в диалоге
+      # "Настройки" — раньше жил в dist/app.js, файл раздроблен на модули,
+      # см. dist/app/*.js) подставляются отсюда прямо перед сборкой, чтобы
+      # номер в самих именах файлов установщиков и в самом приложении
+      # никогда не расходился с тегом релиза (однажды уже разъехалось —
+      # v0.3.0 собрал файлы "...0.2.0...", а APP_VERSION вообще не
+      # патчился и годами показывал версию последней ручной правки).
+      - name: Подставить версию в tauri.conf.json/Cargo.toml/settings.js
         shell: bash
         run: |
           set -e
@@ -56,8 +59,8 @@ jobs:
           "
           sed -i.bak -E 's/^version = \"[0-9.]+\"/version = \"${{ env.PKG_VERSION }}\"/' src-tauri/Cargo.toml
           rm -f src-tauri/Cargo.toml.bak
-          sed -i.bak -E 's/const APP_VERSION = \"[0-9.]+\"/const APP_VERSION = \"${{ env.PKG_VERSION }}\"/' dist/app.js
-          rm -f dist/app.js.bak
+          sed -i.bak -E 's/const APP_VERSION = \"[0-9.]+\"/const APP_VERSION = \"${{ env.PKG_VERSION }}\"/' dist/app/settings.js
+          rm -f dist/app/settings.js.bak
 
       # ffmpeg нужен для локального QC звука — раньше требовался в PATH
       # у пользователя, теперь кладём готовый статичный бинарник прямо
