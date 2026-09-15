@@ -99,10 +99,25 @@ export function renderReports() {
       <td><span class="priority-chip ${esc(r.priority)}"><span class="dot"></span>${esc(r.priority_label)}</span></td>
       <td class="deadline ${overdue ? "overdue" : ""}">${overdue ? "⏰ " : ""}${esc(r.deadline || "без срока")}</td>
       <td>${assigneesHtml(r.assignees)}</td>
+      <td class="row-actions">
+        <button class="icon-btn" data-quick-assign title="Назначить">👤</button>
+        <button class="icon-btn" data-quick-status title="Сменить статус">✓</button>
+      </td>
     `;
     tr.querySelector(".row-check").addEventListener("click", e => {
       e.stopPropagation();
       toggleSelected(r.public_id, e.target.checked);
+    });
+    // Быстрые действия по наведению на строку — открывают тот же диалог,
+    // что и чип на карточке отчёта, просто без похода внутрь карточки.
+    // stopPropagation — иначе клик по кнопке ещё и открыл бы саму карточку.
+    tr.querySelector("[data-quick-assign]").addEventListener("click", e => {
+      e.stopPropagation();
+      assignDialog([r.public_id], () => loadReports());
+    });
+    tr.querySelector("[data-quick-status]").addEventListener("click", e => {
+      e.stopPropagation();
+      changeStatusDialog([r.public_id], () => loadReports());
     });
     tr.addEventListener("click", () => openReportDetail(r.public_id));
     tbody.appendChild(tr);
