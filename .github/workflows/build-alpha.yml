@@ -143,48 +143,93 @@ jobs:
             --outputDir release_output
 
       # Тег alpha-latest — один и тот же на каждый запуск (rolling
-      # release), поэтому старый релиз под этим тегом удаляем перед
-      # публикацией нового — иначе vpk upload наткнётся на уже
-      # существующий тег. "|| true" — на самом первом запуске такого
-      # релиза ещё нет, gh обычным образом вернёт ошибку, которую тут
-      # можно спокойно проигнорировать.
-      - name: Убрать предыдущий alpha-latest
-        shell: bash
-        run: |
-          retry() {
-            for i in 1 2 3; do
-              "$@" && return 0
-              echo "попытка $i не удалась: $*" >&2
-              sleep $((i * 5))
-            done
-            return 1
-          }
-          # "|| true" — на самом первом запуске такого релиза ещё нет,
-          # gh обычным образом вернёт ошибку, которую тут можно
-          # спокойно проигнорировать (retry её тоже отработает впустую
-          # 3 раза и упадёт — но общий exit code всё равно гасим).
-          retry gh release delete alpha-latest --yes --cleanup-tag || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+      # release), поэтому старый релиз под этим тегом надо снести перед
+      # публикацией нового: vpk отказывается заливать в уже занятый тег.
+      #
+      # Снос и публикация — ОДНИМ шагом и внутри одной retry-попытки.
+      # Раньше это были два шага с отдельными retry, и оно разъезжалось
+      # так: vpk заливает ассеты в черновик, падает на «Converting draft
+      # to full published release», а повторная попытка уже упирается в
+      # «There is already an existing release tagged 'alpha-latest'» —
+      # свой же недоделанный релиз. Дальше канал оставался пустым, пока
+      # кто-нибудь не запушит в main снова (у нас так и вышло: альфа
+      # стояла мёртвой три часа). Теперь каждая попытка начинается с
+      # уборки за предыдущей.
+      #
+      # Уборка — через API, а не `gh release delete`: искать надо по тегу
+      # ВСЕ релизы, включая черновики (именно черновик и остаётся после
+      # неудачной публикации), а `gh release delete` на них срабатывает
+      # не всегда.
       - name: Опубликовать альфа-релиз на GitHub
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -e
-          retry() {
-            for i in 1 2 3; do
-              "$@" && return 0
-              echo "попытка $i не удалась: $*" >&2
-              sleep $((i * 5))
+
+          cleanup_alpha_latest() {
+            local ids
+            ids=$(gh api "repos/$REPO/releases" --paginate --jq '.[] | select(.tag_name=="alpha-latest") | .id')
+            for id in $ids; do
+              echo "Удаляю релиз alpha-latest (id=$id)"
+              gh api -X DELETE "repos/$REPO/releases/$id"
             done
-            return 1
+            # Тег мог остаться от релиза, удалённого без --cleanup-tag.
+            gh api -X DELETE "repos/$REPO/git/refs/tags/alpha-latest" >/dev/null 2>&1 || true
           }
-          retry vpk upload github \
-            --outputDir release_output \
-            --repoUrl "https://github.com/${{ github.repository }}" \
-            --token "${{ secrets.GITHUB_TOKEN }}" \
-            --channel alpha \
-            --publish \
-            --pre \
-            --tag alpha-latest \
-            --releaseName "PHOENIX DUB alpha (${{ env.SHORT_SHA }})"
+
+          publish() {
+            cleanup_alpha_latest
+            vpk upload github \
+              --outputDir release_output \
+              --repoUrl "https://github.com/$REPO" \
+              --token "$GH_TOKEN" \
+              --channel alpha \
+              --publish \
+              --pre \
+              --tag alpha-latest \
+              --releaseName "PHOENIX DUB alpha (${{ env.SHORT_SHA }})"
+          }
+
+          for i in 1 2 3; do
+            publish && break
+            echo "попытка $i не удалась" >&2
+            if [ "$i" = "3" ]; then exit 1; fi
+            sleep $((i * 5))
+          done
+
+      # Отдельная проверка, что релиз реально виден пользователям.
+      # vpk умеет завершиться с кодом 0, оставив релиз ЧЕРНОВИКОМ, —
+      # именно так альфа-канал и умер в прошлый раз: сборка зелёная,
+      # ассеты на месте, но черновик не отдаётся публичным API, и
+      # GithubSource на клиенте не видит вообще ничего.
+      - name: Проверить, что альфа-релиз опубликован
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          id=$(gh api "repos/$REPO/releases" --jq '.[] | select(.tag_name=="alpha-latest") | .id' | head -1)
+          if [ -z "$id" ]; then
+            echo "::error::Релиза alpha-latest нет вообще"
+            exit 1
+          fi
+          if [ "$(gh api "repos/$REPO/releases/$id" --jq .draft)" = "true" ]; then
+            echo "::warning::vpk оставил релиз черновиком — публикуем сами"
+            gh api -X PATCH "repos/$REPO/releases/$id" -F draft=false -F prerelease=true
+          fi
+          # Контрольный выстрел: фид должен скачиваться анонимно, ровно
+          # так за ним и приходит клиент.
+          url="https://github.com/$REPO/releases/download/alpha-latest/releases.alpha.json"
+          for i in 1 2 3; do
+            if curl -fsSL -o feed_check.json "$url"; then
+              echo "Фид альфа-канала доступен:"
+              cat feed_check.json
+              exit 0
+            fi
+            sleep $((i * 5))
+          done
+          echo "::error::releases.alpha.json недоступен по $url — клиенты обновление не увидят"
+          exit 1
