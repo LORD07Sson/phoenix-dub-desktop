@@ -129,7 +129,7 @@ export async function openReportDetail(publicId) {
         <div id="notes-list">${orderedNotes.map(noteHtml).join("") || `<div class="no-assignee">Пока нет заметок</div>`}</div>
         <div class="add-row note-add-row">
           <input id="note-time" class="note-time-input" placeholder="04:12" maxlength="8" inputmode="numeric" title="Время на дорожке — необязательно">
-          <textarea id="note-new" rows="2" placeholder="Написать заметку…"></textarea>
+          <textarea id="note-new" rows="2" placeholder="Написать заметку… (Ctrl+Enter — отправить)"></textarea>
           <button class="btn" id="note-add">Добавить</button>
         </div>
       </div>
@@ -301,7 +301,7 @@ export async function openReportDetail(publicId) {
       notesByTime = !notesByTime;
       await render();
     });
-    sheet.querySelector("#note-add").addEventListener("click", async () => {
+    async function addNote() {
       const ta = sheet.querySelector("#note-new");
       const timeInput = sheet.querySelector("#note-time");
       const text = ta.value.trim();
@@ -319,6 +319,17 @@ export async function openReportDetail(publicId) {
         await apiPost(`/report/${publicId}/notes`, { text: payload });
         await render();
       } catch (e) { toast(`Не удалось добавить заметку: ${e.message}`, "error"); }
+    }
+    sheet.querySelector("#note-add").addEventListener("click", addNote);
+    // Ctrl/Cmd+Enter из самого поля — привычка из Slack/GitHub/Linear:
+    // руки уже на клавиатуре после текста заметки, тянуться к кнопке
+    // мышью незачем. Обычный Enter не годится — заметки часто
+    // многострочные (тайм-коды правок один за другим).
+    sheet.querySelector("#note-new").addEventListener("keydown", e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        addNote();
+      }
     });
     sheet.querySelector("#btn-qc-track").addEventListener("click", async () => {
       const picked = await openDialog({ multiple: false, filters: [{ name: "Аудио/видео", extensions: QC_EXTENSIONS }] });
