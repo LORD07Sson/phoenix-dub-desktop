@@ -1,7 +1,7 @@
 // QC звука по локальному файлу — целиком в Rust (src-tauri/src/audio_qc.rs),
 // этот модуль только открывает диалог выбора файла и рисует результат.
 
-import { invoke, openDialog, saveDialog, revealInFolder } from "./tauri.js";
+import { invoke, openDialog, saveDialog, revealInFolder, appWindow, sendNotification } from "./tauri.js";
 import { openSheet, dialogSkeletonHtml, toast, apiPost } from "./api.js";
 import { $, esc, formatTime, formatRange, noteTimePrefix } from "./utils.js";
 
@@ -239,6 +239,31 @@ function summaryHtml(report) {
   return parts.join(" · ");
 }
 
+// Пакетный QC на десяток файлов реально занимает минуты (см. комментарий
+// у runQcBatch выше — файлы считаются по очереди, не параллельно), и
+// открытая шторка с таблицей результатов ничем не поможет, если само
+// окно приложения в этот момент свёрнуто в трей — единственный внутри-
+// оконный индикатор её никто не увидит. Системное уведомление — то,
+// что реально дойдёт до пользователя независимо от состояния окна;
+// isVisible() === false покрывает и «свёрнуто в трей», и «на другом
+// виртуальном рабочем столе», а не только буквальный минимайз.
+async function notifyBatchDoneIfHidden(total, bad, broken) {
+  // Один try на весь путь, а не только на isVisible(): sendNotification
+  // (tauri-plugin-notification) сама трогает window.Notification —
+  // в окружениях без него (например, jsdom в notes-timecodes-test.mjs)
+  // бросает синхронно, и необработанное исключение внутри async-функции
+  // без await на вызывающей стороне роняет процесс целиком.
+  try {
+    if (await appWindow.isVisible()) return;
+    const body = bad || broken
+      ? `${bad} с замечаниями${broken ? `, ${broken} не прочитано` : ""} из ${total}`
+      : `Замечаний нет ни в одном из ${total}`;
+    sendNotification({ title: "PHOENIX DUB — QC завершён", body });
+  } catch {
+    // нет доступа к состоянию окна/уведомлениям — молча пропускаем
+  }
+}
+
 export async function runQcBatch(paths) {
   const overlay = openSheet(`
     <h2>QC звука — ${paths.length} ${paths.length === 1 ? "файл" : "файла"}</h2>
@@ -325,6 +350,7 @@ export async function runQcBatch(paths) {
   progressEl.innerHTML = bad || broken
     ? `Готово: <span style="color:var(--s-stop);">${bad} с замечаниями</span>${broken ? ` · ${broken} не прочитано` : ""} из ${done.length}`
     : `Готово: замечаний нет ни в одном из ${done.length}`;
+  notifyBatchDoneIfHidden(done.length, bad, broken);
 
   // Сортировка — только когда есть что сортировать.
   const sortBtn = overlay.querySelector("#qc-sort");
