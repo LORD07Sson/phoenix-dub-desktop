@@ -102,6 +102,13 @@ export function assigneesHtml(list) {
   return `<span class="avatar-stack">${bubbles}</span>${more}`;
 }
 
+// Диапазонное выделение Shift+клик — привычка из проводника/почты,
+// которой чекбоксы-по-одному не дают: отметить полсотни строк подряд
+// вручную, кликая по каждой, никто делать не станет. Индекс — вне
+// renderReports(), чтобы переживать перерисовку (сортировка, фильтр,
+// снятие звёздочки из фильтра «Избранное» и т.п.).
+let lastCheckedIndex = null;
+
 export function renderReports() {
   const tbody = $("#reports-body");
   tbody.innerHTML = "";
@@ -137,7 +144,22 @@ export function renderReports() {
     `;
     tr.querySelector(".row-check").addEventListener("click", e => {
       e.stopPropagation();
-      toggleSelected(r.public_id, e.target.checked);
+      if (e.shiftKey && lastCheckedIndex !== null) {
+        // Отмечаем/снимаем весь диапазон между прошлым и текущим кликом
+        // тем же состоянием, в которое только что перешёл сам чекбокс.
+        const from = Math.min(lastCheckedIndex, i);
+        const to = Math.max(lastCheckedIndex, i);
+        const on = e.target.checked;
+        for (let j = from; j <= to; j++) {
+          const rep = state.reports[j];
+          if (!rep) continue;
+          if (on) state.selected.add(rep.public_id); else state.selected.delete(rep.public_id);
+        }
+        renderReports();
+      } else {
+        toggleSelected(r.public_id, e.target.checked);
+      }
+      lastCheckedIndex = i;
     });
     tr.querySelector("[data-fav]").addEventListener("click", e => {
       e.stopPropagation();
@@ -200,7 +222,7 @@ export function renderReports() {
     (truncated
       ? `Показаны первые ${state.reports.length} из ${state.total} — уточните фильтр или поиск, чтобы увидеть остальные · `
       : `Отчётов: ${state.reports.length} · `) +
-    `клик по строке — открыть карточку, чекбоксы — массовые операции · ` +
+    `клик по строке — открыть карточку, чекбоксы (Shift — диапазоном) — массовые операции · ` +
     `Ctrl+Shift+P — показать/скрыть окно из любого места`;
 
   $("#select-all").checked = state.reports.length > 0 && state.reports.every(r => state.selected.has(r.public_id));
