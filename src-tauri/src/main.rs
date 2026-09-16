@@ -176,6 +176,33 @@ fn token_clear() -> Result<(), String> {
     token_store::clear()
 }
 
+// Прогресс пакетного QC (runQcBatch в qc.js) — на иконке в панели
+// задач, а не только полоской внутри окна: у студии окно приложения
+// часто свёрнуто в трей во время долгого прогона по папке с
+// десятком дорожек, а таскбар виден всегда. progress=None гасит
+// индикатор — вызывается и по завершении прогона, и если шторку
+// закрыли посреди работы (иначе полоска осталась бы висеть на
+// иконке до следующего вызова, вводя в заблуждение).
+// Не (async): сам вызов — дешёвая нативная операция (Windows: одно
+// COM-обращение к ITaskbarList3), в отличие от ffmpeg-субпроцессов
+// или сетевых запросов выше блокировать интерфейс ей нечем.
+#[tauri::command]
+fn set_window_progress(app: tauri::AppHandle, progress: Option<u64>) -> Result<(), String> {
+    let win = app
+        .get_webview_window("main")
+        .ok_or("окно main не найдено")?;
+    let status = if progress.is_some() {
+        tauri::window::ProgressBarStatus::Normal
+    } else {
+        tauri::window::ProgressBarStatus::None
+    };
+    win.set_progress_bar(tauri::window::ProgressBarState {
+        status: Some(status),
+        progress,
+    })
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
@@ -416,6 +443,7 @@ fn main() {
             qc_analyze,
             generate_waveform,
             export_audio_clip,
+            set_window_progress,
             token_save,
             token_load,
             token_clear,

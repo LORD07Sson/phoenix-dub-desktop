@@ -265,10 +265,19 @@ export async function runQcBatch(paths) {
   const progressEl = overlay.querySelector("#qc-progress");
   const results = [];
 
+  // Индикатор на иконке в панели задач — окно приложения на время
+  // пакетного прогона часто свёрнуто в трей (студия оставляет его
+  // работать фоном), внутренняя полоска прогресса в такой момент
+  // никто не видит. Ошибку invoke здесь гасим — на платформе без
+  // поддержки (см. cfg в Rust-команде set_window_progress) это не
+  // повод ломать сам QC.
+  const setTaskbarProgress = pct => invoke("set_window_progress", { progress: pct }).catch(() => {});
+
   for (let i = 0; i < paths.length; i++) {
     // Закрыли шторку посреди прогона — дальше считать незачем.
-    if (!overlay.isConnected) return;
+    if (!overlay.isConnected) { setTaskbarProgress(null); return; }
     progressEl.textContent = `Анализирую ${i + 1} из ${paths.length}…`;
+    setTaskbarProgress(Math.round((i / paths.length) * 100));
     const row = rowsEl.querySelector(`.qc-row[data-i="${i}"]`);
     row.classList.remove("pending");
     row.classList.add("running");
@@ -309,6 +318,7 @@ export async function runQcBatch(paths) {
     }
   }
 
+  setTaskbarProgress(null);
   const done = results.filter(Boolean);
   const bad = done.filter(r => r.severity === "error" || r.severity === "warn").length;
   const broken = done.filter(r => r.severity === "fail").length;
