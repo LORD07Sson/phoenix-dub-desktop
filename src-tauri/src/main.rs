@@ -146,6 +146,19 @@ fn qc_analyze(path: String) -> Result<audio_qc::QcReport, String> {
     audio_qc::analyze(&path)
 }
 
+// Тоже через ffmpeg (полное декодирование в PCM) — на большом файле
+// секунды, поэтому (async) по той же причине, что и у qc_analyze выше.
+#[tauri::command(async)]
+fn generate_waveform(path: String, buckets: u32) -> Result<audio_qc::WaveformData, String> {
+    audio_qc::generate_waveform(&path, buckets)
+}
+
+// Запускает ffmpeg-субпроцесс и пишет файл на диск — блокирующее.
+#[tauri::command(async)]
+fn export_audio_clip(path: String, start: f64, end: f64, save_path: String) -> Result<(), String> {
+    audio_qc::export_clip(&path, start, end, &save_path)
+}
+
 // Обращение к хранилищу учётных данных ОС тоже блокирующее (на Linux —
 // синхронный вызов Secret Service по D-Bus).
 #[tauri::command(async)]
@@ -161,6 +174,33 @@ fn token_load() -> Option<String> {
 #[tauri::command(async)]
 fn token_clear() -> Result<(), String> {
     token_store::clear()
+}
+
+// Прогресс пакетного QC (runQcBatch в qc.js) — на иконке в панели
+// задач, а не только полоской внутри окна: у студии окно приложения
+// часто свёрнуто в трей во время долгого прогона по папке с
+// десятком дорожек, а таскбар виден всегда. progress=None гасит
+// индикатор — вызывается и по завершении прогона, и если шторку
+// закрыли посреди работы (иначе полоска осталась бы висеть на
+// иконке до следующего вызова, вводя в заблуждение).
+// Не (async): сам вызов — дешёвая нативная операция (Windows: одно
+// COM-обращение к ITaskbarList3), в отличие от ffmpeg-субпроцессов
+// или сетевых запросов выше блокировать интерфейс ей нечем.
+#[tauri::command]
+fn set_window_progress(app: tauri::AppHandle, progress: Option<u64>) -> Result<(), String> {
+    let win = app
+        .get_webview_window("main")
+        .ok_or("окно main не найдено")?;
+    let status = if progress.is_some() {
+        tauri::window::ProgressBarStatus::Normal
+    } else {
+        tauri::window::ProgressBarStatus::None
+    };
+    win.set_progress_bar(tauri::window::ProgressBarState {
+        status: Some(status),
+        progress,
+    })
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -401,6 +441,9 @@ fn main() {
         .manage(DroppedFiles::default())
         .invoke_handler(tauri::generate_handler![
             qc_analyze,
+            generate_waveform,
+            export_audio_clip,
+            set_window_progress,
             token_save,
             token_load,
             token_clear,

@@ -4,7 +4,7 @@
 
 import { apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
 import { state } from "./state.js";
-import { invoke, saveDialog, openDialog } from "./tauri.js";
+import { invoke, saveDialog, openDialog, revealInFolder } from "./tauri.js";
 import { esc, initials, STATUS_DOT_CLASS, isOverdue, parseNoteTime, secondsFromTimeInput, noteTimePrefix, formatRange } from "./utils.js";
 import { runQcAnalysis, QC_EXTENSIONS } from "./qc.js";
 import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
@@ -355,7 +355,10 @@ export async function openReportDetail(publicId) {
             initData: state.token || "",
             savePath,
           });
-          toast("Файл сохранён.");
+          toast("Файл сохранён.", "success", {
+            label: "📂 Показать в папке",
+            onClick: () => revealInFolder(savePath),
+          });
         } catch (e) {
           toast(`Не удалось скачать: ${e}`, "error");
         } finally {
