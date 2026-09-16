@@ -878,6 +878,13 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
   .row-in, .bcell, #skeleton, .content table, .toast { animation: none !important; transition: none !important; }
 }
 
+/* Переключение темы — плавный crossfade через View Transitions API
+   (см. theme.js). Значение по умолчанию у браузера короче и резче,
+   чем остальные переходы интерфейса — подгоняем длительность под тот
+   же ритм, что и всплытие модалок/тостов. Без поддержки API это
+   правило просто ни на что не влияет. */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .32s; }
+
 .bulk-bar {
   position: sticky;
   bottom: 0;

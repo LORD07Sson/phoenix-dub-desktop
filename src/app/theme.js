@@ -11,7 +11,17 @@ export function applyTheme(theme) {
   applyTheme(saved || "dark");
 })();
 
+// Смена темы раньше была одним мгновенным щелчком — все цвета разом.
+// View Transitions API (Chromium/WebView2 111+, см. build.yml — сборка
+// только под windows-latest, там актуальный WebView2) даёт плавный
+// crossfade почти бесплатно: браузер сам снимает снимки до/после и
+// анимирует переход между ними. Без поддержки — тот же мгновенный
+// щелчок, что и раньше, ничего не ломается.
 document.querySelector("#theme-toggle").addEventListener("click", () => {
-  const cur = document.documentElement.dataset.theme === "light" ? "dark" : "light";
-  applyTheme(cur);
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    applyTheme(next);
+    return;
+  }
+  document.startViewTransition(() => applyTheme(next));
 });
