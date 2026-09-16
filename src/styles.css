@@ -780,6 +780,21 @@ td.row-actions .icon-btn { padding: 4px 6px; font-size: 12px; margin-right: 4px;
 tbody tr.selected { background: var(--accent-soft); }
 tbody td { padding: 9px 10px; }
 tbody td.num { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+
+/* Звёздочка «избранное» — видна всегда чуть приглушённой, чтобы было
+   понятно, что кликабельна, но не спорила за внимание с самим номером;
+   активная — золотом, тем же оттенком, что награды на профиле. */
+.fav-star {
+  background: none; border: none; cursor: pointer; padding: 0 4px 0 0;
+  font-size: 13px; line-height: 1; color: var(--ink-dim); vertical-align: -1px;
+  transition: color .12s ease, transform .12s ease;
+}
+.fav-star:hover { color: var(--gold); transform: scale(1.15); }
+.fav-star.on { color: var(--gold); }
+.qf-chip[data-qf="favorites"].active {
+  background: linear-gradient(135deg, var(--gold), #e0a63a);
+  border-color: transparent; color: #241705;
+}
 tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 
 .priority-chip {

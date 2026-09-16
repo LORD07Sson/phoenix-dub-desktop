@@ -10,6 +10,7 @@ import { state } from "./state.js";
 import { apiGet, apiPost, openSheet, toast } from "./api.js";
 import { $, $all, esc, initials, isOverdue, STATUS_DOT_CLASS, PRIORITY_LABELS } from "./utils.js";
 import { openReportDetail } from "./report-detail.js";
+import { isFavorite, toggleFavorite, favoriteIds } from "./favorites.js";
 
 // page_size=100 — сервер отдаёт максимум одну страницу, offset для
 // /reports в API не предусмотрен (см. docs/API.md), поэтому при
@@ -51,8 +52,20 @@ export async function loadReports() {
   let ok = true;
   try {
     const r = await apiGet("/reports", currentFilters());
-    state.reports = r.reports || [];
-    state.total = r.total || 0;
+    let reports = r.reports || [];
+    let total = r.total || 0;
+    // «Избранное» — чисто локальный фильтр (см. favorites.js), сервер
+    // о нём не знает и параметра под него в API нет. Фильтруем то, что
+    // уже пришло на текущей странице, и подменяем total — иначе
+    // статусбар ниже написал бы «показаны 3 из 47», хотя реально
+    // отфильтровано ровно то, что загружено.
+    if (state.quickFilter === "favorites") {
+      const favs = favoriteIds();
+      reports = reports.filter(x => favs.has(x.public_id));
+      total = reports.length;
+    }
+    state.reports = reports;
+    state.total = total;
     sortLocally();
     renderReports();
   } catch (e) {
@@ -105,9 +118,13 @@ export function renderReports() {
     tr.style.animationDelay = `${Math.min(i, 18) * 22}ms`;
     const dotClass = STATUS_DOT_CLASS[r.status] || "draft";
     const overdue = isOverdue(r);
+    const fav = isFavorite(r.public_id);
     tr.innerHTML = `
       <td class="col-check"><input type="checkbox" class="row-check" ${state.selected.has(r.public_id) ? "checked" : ""}></td>
-      <td class="num">${esc(r.public_id)}</td>
+      <td class="num">
+        <button class="fav-star ${fav ? "on" : ""}" data-fav title="${fav ? "Убрать из избранного" : "В избранное"}">${fav ? "★" : "☆"}</button>
+        ${esc(r.public_id)}
+      </td>
       <td>${esc(r.title)}</td>
       <td><span class="chip"><span class="dot ${dotClass}"></span>${esc(r.status_label)}</span></td>
       <td><span class="priority-chip ${esc(r.priority)}"><span class="dot"></span>${esc(r.priority_label)}</span></td>
@@ -121,6 +138,21 @@ export function renderReports() {
     tr.querySelector(".row-check").addEventListener("click", e => {
       e.stopPropagation();
       toggleSelected(r.public_id, e.target.checked);
+    });
+    tr.querySelector("[data-fav]").addEventListener("click", e => {
+      e.stopPropagation();
+      const on = toggleFavorite(r.public_id);
+      e.target.classList.toggle("on", on);
+      e.target.textContent = on ? "★" : "☆";
+      e.target.title = on ? "Убрать из избранного" : "В избранное";
+      if (state.quickFilter === "favorites" && !on) {
+        // Сняли звёздочку, пока смотрим именно на фильтр «Избранное» —
+        // строка должна пропасть из списка сразу, а не только после
+        // следующего «Обновить».
+        state.reports = state.reports.filter(x => x.public_id !== r.public_id);
+        state.total = state.reports.length;
+        renderReports();
+      }
     });
     // Быстрые действия по наведению на строку — открывают тот же диалог,
     // что и чип на карточке отчёта, просто без похода внутрь карточки.
