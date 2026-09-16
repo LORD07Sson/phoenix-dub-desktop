@@ -8,7 +8,7 @@
 
 import { state } from "./state.js";
 import { apiGet, apiPost, openSheet, toast } from "./api.js";
-import { $, $all, esc, initials, isOverdue, STATUS_DOT_CLASS, PRIORITY_LABELS } from "./utils.js";
+import { $, $all, esc, initials, isOverdue, STATUS_DOT_CLASS, PRIORITY_LABELS, showContextMenu } from "./utils.js";
 import { openReportDetail } from "./report-detail.js";
 import { isFavorite, toggleFavorite, favoriteIds } from "./favorites.js";
 
@@ -166,6 +166,32 @@ export function renderReports() {
       changeStatusDialog([r.public_id], () => loadReports(), r.status);
     });
     tr.addEventListener("click", () => openReportDetail(r.public_id));
+    // Правый клик — тот же набор быстрых действий, что уже есть в
+    // строке «Команда» профиля (см. profile.js), только для отчёта:
+    // открыть без выделения текста мышью, сменить статус/исполнителя/
+    // приоритет/срок без похода внутрь карточки, скопировать номер.
+    // Десктопная привычка (проводник, почта) — у мини-аппа такого
+    // жеста просто нет физически.
+    tr.addEventListener("contextmenu", e => {
+      e.preventDefault();
+      const favNow = isFavorite(r.public_id);
+      showContextMenu(e.clientX, e.clientY, [
+        { label: "Открыть карточку", action: () => openReportDetail(r.public_id) },
+        { label: favNow ? "Убрать из избранного" : "В избранное", action: () => {
+          toggleFavorite(r.public_id);
+          if (state.activeTab === "list") renderReports();
+        } },
+        { label: "Сменить статус", action: () => changeStatusDialog([r.public_id], () => loadReports(), r.status) },
+        { label: "Назначить исполнителя", action: () => assignDialog([r.public_id], () => loadReports()) },
+        { label: "Приоритет", action: () => priorityDialog(r.public_id, () => loadReports(), r.priority) },
+        { label: "Срок", action: () => deadlineDialog(r.public_id, r.deadline, () => loadReports()) },
+        { label: "Скопировать номер", action: () => {
+          navigator.clipboard.writeText(r.public_id)
+            .then(() => toast(`${r.public_id} скопирован.`))
+            .catch(() => toast("Не удалось скопировать.", "error"));
+        } },
+      ]);
+    });
     tbody.appendChild(tr);
   });
 
