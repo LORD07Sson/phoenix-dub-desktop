@@ -779,6 +779,13 @@ tbody tr:hover td.row-actions { opacity: 1; }
 td.row-actions .icon-btn { padding: 4px 6px; font-size: 12px; margin-right: 4px; }
 tbody tr.selected { background: var(--accent-soft); }
 tbody td { padding: 9px 10px; }
+
+/* Компактная плотность (Настройки → «Плотность таблиц») — десктопу
+   есть смысл дать выбор, мини-аппу с тач-целями такой режим только
+   мешал бы: там и так всё сжато под ширину телефона. */
+:root[data-density="compact"] tbody td { padding: 4px 10px; }
+:root[data-density="compact"] .avatar-bubble { width: 20px; height: 20px; font-size: 9.5px; }
+:root[data-density="compact"] .row-in { animation-duration: .16s; }
 tbody td.num { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 
 /* Звёздочка «избранное» — видна всегда чуть приглушённой, чтобы было

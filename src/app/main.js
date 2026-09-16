@@ -15,6 +15,7 @@
 
 import { appWindow } from "./tauri.js";
 import { tryRestoreSession } from "./auth.js";
+import "./density.js";
 import "./tabs.js";
 import "./qc.js";
 import { checkForUpdates } from "./settings.js";
