@@ -5,13 +5,17 @@
 import { apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
 import { state } from "./state.js";
 import { invoke, saveDialog, openDialog } from "./tauri.js";
-import { esc, initials, STATUS_DOT_CLASS, isOverdue, parseNoteTime, secondsFromTimeInput, noteTimePrefix } from "./utils.js";
+import { esc, initials, STATUS_DOT_CLASS, isOverdue, parseNoteTime, secondsFromTimeInput, noteTimePrefix, formatRange } from "./utils.js";
 import { runQcAnalysis, QC_EXTENSIONS } from "./qc.js";
 import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
 import { loadRoles, loadAssignable, userOptionsHtml } from "./titles-admin.js";
 import { setDropTarget } from "./file-drop.js";
 
-const QC_FINDING_LABELS_RU = { clipping: "Клиппинг", silence: "Пауза", noise: "Шум", loud: "Громко", quiet: "Тихо" };
+// Ключи "kind" — ровно те, что отдаёт серверный audio_qc.py (miniapp/audio_qc.py):
+// "clip"/"noise"/"silence"/"silence_long"/"no_speech". Раньше здесь жил набор
+// clipping/silence/noise/loud/quiet — ни один ключ не совпадал с реальным
+// ответом сервера, находки просто не подписывались.
+const QC_FINDING_LABELS_RU = { clip: "Клиппинг", noise: "Шум", silence_long: "Долгая тишина", no_speech: "Речь не найдена" };
 const FILE_ICONS = { photo: "🖼", video: "🎬", audio: "🎵", voice: "🎙", document: "📄" };
 
 export async function openReportDetail(publicId) {
@@ -350,10 +354,16 @@ export async function openReportDetail(publicId) {
         try {
           const res = await apiPost(`/report/${publicId}/files/${fileId}/qc`, {});
           const resultEl = sheet.querySelector(`#qc-result-${fileId}`);
-          const findings = res.findings || [];
-          resultEl.innerHTML = findings.length
-            ? findings.map(f => `<div class="qc-finding ${f.severity || "warn"}"><span class="tag">${esc(QC_FINDING_LABELS_RU[f.kind] || f.kind || "?")}</span><div>${esc(f.message || "")}</div></div>`).join("")
+          // Сервер отдаёт {file_label, result: {issues, duration, error}}
+          // (см. miniapp/server.py::api_qc_file) — не {findings}.
+          const result = res.result || {};
+          const issues = result.issues || [];
+          resultEl.innerHTML = issues.length
+            ? issues.map(i => `<div class="qc-finding warn"><span class="tag">${esc(QC_FINDING_LABELS_RU[i.kind] || i.kind || "?")}</span><div><div class="time">${formatRange(i.start, i.end)}</div><div>${esc(i.detail || "")}</div></div></div>`).join("")
             : `<div style="color:var(--s-done); font-size:12px;">✓ Замечаний не найдено</div>`;
+          if (result.error) {
+            resultEl.innerHTML += `<div style="color:var(--s-stop); font-size:12px; margin-top:6px;">${esc(result.error)}</div>`;
+          }
         } catch (e) {
           toast(`AI-проверка не удалась: ${e.message}`, "error");
         } finally {
