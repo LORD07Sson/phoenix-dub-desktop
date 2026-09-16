@@ -6,6 +6,7 @@ import { apiGet, openSheet, toast, dismissSheet } from "./api.js";
 import { $, esc } from "./utils.js";
 import { applyTheme } from "./theme.js";
 import { applyDensity, currentDensity } from "./density.js";
+import { focusModePreferred, setFocusModePreferred } from "./focus-mode.js";
 import { isDevModeOn, setDevModeOn } from "./devmode.js";
 import { openAdminPanel } from "./admin.js";
 
@@ -60,6 +61,10 @@ async function openSettings() {
         <option value="compact">Компактная</option>
       </select>
     </div>
+    <div class="row" style="align-items:center; justify-content:space-between;">
+      <span>🧘 Фокус-режим при открытии отчёта</span>
+      <input type="checkbox" id="s-focus-mode" ${focusModePreferred() ? "checked" : ""}>
+    </div>
     ${state.isDeveloper ? `
     <div class="row dev-pill-toggle" style="align-items:center; justify-content:space-between;">
       <span>🛠 Режим разработчика</span>
@@ -103,6 +108,7 @@ async function openSettings() {
   overlay.querySelector("#s-theme").addEventListener("change", e => applyTheme(e.target.value));
   overlay.querySelector("#s-density").value = currentDensity();
   overlay.querySelector("#s-density").addEventListener("change", e => applyDensity(e.target.value));
+  overlay.querySelector("#s-focus-mode").addEventListener("change", e => setFocusModePreferred(e.target.checked));
   overlay.querySelector("#s-autostart").addEventListener("change", async e => {
     try {
       await invoke("set_autostart", { enabled: e.target.checked });

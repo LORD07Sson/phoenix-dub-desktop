@@ -1608,3 +1608,50 @@ kbd {
 .dev-badge-row { display: flex; gap: 8px; }
 .dev-badge-row input:first-child { flex: 0 0 52px; text-align: center; }
 .dev-badge-row input:last-child { flex: 1; }
+
+/* ---------- Фокус-режим карточки отчёта (focus-mode.js) ---------- */
+
+.detail-head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+/* Активный переключатель — тот же приём подсветки, что у выбранной
+   вкладки в сайдбаре (.tab-btn.active), чтобы "включено" читалось с
+   первого взгляда, а не только по тексту кнопки. */
+.icon-btn.active {
+  color: var(--fire);
+  border-color: color-mix(in srgb, var(--fire) 45%, var(--line));
+  background: var(--accent-soft);
+}
+
+/* Пока активен фокус-режим — шапка и боковая панель вкладок уходят из
+   вида (opacity, не display:none: раскладка .app-body не должна
+   прыгать туда-обратно на каждый тоггл), а сама карточка отчёта
+   разворачивается на всё окно вместо обычной модалки по центру —
+   тот самый переход "модалка -> отдельный экран", который и делает
+   режим ощутимо отличным от простого открытия карточки. */
+body.focus-mode .titlebar,
+body.focus-mode .sidebar {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s ease;
+}
+body.focus-mode .report-detail-overlay {
+  align-items: stretch;
+  justify-content: stretch;
+  background: var(--bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding: 0;
+}
+body.focus-mode .report-detail-overlay .sheet {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  padding: 28px clamp(16px, 6vw, 120px);
+  margin: 0 auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  body.focus-mode .titlebar, body.focus-mode .sidebar { transition: none; }
+}
