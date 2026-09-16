@@ -73,20 +73,61 @@ export function apiPost(path, body) { return api("POST", path, body || {}); }
 export function apiDelete(path) { return api("DELETE", path); }
 
 // Адрес картинки, которую отдаёт наш же API (аватар, баннер, постер
-// через img_proxy). Токен приходится класть в query — заголовок к
-// <img src> не приделать, — поэтому единственная точка, где это
-// делается, вынесена сюда: видно, что мест ровно одно, и без токена
-// URL вообще не собирается (раньше в строку улетало "null" и сервер
-// отвечал 401 на каждую аватарку).
+// через img_proxy). Заголовок X-Init-Data к <img src> не приделать,
+// поэтому единственная точка, где auth уезжает в query, вынесена сюда.
 //
-// TODO(server): завести короткоживущий одноразовый ключ для медиа
-// вместо самого dsk_-токена — сейчас он попадает в access-логи
-// сервера. См. SECURITY.md.
+// Раньше туда клали сам dsk_-токен (живёт месяцами) — он оседал в
+// access-логах сервера при каждой картинке (см. SECURITY.md). Теперь
+// вместо него — mediaToken: короткоживущий (см. _MEDIA_TOKEN_TTL на
+// сервере, сейчас 5 минут) обменник, который ни на что, кроме этих
+// трёх картиночных ручек, прав не даёт. mediaUrl() остаётся синхронной
+// функцией (её вызывают десятки мест, собирая <img src="..."> строкой
+// за один проход) — токен уже должен быть в state к этому моменту,
+// см. ensureMediaToken() ниже и её вызов в auth.js сразу после
+// state.token.
 export function mediaUrl(path, params) {
-  if (!state.token) return "";
-  const qs = new URLSearchParams({ ...(params || {}), init_data: state.token });
+  if (!state.mediaToken) return "";
+  const qs = new URLSearchParams({ ...(params || {}), mtok: state.mediaToken });
   return `${API_BASE}${path}?${qs}`;
 }
+
+// Обновляет state.mediaToken заранее, до истечения — а не по факту 401
+// от уже отрисованной картинки (её тогда пришлось бы перерисовывать).
+// MEDIA_TOKEN_REFRESH_SLACK_MS — запас до истечения, с которым токен
+// считается «пора обновить»: сервер даёт 5 минут, обновляем на
+// четвёртой, чтобы не словить протухание прямо во время рендера длинного
+// списка аватарок.
+const MEDIA_TOKEN_REFRESH_SLACK_MS = 60_000;
+let mediaTokenPromise = null;
+
+export async function ensureMediaToken() {
+  if (!state.token) return;
+  if (state.mediaToken && Date.now() < state.mediaTokenExpiresAt - MEDIA_TOKEN_REFRESH_SLACK_MS) return;
+  // Несколько мест могут дёрнуть ensureMediaToken() одновременно
+  // (несколько картинок рендерятся разом) — один запрос на всех,
+  // а не по одному на каждую.
+  if (mediaTokenPromise) return mediaTokenPromise;
+  mediaTokenPromise = (async () => {
+    try {
+      const res = await apiPost("/media/token", {});
+      state.mediaToken = res.token;
+      state.mediaTokenExpiresAt = Date.now() + res.expires_in * 1000;
+    } catch (_) {
+      // Сеть подвела — оставляем старый токен (если был) до следующей
+      // попытки, картинки просто продолжат грузиться на нём же, пока он
+      // не протухнет на сервере.
+    } finally {
+      mediaTokenPromise = null;
+    }
+  })();
+  return mediaTokenPromise;
+}
+
+// Фоновое обновление — тот же приём, что presence.js (pingPresence):
+// проверка раз в минуту, сам ensureMediaToken() решает, нужно ли
+// реально сходить на сервер (нет токена/сессии — тихо выходит).
+const MEDIA_TOKEN_CHECK_INTERVAL_MS = 60_000;
+setInterval(ensureMediaToken, MEDIA_TOKEN_CHECK_INTERVAL_MS);
 
 export function openSheet(html, variant) {
   const tpl = $(variant === "wide" ? "#tpl-overlay-wide" : "#tpl-overlay").content.cloneNode(true);

@@ -2,7 +2,7 @@
 
 import { invoke } from "./tauri.js";
 import { state, resetSessionState } from "./state.js";
-import { api, apiGet, armSessionExpiry } from "./api.js";
+import { api, apiGet, armSessionExpiry, ensureMediaToken } from "./api.js";
 import { $ } from "./utils.js";
 import { refreshAll, clearTabDom, restoreLastTab } from "./tabs.js";
 import { resetAssignmentsBaseline } from "./notifications.js";
@@ -57,6 +57,7 @@ export async function tryRestoreSession() {
   try {
     const who = await api("GET", "/whoami");
     state.telegramId = who.telegram_id;
+    await ensureMediaToken();
     showApp();
     restoreLastTab();
     hideSplash();
@@ -109,6 +110,7 @@ async function submitCode() {
     state.telegramId = result.telegram_id;
     setDisplayName(result.name);
     await invoke("token_save", { token: result.token });
+    await ensureMediaToken();
     showApp();
     restoreLastTab();
     await refreshAll();
