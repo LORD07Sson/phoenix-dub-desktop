@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Открепленный отчёт — PHOENIX DUB</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="pin-body">
+<!-- Отдельное окно (Tauri WebviewWindow, см. app/tauri.js::pinReportWindow),
+     не вкладка/модалка основного экрана — маленькое read-only окно
+     "статус отчёта на виду", пока работаешь в другой программе, без
+     alt-tab обратно в студию. Минимальный отдельный HTML-вход (не
+     index.html): тому нужен весь экран входа/вкладки/трей-обвязка,
+     этому — только карточка одного отчёта. -->
+<div id="pin-root" class="pin-root">
+  <div class="skeleton-wrap" style="padding:14px;">
+    <div class="skeleton-row"></div>
+    <div class="skeleton-row"></div>
+    <div class="skeleton-row"></div>
+  </div>
+</div>
+<div id="toast-root"></div>
+<script type="module" src="app/pin-window.js"></script>
+</body>
+</html>

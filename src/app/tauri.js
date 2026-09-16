@@ -21,14 +21,51 @@
 // слушаем через listen() ниже).
 
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen, emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 
-export { invoke, listen, getCurrentWindow, openDialog, saveDialog, sendNotification };
+export { invoke, listen, emit, getCurrentWindow, WebviewWindow, openDialog, saveDialog, sendNotification };
 
 export const appWindow = getCurrentWindow();
+
+// Окно «📌 Открепить в окне» (report-detail.js) — отдельный WebviewWindow
+// (Tauri 2 multiwebview, @tauri-apps/api/webviewWindow: конструктор бьёт
+// в plugin:webview|create_webview_window, не в plugin:window|create —
+// сверено по node_modules/@tauri-apps/api/webviewWindow.js, а не по
+// памяти о Tauri 1, где модуль назывался иначе). Всегда один и тот же
+// label — окно единственное: открепить второй отчёт значит заменить
+// содержимое уже открытого окна, а не плодить второе поверх первого.
+export const PIN_WINDOW_LABEL = "report-pin";
+export const PIN_REPORT_EVENT = "pin-report-changed";
+
+// Загружается отдельным HTML-входом (src/pin.html -> app/pin-window.js,
+// см. vite.config.js: rollupOptions.input) — не главным index.html: тот
+// поднимает весь экран входа/вкладки/трей-обвязку разом (побочные
+// эффекты верхнего уровня почти в каждом модуле main.js тянет), а
+// открепленному окну нужна только read-only карточка одного отчёта.
+export async function pinReportWindow(publicId) {
+  const existing = await WebviewWindow.getByLabel(PIN_WINDOW_LABEL);
+  if (existing) {
+    // Уже открыто — не плодим второе, просто подменяем отчёт в нём и
+    // выводим на передний план.
+    await emit(PIN_REPORT_EVENT, { publicId });
+    await existing.setFocus();
+    return existing;
+  }
+  return new WebviewWindow(PIN_WINDOW_LABEL, {
+    url: `pin.html?id=${encodeURIComponent(publicId)}`,
+    title: `📌 ${publicId} — PHOENIX DUB`,
+    width: 360,
+    height: 520,
+    minWidth: 300,
+    minHeight: 340,
+    alwaysOnTop: true,
+    decorations: true,
+  });
+}
 
 // Открыть ссылку во внешнем браузере/приложении (plugin:shell|open) —
 // внутри окна открывать чужие сайты незачем. Обычный <a target="_blank">

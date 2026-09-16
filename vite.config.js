@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 
@@ -24,6 +25,19 @@ export default defineConfig({
   build: {
     outDir: "../dist",
     emptyOutDir: true,
+    // Второй вход — src/pin.html (окно «📌 Открепить в окне», см.
+    // src-tauri/src/main.rs нет, чисто JS/Rust-multiwebview: окно
+    // создаёт WebviewWindow из app/tauri.js). Без явного input сюда
+    // vite build обработал бы только src/index.html — pin.html
+    // остался бы вне dist/ и WebviewWindow ловил бы 404 на реальной
+    // сборке (дев-сервер отдал бы его и так, по прямому пути — разница
+    // всплыла бы только в собранном виде).
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("./src/index.html", import.meta.url)),
+        pin: fileURLToPath(new URL("./src/pin.html", import.meta.url)),
+      },
+    },
   },
   // Tauri сам поднимает окно на frontendDist/devUrl — сервер разработки
   // не должен занимать порт, который уже используется чем-то другим

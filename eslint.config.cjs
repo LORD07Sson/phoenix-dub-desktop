@@ -44,6 +44,12 @@ module.exports = [
         MutationObserver: "readonly",
         CustomEvent: "readonly",
         AbortController: "readonly",
+        // pin-window.js — читает ?id= из адреса открепленного окна и
+        // подменяет его на лету (PIN_REPORT_EVENT), не перезагружая
+        // страницу.
+        location: "readonly",
+        history: "readonly",
+        URL: "readonly",
         // Подставляется Vite на этапе сборки (define в vite.config.js).
         __APP_VERSION__: "readonly",
       },

@@ -4,7 +4,7 @@
 
 import { apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
 import { state } from "./state.js";
-import { invoke, saveDialog, openDialog, revealInFolder } from "./tauri.js";
+import { invoke, saveDialog, openDialog, revealInFolder, pinReportWindow } from "./tauri.js";
 import { esc, initials, STATUS_DOT_CLASS, isOverdue, parseNoteTime, secondsFromTimeInput, noteTimePrefix, formatRange } from "./utils.js";
 import { runQcAnalysis, QC_EXTENSIONS } from "./qc.js";
 import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
@@ -176,10 +176,11 @@ export async function openReportDetail(publicId) {
       </div>
 
       <div class="detail-section">
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button class="btn ghost" id="btn-qc-track" style="flex:1;">🎧 QC дорожки</button>
           <button class="btn ghost" id="btn-history" style="flex:1;">🕓 История</button>
           <button class="btn ghost" id="btn-activity" style="flex:1;">📜 Активность</button>
+          <button class="btn ghost" id="btn-pin-window" style="flex:1;">📌 Открепить в окне</button>
         </div>
       </div>
 
@@ -193,6 +194,13 @@ export async function openReportDetail(publicId) {
     sheet.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => overlay.remove()));
     syncFocusButton(sheet.querySelector("#btn-focus-toggle"));
     sheet.querySelector("#btn-focus-toggle").addEventListener("click", toggleFocusMode);
+    sheet.querySelector("#btn-pin-window").addEventListener("click", async () => {
+      try {
+        await pinReportWindow(publicId);
+      } catch (e) {
+        toast(`Не удалось открыть окно: ${e}`, "error");
+      }
+    });
     sheet.querySelector("#chip-status").addEventListener("click", () => changeStatusDialog([publicId], render, detail.status));
     sheet.querySelector("#chip-assign").addEventListener("click", () => assignDialog([publicId], render));
     sheet.querySelector("#chip-priority").addEventListener("click", () => priorityDialog(publicId, render, detail.priority));
