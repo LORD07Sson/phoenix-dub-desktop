@@ -10,6 +10,7 @@ import { runQcAnalysis, QC_EXTENSIONS } from "./qc.js";
 import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
 import { loadRoles, loadAssignable, userOptionsHtml } from "./titles-admin.js";
 import { setDropTarget } from "./file-drop.js";
+import { recordRecentReport } from "./recent-reports.js";
 
 // Ключи "kind" — ровно те, что отдаёт серверный audio_qc.py (miniapp/audio_qc.py):
 // "clip"/"noise"/"silence"/"silence_long"/"no_speech". Раньше здесь жил набор
@@ -39,6 +40,7 @@ export async function openReportDetail(publicId) {
   // вызывается на каждое действие, и сбрасывать выбор на каждом было бы
   // неприятно.
   let notesByTime = false;
+  let recentRecorded = false; // пишем в MRU один раз за открытие, не на каждый render()
   new MutationObserver((_muts, obs) => {
     if (!overlay.isConnected) {
       obs.disconnect();
@@ -63,6 +65,10 @@ export async function openReportDetail(publicId) {
       overlay.querySelector(".sheet").innerHTML = `<div style="color:var(--s-stop);">Не удалось загрузить карточку: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
       overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
       return;
+    }
+    if (!recentRecorded) {
+      recentRecorded = true;
+      recordRecentReport(publicId, detail.title);
     }
 
     // Черновик цепочки пайплайна — правится локально до нажатия

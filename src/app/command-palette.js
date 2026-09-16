@@ -9,6 +9,7 @@ import { openSheet, apiGet } from "./api.js";
 import { $, esc } from "./utils.js";
 import { switchTab } from "./tabs.js";
 import { openReportDetail } from "./report-detail.js";
+import { recentReports } from "./recent-reports.js";
 
 const ACTIONS = [
   { label: "Обзор", icon: "📊", run: () => switchTab("overview") },
@@ -75,12 +76,26 @@ function openPalette() {
     renderList();
   }
 
+  // Недавно открытые отчёты — только при пустом запросе, сверху над
+  // действиями (тот же порядок, что в reportItems ниже: то, что скорее
+  // всего искали, — первым). Как только начали печатать, это уже не
+  // "куда я недавно заходил", а обычный поиск — MRU прячется.
+  function recentItems() {
+    return recentReports().map(r => ({
+      label: r.title ? `${r.publicId} · ${r.title}` : r.publicId,
+      icon: "🕘",
+      sub: "недавнее",
+      run: () => openReportDetail(r.publicId),
+    }));
+  }
+
   async function onInput() {
     const q = input.value.trim();
     const staticMatches = q
       ? ACTIONS.filter(a => a.label.toLowerCase().includes(q.toLowerCase()))
       : ACTIONS;
-    setItems(staticMatches.map(a => ({ label: a.label, icon: a.icon, run: a.run })));
+    const base = staticMatches.map(a => ({ label: a.label, icon: a.icon, run: a.run }));
+    setItems(q ? base : [...recentItems(), ...base]);
 
     clearTimeout(searchDebounce);
     if (q.length < 2) return;
@@ -114,7 +129,7 @@ function openPalette() {
     }
   });
 
-  setItems(ACTIONS.map(a => ({ label: a.label, icon: a.icon, run: a.run })));
+  setItems([...recentItems(), ...ACTIONS.map(a => ({ label: a.label, icon: a.icon, run: a.run }))]);
   input.focus();
 }
 
