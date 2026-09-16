@@ -841,6 +841,13 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
   text-align: center;
   color: var(--ink-dim);
   padding: 60px 20px;
+  animation: empty-state-in .3s ease both;
+}
+.empty-state-ic { font-size: 34px; margin-bottom: 8px; }
+.empty-state-text { max-width: 340px; margin: 0 auto; line-height: 1.5; }
+@keyframes empty-state-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .skeleton-wrap { padding: 10px 0; }

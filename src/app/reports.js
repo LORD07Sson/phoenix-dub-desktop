@@ -114,6 +114,29 @@ export function renderReports() {
   tbody.innerHTML = "";
   const empty = $("#empty-state");
   empty.hidden = state.reports.length > 0;
+  if (!empty.hidden) {
+    // Причина пустого списка обычно понятна сразу (активный фильтр),
+    // так что подсказка — не общая заглушка, а конкретный следующий
+    // шаг под конкретную причину, а не догадки пользователя.
+    const textEl = empty.querySelector(".empty-state-text");
+    const icEl = empty.querySelector(".empty-state-ic");
+    if (state.quickFilter === "favorites") {
+      icEl.textContent = "★";
+      textEl.textContent = "Пока нет избранного — нажмите ☆ у номера отчёта в списке, чтобы отметить нужные.";
+    } else if (state.quickFilter === "overdue") {
+      icEl.textContent = "🎉";
+      textEl.textContent = "Просроченных нет — всё по срокам.";
+    } else if (state.quickFilter === "unassigned") {
+      icEl.textContent = "✅";
+      textEl.textContent = "Без исполнителя ничего не осталось.";
+    } else if (state.quickFilter === "mine") {
+      icEl.textContent = "🗂️";
+      textEl.textContent = "На вас пока ничего не назначено.";
+    } else {
+      icEl.textContent = "🗂️";
+      textEl.textContent = "Ничего не найдено — попробуйте другой фильтр.";
+    }
+  }
 
   state.reports.forEach((r, i) => {
     const tr = document.createElement("tr");
