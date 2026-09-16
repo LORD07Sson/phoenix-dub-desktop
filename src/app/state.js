@@ -6,6 +6,8 @@ export const state = {
   token: null,
   telegramId: null,
   name: null,
+  mediaToken: null, // короткоживущий токен для <img src> — см. ensureMediaToken() в api.js
+  mediaTokenExpiresAt: 0,
   reports: [],
   total: 0,
   sort: { field: "public_id", dir: "asc" },
@@ -37,6 +39,8 @@ export function resetSessionState() {
   state.token = null;
   state.telegramId = null;
   state.name = null;
+  state.mediaToken = null;
+  state.mediaTokenExpiresAt = 0;
   state.reports = [];
   state.total = 0;
   state.selected.clear();

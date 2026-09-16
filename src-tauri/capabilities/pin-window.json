@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "pin-window",
+  "description": "Права окна «📌 Открепить в окне» (label report-pin, создаётся из main через tauri.js::pinReportWindow) — уже, чем default.json у главного окна: это read-only витрина одного отчёта, ей не нужны диалоги/уведомления/автозапуск/shell/глобальные горячие клавиши. core:window:allow-set-always-on-top — переключатель 📌/📍 внутри самого окна (pin-window.js); остальное из core:window — стандартные для-себя операции (закрыть, свернуть, фокус), уже входящие в core:default.",
+  "windows": ["report-pin"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-always-on-top"
+  ]
+}

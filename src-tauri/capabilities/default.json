@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Права основного окна — доступ к диалогам, уведомлениям, глобальным горячим клавишам и автозапуску. Апдейтер (Velopack) и сеть к своему API — только через Rust-команды, JS-плагины для них не нужны. shell:allow-open — открыть ссылку (Telegram-профиль коллеги из карточки «Команда») во внешнем браузере, не внутри окна приложения.",
+  "description": "Права основного окна — доступ к диалогам, уведомлениям, глобальным горячим клавишам и автозапуску. Апдейтер (Velopack) и сеть к своему API — только через Rust-команды, JS-плагины для них не нужны. shell:allow-open — открыть ссылку (Telegram-профиль коллеги из карточки «Команда») во внешнем браузере, не внутри окна приложения. core:webview:allow-create-webview-window — «📌 Открепить в окне» у карточки отчёта (report-detail.js -> tauri.js::pinReportWindow, @tauri-apps/api/webviewWindow): именно этот, а не core:window:allow-create — сверено по node_modules/@tauri-apps/api/webviewWindow.js, конструктор WebviewWindow бьёт в plugin:webview|create_webview_window, не в plugin:window|create. Права самого открепленного окна — отдельным файлом (pin-window.json), у'же этих: оно не открывает диалоги/уведомления/автозапуск.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -10,6 +10,7 @@
     "core:window:allow-close",
     "core:window:allow-set-focus",
     "core:window:allow-is-visible",
+    "core:webview:allow-create-webview-window",
     "dialog:default",
     "notification:default",
     "store:default",
