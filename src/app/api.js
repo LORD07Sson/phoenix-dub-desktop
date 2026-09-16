@@ -123,15 +123,19 @@ document.addEventListener("keydown", e => {
 // цвета левой полоски у error других сигналов не было.
 const TOAST_ICON = { info: "", error: "⚠️", success: "✓" };
 
-export function toast(text, kind = "info") {
+// action — необязательная кликабельная кнопка внутри тоста, например
+// «Показать в папке» после скачивания/экспорта файла: действие само по
+// себе неважное настолько, чтобы держать под него отдельный диалог, но
+// и незаметно потерять его после закрытия шторки не хочется.
+export function toast(text, kind = "info", action = null) {
   const root = $("#toast-root");
   if (!root) return;
   const el = document.createElement("div");
   el.className = "toast";
   el.dataset.kind = kind;
-  const duration = 4200;
+  const duration = action ? 7000 : 4200;
   const icon = TOAST_ICON[kind] || "";
-  el.innerHTML = `${icon ? `<span class="toast-icon">${icon}</span>` : ""}<span class="toast-text"></span><span class="toast-progress" style="animation-duration:${duration}ms;"></span>`;
+  el.innerHTML = `${icon ? `<span class="toast-icon">${icon}</span>` : ""}<span class="toast-text"></span>${action ? `<button type="button" class="toast-action"></button>` : ""}<span class="toast-progress" style="animation-duration:${duration}ms;"></span>`;
   el.querySelector(".toast-text").textContent = text;
   root.appendChild(el);
   const remove = () => {
@@ -139,6 +143,19 @@ export function toast(text, kind = "info") {
     el.addEventListener("animationend", () => el.remove(), { once: true });
   };
   const timer = setTimeout(remove, duration); // DevSkim: ignore DS172411 — вызов функции, не строки, данные не внешние
+  if (action) {
+    const actionBtn = el.querySelector(".toast-action");
+    actionBtn.textContent = action.label;
+    // stopPropagation — иначе клик по кнопке действия попадал бы и на
+    // обработчик тоста целиком (закрытие по клику) одновременно с
+    // самим действием.
+    actionBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      clearTimeout(timer);
+      action.onClick();
+      remove();
+    });
+  }
   el.addEventListener("click", () => { clearTimeout(timer); remove(); });
 }
 

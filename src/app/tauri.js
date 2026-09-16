@@ -37,3 +37,18 @@ export const appWindow = getCurrentWindow();
 export function openExternal(url) {
   return invoke("plugin:shell|open", { path: url });
 }
+
+// «Показать в папке» — открывает системный файловый менеджер на
+// каталоге, содержащем указанный файл (сам plugin:shell|open умеет
+// открывать и файлы, и папки; выделить конкретный файл внутри — уже
+// отдельная программа на каждой ОС типа `explorer /select,`, а это
+// shell:allow-execute — заведомо более широкое право, чем оправдано
+// ради подсветки одного файла). Тот же shell:allow-open, что уже даёт
+// "открыть в браузере" в карточке «Команда» — новых прав не требуется.
+function parentDir(filePath) {
+  const idx = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  return idx > 0 ? filePath.slice(0, idx) : filePath;
+}
+export function revealInFolder(filePath) {
+  return invoke("plugin:shell|open", { path: parentDir(filePath) });
+}

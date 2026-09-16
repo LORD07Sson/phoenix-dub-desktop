@@ -1,7 +1,7 @@
 // QC звука по локальному файлу — целиком в Rust (src-tauri/src/audio_qc.rs),
 // этот модуль только открывает диалог выбора файла и рисует результат.
 
-import { invoke, openDialog } from "./tauri.js";
+import { invoke, openDialog, saveDialog, revealInFolder } from "./tauri.js";
 import { openSheet, dialogSkeletonHtml, toast, apiPost } from "./api.js";
 import { $, esc, formatTime, formatRange, noteTimePrefix } from "./utils.js";
 
@@ -18,17 +18,134 @@ function baseName(path) {
   return String(path).split(/[\\/]/).pop() || path;
 }
 
-function findingsHtml(findings) {
+// path — необязателен: когда он есть (одиночный QC и раскрытая строка
+// пакетного QC — там путь файла тоже известен), рядом с находкой
+// рисуется кнопка «вырезать фрагмент», см. wireExportButtons ниже.
+function findingsHtml(findings, path) {
   return findings.map(f => `
     <div class="qc-finding ${f.severity}">
       <span class="tag">${esc(FINDING_LABELS[f.kind] || f.kind)}</span>
-      <div>
+      <div class="qc-finding-body">
         <div class="time">${formatRange(f.start, f.end)}</div>
         <div>${esc(f.message)}</div>
       </div>
+      ${path ? `<button type="button" class="qc-export-btn" title="Сохранить фрагмент вокруг находки как WAV"
+          data-export-path="${esc(path)}" data-export-start="${f.start}" data-export-end="${f.end}"
+          data-export-kind="${esc(f.kind)}">✂ Фрагмент</button>` : ""}
     </div>
   `).join("");
 }
+
+// ---------- волна с маркерами находок ----------
+// Раньше QC-находки были просто списком с тайм-кодами — время видно,
+// но не видно САМ сигнал: почему именно тут "тихо" или где именно на
+// пике клиппинг. Огибающая амплитуды (min/max по бакетам, из Rust —
+// generate_waveform в audio_qc.rs) рисуется под находками той же
+// шкалой времени, с подсвеченными диапазонами находок — тот же приём,
+// что маркеры в Adobe Audition/iZotope RX, только без открытия
+// отдельного приложения.
+const WAVEFORM_BUCKETS = 400;
+
+function drawWaveform(canvas, waveform, findings) {
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || 560;
+  const cssHeight = 84;
+  canvas.width = Math.round(cssWidth * dpr);
+  canvas.height = Math.round(cssHeight * dpr);
+  canvas.style.height = `${cssHeight}px`;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const mid = cssHeight / 2;
+  const buckets = waveform.peaks.length / 2;
+  const barWidth = cssWidth / buckets;
+
+  // Диапазоны находок — полупрозрачные полосы под волной, цвет по
+  // серьёзности (та же пара цветов, что .qc-finding.error/.warn).
+  (findings || []).forEach(f => {
+    if (!waveform.duration) return;
+    const x1 = (f.start / waveform.duration) * cssWidth;
+    const x2 = (f.end / waveform.duration) * cssWidth;
+    ctx.fillStyle = f.severity === "error" ? "rgba(255,139,130,.28)" : "rgba(232,188,85,.24)";
+    ctx.fillRect(x1, 0, Math.max(1.5, x2 - x1), cssHeight);
+  });
+
+  const grad = ctx.createLinearGradient(0, 0, 0, cssHeight);
+  grad.addColorStop(0, "#ff7a45");
+  grad.addColorStop(1, "#ffc773");
+  ctx.fillStyle = grad;
+  for (let i = 0; i < buckets; i++) {
+    const min = waveform.peaks[i * 2];
+    const max = waveform.peaks[i * 2 + 1];
+    const x = i * barWidth;
+    const yTop = mid - max * mid;
+    const yBottom = mid - min * mid;
+    ctx.fillRect(x, yTop, Math.max(1, barWidth - 0.5), Math.max(1, yBottom - yTop));
+  }
+
+  ctx.strokeStyle = "rgba(255,255,255,.1)";
+  ctx.beginPath();
+  ctx.moveTo(0, mid + 0.5);
+  ctx.lineTo(cssWidth, mid + 0.5);
+  ctx.stroke();
+}
+
+// Подгружается отдельно от самого QC-отчёта и не блокирует его показ:
+// не всякий файл вообще имеет смысл рисовать волной (например, видео
+// без звуковой дорожки), и вторая ffmpeg-команда не должна тормозить
+// уже готовый список находок.
+async function loadWaveform(overlay, path, findings) {
+  const canvas = overlay.querySelector(".qc-waveform");
+  if (!canvas) return;
+  try {
+    const waveform = await invoke("generate_waveform", { path, buckets: WAVEFORM_BUCKETS });
+    if (!overlay.isConnected) return;
+    drawWaveform(canvas, waveform, findings);
+  } catch {
+    // Тихо убираем плейсхолдер — не аудио/видео с дорожкой, или ffmpeg
+    // не смог прочитать поток. Сам QC-анализ (qc_analyze) в этот момент
+    // уже отрисован, вторая ошибка тем же текстом ничего не добавляет.
+    canvas.remove();
+  }
+}
+
+// Экспорт фрагмента вокруг находки — делегирование на document, а не
+// точечная навеска после каждого рендера: кнопки живут и в одиночном
+// QC, и в раскрытых строках пакетного QC, рендерятся динамически.
+// Секунда запаса до/после находки — чтобы в вырезанном кусочке было
+// слышно контекст, а не только сам щелчок клиппинга/срез паузы;
+// верхнюю границу под длительность файла не подрезаем — ffmpeg -t за
+// пределами файла просто останавливается на EOF сам.
+document.addEventListener("click", async e => {
+  const btn = e.target.closest(".qc-export-btn");
+  if (!btn) return;
+  const path = btn.dataset.exportPath;
+  const start = Math.max(0, parseFloat(btn.dataset.exportStart) - 1);
+  const end = parseFloat(btn.dataset.exportEnd) + 1;
+  const kind = btn.dataset.exportKind;
+  const stem = baseName(path).replace(/\.[^./\\]+$/, "");
+  const savePath = await saveDialog({
+    defaultPath: `${stem}_${kind}_${Math.round(start)}s.wav`,
+    filters: [{ name: "WAV", extensions: ["wav"] }],
+  });
+  if (!savePath) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "Вырезаю…";
+  try {
+    await invoke("export_audio_clip", { path, start, end, savePath });
+    toast("Фрагмент сохранён.", "success", {
+      label: "📂 Показать в папке",
+      onClick: () => revealInFolder(savePath),
+    });
+  } catch (err) {
+    toast(`Не удалось вырезать фрагмент: ${err}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+});
 
 // Сам прогон QC + отрисовка результата — вынесено отдельной функцией,
 // чтобы её могли звать и обычный диалог выбора файла (ниже), и
@@ -48,13 +165,17 @@ export async function runQcAnalysis(path, opts = {}) {
   try {
     const report = await invoke("qc_analyze", { path });
     const body = overlay.querySelector("#qc-body");
+    const waveformHtml = `<canvas class="qc-waveform"></canvas>`;
     if (!report.findings.length) {
-      body.innerHTML = `<div style="color:var(--s-done);">✓ Замечаний не найдено. Пик ${report.peak_dbfs.toFixed(1)} дБФС, RMS ${report.rms_dbfs.toFixed(1)} дБФС, длительность ${formatTime(report.duration)}.</div>`;
+      body.innerHTML = waveformHtml +
+        `<div style="color:var(--s-done);">✓ Замечаний не найдено. Пик ${report.peak_dbfs.toFixed(1)} дБФС, RMS ${report.rms_dbfs.toFixed(1)} дБФС, длительность ${formatTime(report.duration)}.</div>`;
+      loadWaveform(overlay, path, report.findings);
       return;
     }
-    body.innerHTML =
+    body.innerHTML = waveformHtml +
       `<div style="color:var(--ink-soft); font-size:12.5px; margin-bottom:10px;">Длительность ${formatTime(report.duration)} · Пик ${report.peak_dbfs.toFixed(1)} дБФС · RMS ${report.rms_dbfs.toFixed(1)} дБФС</div>` +
-      findingsHtml(report.findings);
+      findingsHtml(report.findings, path);
+    loadWaveform(overlay, path, report.findings);
     if (opts.reportId) wireAddToNotes(overlay, opts.reportId, report.findings);
   } catch (e) {
     overlay.querySelector("#qc-body").innerHTML = `<div style="color:var(--s-stop);">${esc(e)}</div>`;
@@ -172,7 +293,7 @@ export async function runQcBatch(paths) {
       row.querySelector(".st").innerHTML = summaryHtml(report);
       const box = row.querySelector(".qc-row-findings");
       if (report.findings.length) {
-        box.innerHTML = findingsHtml(report.findings);
+        box.innerHTML = findingsHtml(report.findings, paths[i]);
         row.classList.add("expandable");
         row.addEventListener("click", () => { box.hidden = !box.hidden; });
       }
