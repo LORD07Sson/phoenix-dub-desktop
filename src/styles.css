@@ -1119,9 +1119,16 @@ kbd {
   cursor: pointer;
 }
 .toast-text { display: block; }
+.toast-icon { margin-right: 6px; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .toast.toast-out { animation: toast-out .18s ease forwards; }
 @keyframes toast-out { to { opacity: 0; transform: translateY(-4px) scale(.98); } }
+
+/* Тип тоста — цвет полоски слева и иконка перед текстом (см. TOAST_ICON
+   в api.js), не только цвет: полоска в 3px на периферии зрения легко
+   спутать с обычным акцентом интерфейса, иконка — нет. */
+.toast[data-kind="error"] { border-left-color: var(--s-stop); }
+.toast[data-kind="success"] { border-left-color: var(--s-done); }
 
 /* Полоска автозакрытия — визуально показывает, сколько времени
    осталось до того, как тост исчезнет сам. Клик по тосту закрывает раньше. */
@@ -1136,6 +1143,8 @@ kbd {
   animation-timing-function: linear;
   animation-fill-mode: forwards;
 }
+.toast[data-kind="error"] .toast-progress { background: var(--s-stop); }
+.toast[data-kind="success"] .toast-progress { background: var(--s-done); }
 @keyframes toast-progress { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 
 .spinner {

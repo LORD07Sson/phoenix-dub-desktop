@@ -327,7 +327,7 @@ export function changeStatusDialog(publicIds, onDone, currentStatus) {
       } else {
         await apiPost("/reports/bulk/status", { public_ids: publicIds, status });
       }
-      toast("Статус обновлён.");
+      toast("Статус обновлён.", "success");
       overlay.remove();
       state.selected.clear();
       await loadReports();
@@ -357,7 +357,7 @@ export function assignDialog(publicIds, onDone) {
       } else {
         await apiPost("/reports/bulk/assign", { public_ids: publicIds, telegram_id: telegramId });
       }
-      toast("Исполнитель назначен.");
+      toast("Исполнитель назначен.", "success");
       overlay.remove();
       state.selected.clear();
       await loadReports();
@@ -381,7 +381,7 @@ export function priorityDialog(publicId, onDone, current) {
   overlay.querySelector("#dlg-apply").addEventListener("click", async () => {
     try {
       await apiPost(`/report/${publicId}/details`, { priority: overlay.querySelector("#dlg-priority").value });
-      toast("Приоритет обновлён.");
+      toast("Приоритет обновлён.", "success");
       overlay.remove();
       await loadReports();
       if (onDone) await onDone();
@@ -403,7 +403,7 @@ export function deadlineDialog(publicId, current, onDone) {
   overlay.querySelector("#dlg-clear").addEventListener("click", async () => {
     try {
       await apiPost(`/report/${publicId}/details`, { clear_deadline: true });
-      toast("Срок убран.");
+      toast("Срок убран.", "success");
       overlay.remove();
       await loadReports();
       if (onDone) await onDone();
@@ -414,7 +414,7 @@ export function deadlineDialog(publicId, current, onDone) {
     if (!val) return;
     try {
       await apiPost(`/report/${publicId}/details`, { deadline: val });
-      toast("Срок обновлён.");
+      toast("Срок обновлён.", "success");
       overlay.remove();
       await loadReports();
       if (onDone) await onDone();
