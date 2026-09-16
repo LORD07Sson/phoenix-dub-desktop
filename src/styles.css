@@ -1361,9 +1361,32 @@ kbd {
   background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px;
   padding: 10px; display: flex; flex-direction: column; gap: 8px;
 }
-.board-col-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 4px; }
-.board-col-head .lb { font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
-.board-col-head .cnt { font-size: 11.5px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.board-col-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 4px; gap: 6px; }
+.board-col-head .lb { font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-col-head .cnt { font-size: 11.5px; color: var(--ink-dim); font-variant-numeric: tabular-nums; flex: none; }
+.board-col-collapse {
+  flex: none; width: 20px; height: 20px; border: none; background: none; color: var(--ink-dim);
+  cursor: pointer; border-radius: 5px; font-size: 13px; line-height: 1; transition: transform .18s ease, background .12s ease;
+}
+.board-col-collapse:hover { background: var(--surface-3); color: var(--ink); }
+
+/* Свёрнутая колонка — узкая полоска: подпись читается сверху вниз,
+   карточки и "показать ещё" спрятаны. Клик по стрелке (или заголовку)
+   разворачивает обратно. Ширина — не 0 и не display:none у всей
+   колонки: счётчик отчётов должен оставаться виден даже свёрнутым,
+   иначе "где мои 12 завершённых" не узнать, не разворачивая. */
+.board-col.collapsed {
+  width: 40px; padding: 10px 6px; align-items: center; gap: 10px;
+}
+.board-col.collapsed .board-cards,
+.board-col.collapsed .board-col-more { display: none; }
+.board-col.collapsed .board-col-head {
+  flex-direction: column; padding: 0; gap: 8px;
+}
+.board-col.collapsed .board-col-head .lb {
+  writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; overflow: visible;
+}
+.board-col.collapsed .board-col-collapse { transform: rotate(180deg); }
 .board-cards { display: flex; flex-direction: column; gap: 8px; min-height: 4px; }
 .board-card {
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
