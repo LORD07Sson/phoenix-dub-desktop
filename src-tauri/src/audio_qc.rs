@@ -63,6 +63,103 @@ pub fn analyze(path: &str) -> Result<QcReport, String> {
     analyze_samples(&samples)
 }
 
+/// Огибающая амплитуды для отрисовки волны на фронтенде — min/max на
+/// каждый "бакет" (по паре float на бакет, диапазон -1..1), а не сырые
+/// сэмплы: 16кГц * несколько минут — это сотни тысяч точек, тянуть их
+/// все через invoke() в JS и рисовать один <canvas> шириной 800px
+/// незачем и вредно для памяти webview. Находки QC уже несут start/end
+/// в секундах (см. QcFinding) — фронтенд сам кладёт маркеры на ту же
+/// шкалу времени, что и duration здесь.
+#[derive(Serialize)]
+pub struct WaveformData {
+    pub duration: f64,
+    /// Чередование [min0, max0, min1, max1, ...] — длина ровно buckets*2.
+    pub peaks: Vec<f32>,
+}
+
+const MIN_WAVEFORM_BUCKETS: u32 = 8;
+const MAX_WAVEFORM_BUCKETS: u32 = 4000;
+
+pub fn generate_waveform(path: &str, buckets: u32) -> Result<WaveformData, String> {
+    let samples = decode_pcm(path)?;
+    if samples.is_empty() {
+        return Err("Не удалось прочитать аудио — файл пуст или повреждён.".into());
+    }
+    let buckets = buckets.clamp(MIN_WAVEFORM_BUCKETS, MAX_WAVEFORM_BUCKETS);
+    let duration = samples.len() as f64 / SAMPLE_RATE as f64;
+    Ok(WaveformData {
+        duration,
+        peaks: downsample_peaks(&samples, buckets),
+    })
+}
+
+/// Чистая функция без ffmpeg — вынесена отдельно ровно затем же, зачем
+/// и analyze_samples: юнит-тесты гоняют её на синтетических сэмплах, без
+/// реального аудиофайла и процесса ffmpeg.
+fn downsample_peaks(samples: &[i16], buckets: u32) -> Vec<f32> {
+    let buckets = buckets.max(1) as usize;
+    let len = samples.len();
+    let mut out = Vec::with_capacity(buckets * 2);
+    for b in 0..buckets {
+        let start = b * len / buckets;
+        let end = (((b + 1) * len / buckets).max(start + 1)).min(len);
+        let slice = &samples[start..end];
+        let mut mn = i16::MAX;
+        let mut mx = i16::MIN;
+        for &s in slice {
+            if s < mn {
+                mn = s;
+            }
+            if s > mx {
+                mx = s;
+            }
+        }
+        out.push(mn as f32 / 32768.0);
+        out.push(mx as f32 / 32768.0);
+    }
+    out
+}
+
+/// Вырезает и сохраняет фрагмент дорожки — экспорт QC-находки как
+/// самостоятельный файл, чтобы отправить её коллеге/режиссёру без
+/// пересылки исходника целиком. Результат всегда WAV PCM: у входа может
+/// быть любой контейнер/кодек (в т.ч. видео), пересчитывать в тот же
+/// формат для короткого превью-фрагмента не имеет смысла, а WAV
+/// открывается чем угодно без вопросов про кодеки.
+/// -ss ДО -i — быстрый seek по контейнеру; для звука (в отличие от
+/// видео с его keyframe-интервалами) ffmpeg декодирует точно от начала
+/// запрошенной позиции, так что точность не страдает.
+pub fn export_clip(path: &str, start: f64, end: f64, out_path: &str) -> Result<(), String> {
+    if !(start.is_finite() && end.is_finite() && start >= 0.0 && end > start) {
+        return Err("Некорректный диапазон фрагмента.".into());
+    }
+    let duration = end - start;
+    let ffmpeg = resolve_ffmpeg();
+    let output = ffmpeg_command(ffmpeg)
+        .args([
+            "-v", "error",
+            "-y",
+            "-ss", &format!("{start:.3}"),
+            "-i", path,
+            "-t", &format!("{duration:.3}"),
+            "-vn",
+            "-acodec", "pcm_s16le",
+            "-ar", "44100",
+            "-ac", "2",
+        ])
+        .arg(out_path)
+        .output()
+        .map_err(|e| format!(
+            "ffmpeg не найден или не запустился ({ffmpeg}): {e}."
+        ))?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("ffmpeg не смог вырезать фрагмент: {}", err.trim()));
+    }
+    Ok(())
+}
+
 /// Путь к ffmpeg рядом с исполняемым файлом приложения, если он там
 /// есть (packaged-вариант) — иначе `None`, и вызывающий код откатится
 /// на системный PATH. `current_exe()` — тот же приём, что использует
@@ -390,6 +487,90 @@ mod tests {
         let samples = tone(1.0, 32000);
         let report = analyze_samples(&samples).unwrap();
         assert!(report.findings.iter().any(|f| f.kind == "loud" || f.kind == "clipping"));
+    }
+
+    #[test]
+    fn waveform_peaks_length_matches_requested_buckets() {
+        let samples = tone(2.0, 8000);
+        let peaks = downsample_peaks(&samples, 100);
+        assert_eq!(peaks.len(), 200); // min+max на бакет
+    }
+
+    #[test]
+    fn waveform_peaks_reflect_full_scale_tone() {
+        // tone() чередует +amplitude/-amplitude — на полной шкале min
+        // должен быть близко к -1, max — близко к +1.
+        let samples = tone(1.0, 32000);
+        let peaks = downsample_peaks(&samples, 10);
+        for chunk in peaks.chunks(2) {
+            assert!(chunk[0] < -0.9, "min бакета должен быть у -1: {}", chunk[0]);
+            assert!(chunk[1] > 0.9, "max бакета должен быть у +1: {}", chunk[1]);
+        }
+    }
+
+    #[test]
+    fn waveform_peaks_are_near_zero_for_silence() {
+        let samples = silence(1.0);
+        let peaks = downsample_peaks(&samples, 20);
+        assert!(peaks.iter().all(|&p| p == 0.0));
+    }
+
+    #[test]
+    fn waveform_handles_more_buckets_than_samples_without_panicking() {
+        // Совсем короткий файл — буферов запрошено больше, чем сэмплов.
+        let samples = tone(0.0005, 8000); // единицы сэмплов
+        let peaks = downsample_peaks(&samples, 500);
+        assert_eq!(peaks.len(), 1000);
+    }
+
+    #[test]
+    fn export_clip_rejects_invalid_range() {
+        assert!(export_clip("whatever.wav", -1.0, 1.0, "/tmp/out.wav").is_err());
+        assert!(export_clip("whatever.wav", 2.0, 1.0, "/tmp/out.wav").is_err());
+        assert!(export_clip("whatever.wav", 1.0, 1.0, "/tmp/out.wav").is_err());
+    }
+
+    /// Реальный прогон через системный ffmpeg (на этой машине он есть в
+    /// PATH — resolve_ffmpeg() откатится на него, т.к. бандловый
+    /// ffmpeg.exe тут не запускается, это Windows PE). Генерируем
+    /// синтетический тон через lavfi, режем середину, проверяем, что
+    /// результат — валидный WAV нужной длительности. Если на машине,
+    /// где гоняют тесты, ffmpeg не установлен вовсе — пропускаем, а не
+    /// падаем: это единственный тест здесь, которому нужен реальный
+    /// бинарник в PATH.
+    #[test]
+    fn export_clip_produces_wav_of_requested_duration() {
+        if Command::new("ffmpeg").arg("-version").output().map(|o| !o.status.success()).unwrap_or(true) {
+            eprintln!("ffmpeg не найден в PATH — пропускаем интеграционный тест export_clip");
+            return;
+        }
+        let dir = std::env::temp_dir();
+        let src = dir.join("phoenix_test_source.wav");
+        let out = dir.join("phoenix_test_clip.wav");
+
+        // 5-секундный тон 440Гц как исходник.
+        let gen = Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=5"])
+            .arg(&src)
+            .output()
+            .expect("не удалось сгенерировать тестовый тон");
+        assert!(gen.status.success(), "ffmpeg lavfi source: {}", String::from_utf8_lossy(&gen.stderr));
+
+        let src_str = src.to_string_lossy().into_owned();
+        let out_str = out.to_string_lossy().into_owned();
+        export_clip(&src_str, 1.0, 3.0, &out_str).expect("export_clip не должен падать на валидном входе");
+
+        // Проверяем длительность результата тем же decode_pcm, которым
+        // пользуется весь остальной модуль — не тянем ffprobe отдельно.
+        let clipped_samples = decode_pcm(&out_str).expect("результат export_clip должен читаться decode_pcm");
+        let got_duration = clipped_samples.len() as f64 / SAMPLE_RATE as f64;
+        assert!(
+            (got_duration - 2.0).abs() < 0.1,
+            "ожидали ~2с, получили {got_duration:.3}с"
+        );
+
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&out);
     }
 
     #[test]

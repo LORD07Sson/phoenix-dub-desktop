@@ -146,6 +146,19 @@ fn qc_analyze(path: String) -> Result<audio_qc::QcReport, String> {
     audio_qc::analyze(&path)
 }
 
+// Тоже через ffmpeg (полное декодирование в PCM) — на большом файле
+// секунды, поэтому (async) по той же причине, что и у qc_analyze выше.
+#[tauri::command(async)]
+fn generate_waveform(path: String, buckets: u32) -> Result<audio_qc::WaveformData, String> {
+    audio_qc::generate_waveform(&path, buckets)
+}
+
+// Запускает ffmpeg-субпроцесс и пишет файл на диск — блокирующее.
+#[tauri::command(async)]
+fn export_audio_clip(path: String, start: f64, end: f64, save_path: String) -> Result<(), String> {
+    audio_qc::export_clip(&path, start, end, &save_path)
+}
+
 // Обращение к хранилищу учётных данных ОС тоже блокирующее (на Linux —
 // синхронный вызов Secret Service по D-Bus).
 #[tauri::command(async)]
@@ -401,6 +414,8 @@ fn main() {
         .manage(DroppedFiles::default())
         .invoke_handler(tauri::generate_handler![
             qc_analyze,
+            generate_waveform,
+            export_audio_clip,
             token_save,
             token_load,
             token_clear,
