@@ -42,7 +42,7 @@ function boardCardHtml(r, status) {
   const accent = `var(${STATUS_COLOR_VAR[status] || "--s-draft"})`;
   const prColor = `var(${PRIORITY_COLOR_VAR[r.priority] || "--ink-soft"})`;
   return `
-    <div class="board-card" data-open="${esc(r.public_id)}" data-id="${esc(r.public_id)}" data-status="${esc(status)}" style="border-left: 3px solid ${accent};">
+    <div class="board-card" data-open="${esc(r.public_id)}" data-id="${esc(r.public_id)}" data-status="${esc(status)}" style="border-left: 3px solid ${accent}; --accent-dot: ${accent};">
       <div class="id">${esc(r.public_id)}</div>
       <div class="ttl">${esc(r.title)}</div>
       ${r.priority ? `<div class="pr" style="color:${prColor};">${r.priority === "urgent" ? "⚡ " : ""}${esc(PRIORITY_LABELS[r.priority] || r.priority)}</div>` : ""}

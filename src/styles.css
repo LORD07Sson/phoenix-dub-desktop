@@ -42,6 +42,22 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   --s-stop: #ff8b82;
   --shadow: 0 2px 10px rgba(0,0,0,.28);
   --radius: 14px;
+
+  /* Стеклянные поверхности — те же токены и та же логика, что в
+     мини-аппе (miniapp/static/index.html): точечно на шапке, боковой
+     панели вкладок, модалках/командной палитре и всплывающих карточках
+     (аватар/тайтл/контекстное меню) — там элемент реально лежит поверх
+     остального интерфейса, и размытие подчёркивает это. Карточки
+     контента (доска, bento, лента, таблица) остаются непрозрачными —
+     они не перекрывают ничего под собой, стекло там было бы просто
+     полупрозрачным фоном без физического смысла. */
+  --glass-bg: rgba(26, 18, 21, .62);
+  --glass-bg-strong: rgba(20, 13, 15, .78);
+  --glass-border: rgba(255, 210, 180, .12);
+  --glass-hi: rgba(255, 255, 255, .06);
+  --glass-blur: 20px;
+  --shadow-lg: 0 18px 40px -14px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.3);
+  --shadow-float: 0 10px 30px -8px rgba(0,0,0,.5), 0 1px 0 rgba(255,255,255,.04) inset;
 }
 
 :root[data-theme="light"] {
@@ -57,6 +73,17 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   --ink-dim: #9a8083;
   --accent-soft: rgba(255, 122, 69, .12);
   --shadow: 0 2px 14px rgba(60,30,20,.08);
+
+  /* Та же стеклянная подложка, но на светлой теме: тёмное полупрозрачное
+     стекло на светлом фоне читалось бы грязным пятном, поэтому здесь
+     это светлое стекло — белёсая полупрозрачная поверхность вместо
+     чёрной. */
+  --glass-bg: rgba(255, 250, 247, .68);
+  --glass-bg-strong: rgba(255, 255, 255, .82);
+  --glass-border: rgba(120, 60, 30, .1);
+  --glass-hi: rgba(255, 255, 255, .5);
+  --shadow-lg: 0 18px 40px -14px rgba(60,30,20,.22), 0 2px 8px rgba(60,30,20,.1);
+  --shadow-float: 0 10px 30px -8px rgba(60,30,20,.16), 0 1px 0 rgba(255,255,255,.6) inset;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -65,7 +92,15 @@ html, body { height: 100%; }
 
 body {
   margin: 0;
-  background: var(--bg);
+  /* Лёгкое фирменное свечение по углам окна вместо плоской заливки —
+     без него стеклянным шапке/боковой панели ниже было бы физически
+     нечего размывать (backdrop-filter размывает то, что реально лежит
+     под элементом; на сплошном var(--bg) эффект был бы незаметен). */
+  background:
+    radial-gradient(46% 38% at 18% -4%, var(--accent-soft), transparent 65%),
+    radial-gradient(36% 32% at 100% 100%, rgba(255, 156, 192, .06), transparent 65%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--ink);
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overflow: hidden;
@@ -115,8 +150,8 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
 }
 .btn:hover, .icon-btn:hover { background: var(--surface-3); border-color: var(--fire); }
 .btn:active, .icon-btn:active { transform: scale(.97); }
-.btn.primary { background: linear-gradient(135deg, var(--fire), var(--ember)); border: none; color: #1a0f0a; font-weight: 600; }
-.btn.primary:hover { filter: brightness(1.08); }
+.btn.primary { background: linear-gradient(135deg, var(--fire), var(--ember)); border: none; color: #1a0f0a; font-weight: 600; box-shadow: 0 4px 14px -4px rgba(255, 122, 69, .45); }
+.btn.primary:hover { filter: brightness(1.08); box-shadow: 0 6px 18px -4px rgba(255, 122, 69, .55); }
 .btn.ghost { background: transparent; }
 .btn.danger { border-color: var(--s-stop); color: var(--s-stop); background: transparent; }
 .btn.danger:hover { background: var(--s-stop); color: #1a0f0a; }
@@ -211,8 +246,17 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-2);
+  border-bottom: 1px solid var(--glass-border);
+  /* Настоящее стекло — та же подложка/блюр, что в шапке мини-аппа:
+     полупрозрачная заливка + backdrop-filter, чтобы фирменное свечение
+     из фона окна (см. body выше) просвечивало размытым пятном, а не
+     плоским цветом. */
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  box-shadow: var(--shadow-float);
+  position: relative;
+  z-index: 6;
 }
 
 .titlebar-left { display: flex; align-items: center; gap: 10px; }
@@ -243,8 +287,15 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
   align-items: center;
   gap: 4px;
   padding: 12px 0;
-  background: var(--bg-2);
-  border-right: 1px solid var(--line);
+  /* Тот же стеклянный приём, что у шапки, но чуть слабее (--glass-bg
+     вместо --glass-bg-strong) — вертикальная панель у'же и заметнее
+     мерцает при сильном блюре на скролле контента рядом с ней. */
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border-right: 1px solid var(--glass-border);
+  position: relative;
+  z-index: 4;
 }
 .sidebar-spacer { flex: 1; }
 
@@ -259,12 +310,24 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color .15s, background .15s;
+  transition: color .15s, background .15s, box-shadow .18s ease, transform .12s cubic-bezier(.2,.8,.3,1.4);
   position: relative;
 }
-.tab-btn .tab-ic { line-height: 1; }
+.tab-btn .tab-ic { line-height: 1; transition: transform .18s cubic-bezier(.2,.8,.3,1.4); }
 .tab-btn:hover { color: var(--ink); background: var(--surface-2); }
-.tab-btn.active { color: var(--fire); background: var(--surface); }
+.tab-btn:active { transform: scale(.92); }
+/* Активная вкладка — мягкая огненная заливка-градиент поверх стекла
+   боковой панели плюс тонкое внутреннее кольцо и лёгкое свечение,
+   тот же язык, что у активной плитки плавающего дока в мини-аппе
+   (.tab.on), адаптированный под узкую вертикальную кнопку: полоска
+   слева (::after) остаётся — она читается на боковой панели лучше,
+   чем нижняя обводка, — но теперь дополнена самим свечением кнопки. */
+.tab-btn.active {
+  color: var(--fire);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--fire) 20%, transparent), color-mix(in srgb, var(--gold) 9%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fire) 45%, transparent), 0 0 14px -3px rgba(255, 122, 69, .55);
+}
+.tab-btn.active .tab-ic { transform: scale(1.08); }
 .tab-btn.active::after {
   content: "";
   position: absolute;
@@ -272,6 +335,7 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
   width: 3px;
   background: linear-gradient(180deg, var(--fire), var(--gold));
   border-radius: 0 3px 3px 0;
+  box-shadow: 0 0 8px 1px rgba(255, 122, 69, .5);
 }
 
 /* Счётчик непрочитанного на иконке вкладки (сейчас — «Лента»,
@@ -311,15 +375,23 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
   border-radius: 16px;
   padding: 16px;
   opacity: 0;
+  box-shadow: var(--shadow);
   animation: bcell-in .4s ease forwards;
   transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
 }
 .bcell:hover {
   transform: translateY(-2px) scale(1.012);
   border-color: var(--fire);
-  box-shadow: 0 6px 20px rgba(255, 122, 69, .14);
+  box-shadow: var(--shadow-float), 0 6px 20px rgba(255, 122, 69, .14);
 }
-.bcell.wide { grid-column: span 2; }
+/* Плитка-«герой» (сейчас — «Структура загрузки», первая в сетке) —
+   тонкий фирменный градиент вместо плоской заливки, чтобы она читалась
+   как главная карточка секции, а не просто более широкая версия
+   остальных — тот же приём, что у .bcell.vote-hero в мини-аппе. */
+.bcell.wide {
+  grid-column: span 2;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--fire) 7%, var(--surface)), var(--surface) 70%);
+}
 @media (max-width: 640px) { .bcell.wide { grid-column: span 1; } }
 @keyframes bcell-in {
   from { opacity: 0; transform: translateY(10px) scale(.98); }
@@ -551,9 +623,11 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
    не завязана на разметку конкретной вкладки. */
 .avatar-popover {
   position: fixed; z-index: 300;
-  background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+  background: var(--glass-bg-strong); border: 1px solid var(--glass-border); border-radius: 12px;
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
   padding: 10px 12px; min-width: 180px; max-width: 240px;
-  box-shadow: var(--shadow), 0 10px 24px rgba(0,0,0,.35);
+  box-shadow: var(--shadow-float), 0 10px 24px rgba(0,0,0,.35);
   font-size: 12px;
 }
 .avatar-popover .ap-name { font-weight: 700; font-size: 13px; }
@@ -571,9 +645,11 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
 .title-popover {
   position: fixed; z-index: 300;
   display: flex; flex-direction: column; gap: 8px;
-  background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+  background: var(--glass-bg-strong); border: 1px solid var(--glass-border); border-radius: 12px;
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
   padding: 10px; width: 170px;
-  box-shadow: var(--shadow), 0 10px 24px rgba(0,0,0,.35);
+  box-shadow: var(--shadow-float), 0 10px 24px rgba(0,0,0,.35);
   font-size: 12px;
 }
 .title-popover .tp-poster {
@@ -588,9 +664,11 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
 /* Контекстное меню по правому клику — см. showContextMenu в utils.js. */
 .context-menu {
   position: fixed; z-index: 400;
-  background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+  background: var(--glass-bg-strong); border: 1px solid var(--glass-border); border-radius: 10px;
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
   padding: 4px; min-width: 180px;
-  box-shadow: var(--shadow), 0 10px 24px rgba(0,0,0,.35);
+  box-shadow: var(--shadow-float), 0 10px 24px rgba(0,0,0,.35);
   display: flex; flex-direction: column;
 }
 .context-menu-item {
@@ -655,6 +733,7 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
   border-color: transparent;
   color: #1a0f0a;
   font-weight: 600;
+  box-shadow: 0 3px 12px -4px rgba(255, 122, 69, .5);
 }
 
 .content { flex: 1; overflow: auto; padding: 0 16px 16px; position: relative; }
@@ -662,7 +741,13 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead th {
   position: sticky; top: 0;
-  background: var(--bg);
+  z-index: 2;
+  /* sticky-заголовок реально перекрывает строки, которые уходят под
+     него при скролле — стекло здесь физически оправдано, как у
+     .overlay/.sheet выше. */
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
   text-align: left;
   padding: 10px 10px;
   color: var(--ink-soft);
@@ -785,11 +870,15 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: var(--surface-2);
+  /* Стеклянная — она реально лежит поверх прокручивающихся строк
+     таблицы (sticky bottom), в отличие от статичных карточек контента. */
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
   border: 1px solid var(--fire);
   border-radius: 12px;
   margin-top: 10px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-float);
 }
 .bulk-bar b { color: var(--gold); }
 .bulk-bar .spacer { flex: 1; }
@@ -806,7 +895,9 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 
 .overlay {
   position: fixed; inset: 0;
-  background: rgba(0,0,0,.55);
+  background: rgba(4,2,2,.5);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center;
   z-index: 50;
 }
@@ -814,11 +905,17 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
   width: min(480px, 92vw);
   max-height: 84vh;
   overflow: auto;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  /* Настоящее стекло: модалка реально лежит поверх остального окна
+     (доски/таблицы/обзора), поэтому размытие того, что под ней, здесь
+     физически оправдано — тот же приём и те же токены, что у .sheet-body
+     в мини-аппе. */
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-border);
   border-radius: 18px;
   padding: 20px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-lg);
 }
 .sheet h2 { margin: 0 0 14px; font-size: 15px; }
 .sheet .row { display: flex; gap: 8px; margin-bottom: 10px; }
@@ -867,7 +964,7 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
    куда сейчас перейдёшь. */
 .cmdk-overlay { align-items: flex-start; }
 .cmdk-overlay .sheet { width: min(560px, 92vw); margin-top: 14vh; padding: 8px; max-height: 60vh; }
-.cmdk-input-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.cmdk-input-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--glass-border); }
 .cmdk-input-row .cmdk-ic { color: var(--ink-dim); flex: none; }
 #cmdk-input {
   flex: 1; border: none; background: transparent; color: var(--ink);
@@ -980,7 +1077,7 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
   border-radius: 10px;
   padding: 10px 14px 13px;
   font-size: 13px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-float);
   animation: toast-in .2s ease;
   max-width: 320px;
   overflow: hidden;
@@ -1220,7 +1317,13 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 .board-card {
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
   padding: 10px 12px; cursor: pointer; animation: row-in .22s ease both;
-  transition: border-color .15s ease, transform .15s ease, opacity .15s ease;
+  /* Лёгкое цветное свечение статуса поверх обычной тени — --accent-dot
+     задаётся инлайном в board.js (тем же значением, что и цвет левой
+     полоски border-left), поэтому карточка читается одним цветовым
+     пятном ещё до текста, как в мини-аппе (.card). При отсутствии
+     значения (fallback transparent) свечения просто нет. */
+  box-shadow: var(--shadow), 0 0 0 1px rgba(255,255,255,.02) inset, 0 10px 22px -14px var(--accent-dot, transparent);
+  transition: border-color .15s ease, transform .15s ease, opacity .15s ease, box-shadow .18s ease;
   /* pan-y, как и у .board выше: горизонтальный жест пальцем по карточке
      прокручивает доску (см. wireCardDrag), вертикальный — страницу.
      На время переноса самой карточки (долгое удержание) board.js
@@ -1231,7 +1334,11 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 /* border-top/right/bottom-color, а не border-color целиком — иначе
    перекрывает цветную левую полоску статуса (border-left, инлайн-стиль
    в board.js), которая и так была едва заметна на скриншотах. */
-.board-card:hover { border-top-color: var(--fire); border-right-color: var(--fire); border-bottom-color: var(--fire); transform: translateY(-1px); }
+.board-card:hover {
+  border-top-color: var(--fire); border-right-color: var(--fire); border-bottom-color: var(--fire);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-float), 0 0 0 1px rgba(255,255,255,.03) inset, 0 14px 28px -12px var(--accent-dot, transparent);
+}
 .board-card.dragging { opacity: .35; }
 .board-card .id { font-size: 10.5px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
 .board-card .ttl { font-size: 13px; font-weight: 600; margin: 2px 0 6px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
