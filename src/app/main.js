@@ -21,6 +21,7 @@ import { checkForUpdates } from "./settings.js";
 import "./notifications.js";
 import "./presence.js";
 import "./command-palette.js";
+import "./shortcuts-help.js";
 import "./file-drop.js";
 import "./avatar-hover.js";
 import "./feed-badge.js";
