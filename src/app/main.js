@@ -15,12 +15,14 @@
 
 import { appWindow } from "./tauri.js";
 import { tryRestoreSession } from "./auth.js";
+import "./density.js";
 import "./tabs.js";
 import "./qc.js";
 import { checkForUpdates } from "./settings.js";
 import "./notifications.js";
 import "./presence.js";
 import "./command-palette.js";
+import "./shortcuts-help.js";
 import "./file-drop.js";
 import "./avatar-hover.js";
 import "./feed-badge.js";

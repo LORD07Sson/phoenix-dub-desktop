@@ -26,8 +26,17 @@ const LOADERS = {
 // предыдущего пользователя не остались висеть в DOM.
 const TAB_BODIES = ["#overview-body", "#board-body", "#titles-body", "#feed-body", "#profile-body", "#reports-body"];
 
+// Последняя открытая вкладка переживает не только смену пользователя
+// (см. комментарий у state.activeTab в state.js — это настройка
+// интерфейса, а не сессии), но и полный перезапуск приложения: студия
+// целыми днями держит одну и ту же вкладку (обычно «Доску»), и
+// открывать заново «Обзор» после каждого закрытия окна — лишний клик,
+// который набегает десятки раз в день.
+const LAST_TAB_KEY = "phoenix-last-tab";
+
 export function switchTab(name) {
   state.activeTab = name;
+  try { localStorage.setItem(LAST_TAB_KEY, name); } catch (_) { /* не критично */ }
   $all(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
   $all(".tab-panel").forEach(p => p.classList.toggle("active", p.dataset.panel === name));
   // Переключение вкладки — не await: ловим падение сами, чтобы
@@ -55,6 +64,20 @@ export async function loadActiveTab(force) {
   const ok = await loader();
   if (ok !== false) state.loadedTabs.add(name);
   else state.loadedTabs.delete(name);
+}
+
+// Вызывается один раз при старте, до первой загрузки данных — иначе
+// пришлось бы дважды бить по сети (сначала «Обзор» по умолчанию из
+// разметки, потом настоящая последняя вкладка). Просто переключает DOM
+// и state.activeTab, саму загрузку данных всё ещё делает
+// loadActiveTab()/refreshAll() ниже по цепочке вызовов в auth.js.
+export function restoreLastTab() {
+  let saved = null;
+  try { saved = localStorage.getItem(LAST_TAB_KEY); } catch (_) { /* не критично */ }
+  if (!saved || !LOADERS[saved]) return;
+  state.activeTab = saved;
+  $all(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === saved));
+  $all(".tab-panel").forEach(p => p.classList.toggle("active", p.dataset.panel === saved));
 }
 
 export function clearTabDom() {

@@ -25,6 +25,21 @@ import { apiGet, apiPost, toast, dialogSkeletonHtml } from "./api.js";
 import { $, esc, isOverdue, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS } from "./utils.js";
 import { assigneesHtml } from "./reports.js";
 import { openReportDetail } from "./report-detail.js";
+import { state } from "./state.js";
+
+// Свёрнутые колонки — узкая студия часто держит "Завершено"/"Отменено"
+// сложенными: сами по себе они редко нужны, но занимают на широкой
+// доске столько же места, сколько активные статусы. Чисто локальное
+// предпочтение раскладки (у API нет и не должно быть такого поля) —
+// живёт в localStorage на пользователя, тем же приёмом, что избранное
+// в списке (см. favorites.js).
+function collapsedKey() { return `phoenix_board_collapsed_${state.telegramId || "anon"}`; }
+function readCollapsed() {
+  try { return new Set(JSON.parse(localStorage.getItem(collapsedKey()) || "[]")); } catch (_) { return new Set(); }
+}
+function writeCollapsed(set) {
+  try { localStorage.setItem(collapsedKey(), JSON.stringify([...set])); } catch (_) { /* не критично */ }
+}
 
 const PRIORITY_COLOR_VAR = { urgent: "--s-stop", high: "--ember", normal: "--ink-soft", low: "--ink-dim" };
 const DRAG_THRESHOLD_PX = 6;
@@ -301,13 +316,15 @@ export async function loadBoard() {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить доску: ${esc(e.message)}</div>`;
     return false;
   }
+  const collapsed = readCollapsed();
   root.innerHTML = `
     <div class="board">
       ${d.statuses.map(col => `
-        <div class="board-col" data-status="${esc(col.status)}" style="border-top: 3px solid var(${STATUS_COLOR_VAR[col.status] || "--s-draft"});">
+        <div class="board-col ${collapsed.has(col.status) ? "collapsed" : ""}" data-status="${esc(col.status)}" style="border-top: 3px solid var(${STATUS_COLOR_VAR[col.status] || "--s-draft"});">
           <div class="board-col-head">
             <span class="lb"><span class="dot ${STATUS_DOT_CLASS[col.status] || "draft"}"></span>${esc(col.label)}</span>
             <span class="cnt">${col.total}</span>
+            <button class="board-col-collapse" data-collapse="${esc(col.status)}" title="Свернуть/развернуть колонку">‹</button>
           </div>
           <div class="board-cards" data-count="${col.reports.length}">
             ${col.reports.length ? col.reports.map(r => boardCardHtml(r, col.status)).join("") : `<div class="board-col-empty">пусто</div>`}
@@ -319,6 +336,17 @@ export async function loadBoard() {
   `;
   wireBoardCards(root);
   wireBoardScroll(root.querySelector(".board"));
+  root.querySelectorAll("[data-collapse]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const status = btn.dataset.collapse;
+      const colEl = root.querySelector(`.board-col[data-status="${status}"]`);
+      const set = readCollapsed();
+      const now = colEl.classList.toggle("collapsed");
+      if (now) set.add(status); else set.delete(status);
+      writeCollapsed(set);
+    });
+  });
   root.querySelectorAll("[data-loadmore]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const status = btn.dataset.loadmore;

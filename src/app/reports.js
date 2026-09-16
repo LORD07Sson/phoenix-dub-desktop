@@ -8,8 +8,9 @@
 
 import { state } from "./state.js";
 import { apiGet, apiPost, openSheet, toast } from "./api.js";
-import { $, $all, esc, initials, isOverdue, STATUS_DOT_CLASS, PRIORITY_LABELS } from "./utils.js";
+import { $, $all, esc, initials, isOverdue, STATUS_DOT_CLASS, PRIORITY_LABELS, showContextMenu } from "./utils.js";
 import { openReportDetail } from "./report-detail.js";
+import { isFavorite, toggleFavorite, favoriteIds } from "./favorites.js";
 
 // page_size=100 — сервер отдаёт максимум одну страницу, offset для
 // /reports в API не предусмотрен (см. docs/API.md), поэтому при
@@ -51,8 +52,20 @@ export async function loadReports() {
   let ok = true;
   try {
     const r = await apiGet("/reports", currentFilters());
-    state.reports = r.reports || [];
-    state.total = r.total || 0;
+    let reports = r.reports || [];
+    let total = r.total || 0;
+    // «Избранное» — чисто локальный фильтр (см. favorites.js), сервер
+    // о нём не знает и параметра под него в API нет. Фильтруем то, что
+    // уже пришло на текущей странице, и подменяем total — иначе
+    // статусбар ниже написал бы «показаны 3 из 47», хотя реально
+    // отфильтровано ровно то, что загружено.
+    if (state.quickFilter === "favorites") {
+      const favs = favoriteIds();
+      reports = reports.filter(x => favs.has(x.public_id));
+      total = reports.length;
+    }
+    state.reports = reports;
+    state.total = total;
     sortLocally();
     renderReports();
   } catch (e) {
@@ -89,11 +102,41 @@ export function assigneesHtml(list) {
   return `<span class="avatar-stack">${bubbles}</span>${more}`;
 }
 
+// Диапазонное выделение Shift+клик — привычка из проводника/почты,
+// которой чекбоксы-по-одному не дают: отметить полсотни строк подряд
+// вручную, кликая по каждой, никто делать не станет. Индекс — вне
+// renderReports(), чтобы переживать перерисовку (сортировка, фильтр,
+// снятие звёздочки из фильтра «Избранное» и т.п.).
+let lastCheckedIndex = null;
+
 export function renderReports() {
   const tbody = $("#reports-body");
   tbody.innerHTML = "";
   const empty = $("#empty-state");
   empty.hidden = state.reports.length > 0;
+  if (!empty.hidden) {
+    // Причина пустого списка обычно понятна сразу (активный фильтр),
+    // так что подсказка — не общая заглушка, а конкретный следующий
+    // шаг под конкретную причину, а не догадки пользователя.
+    const textEl = empty.querySelector(".empty-state-text");
+    const icEl = empty.querySelector(".empty-state-ic");
+    if (state.quickFilter === "favorites") {
+      icEl.textContent = "★";
+      textEl.textContent = "Пока нет избранного — нажмите ☆ у номера отчёта в списке, чтобы отметить нужные.";
+    } else if (state.quickFilter === "overdue") {
+      icEl.textContent = "🎉";
+      textEl.textContent = "Просроченных нет — всё по срокам.";
+    } else if (state.quickFilter === "unassigned") {
+      icEl.textContent = "✅";
+      textEl.textContent = "Без исполнителя ничего не осталось.";
+    } else if (state.quickFilter === "mine") {
+      icEl.textContent = "🗂️";
+      textEl.textContent = "На вас пока ничего не назначено.";
+    } else {
+      icEl.textContent = "🗂️";
+      textEl.textContent = "Ничего не найдено — попробуйте другой фильтр.";
+    }
+  }
 
   state.reports.forEach((r, i) => {
     const tr = document.createElement("tr");
@@ -105,9 +148,13 @@ export function renderReports() {
     tr.style.animationDelay = `${Math.min(i, 18) * 22}ms`;
     const dotClass = STATUS_DOT_CLASS[r.status] || "draft";
     const overdue = isOverdue(r);
+    const fav = isFavorite(r.public_id);
     tr.innerHTML = `
       <td class="col-check"><input type="checkbox" class="row-check" ${state.selected.has(r.public_id) ? "checked" : ""}></td>
-      <td class="num">${esc(r.public_id)}</td>
+      <td class="num">
+        <button class="fav-star ${fav ? "on" : ""}" data-fav title="${fav ? "Убрать из избранного" : "В избранное"}">${fav ? "★" : "☆"}</button>
+        ${esc(r.public_id)}
+      </td>
       <td>${esc(r.title)}</td>
       <td><span class="chip"><span class="dot ${dotClass}"></span>${esc(r.status_label)}</span></td>
       <td><span class="priority-chip ${esc(r.priority)}"><span class="dot"></span>${esc(r.priority_label)}</span></td>
@@ -120,7 +167,37 @@ export function renderReports() {
     `;
     tr.querySelector(".row-check").addEventListener("click", e => {
       e.stopPropagation();
-      toggleSelected(r.public_id, e.target.checked);
+      if (e.shiftKey && lastCheckedIndex !== null) {
+        // Отмечаем/снимаем весь диапазон между прошлым и текущим кликом
+        // тем же состоянием, в которое только что перешёл сам чекбокс.
+        const from = Math.min(lastCheckedIndex, i);
+        const to = Math.max(lastCheckedIndex, i);
+        const on = e.target.checked;
+        for (let j = from; j <= to; j++) {
+          const rep = state.reports[j];
+          if (!rep) continue;
+          if (on) state.selected.add(rep.public_id); else state.selected.delete(rep.public_id);
+        }
+        renderReports();
+      } else {
+        toggleSelected(r.public_id, e.target.checked);
+      }
+      lastCheckedIndex = i;
+    });
+    tr.querySelector("[data-fav]").addEventListener("click", e => {
+      e.stopPropagation();
+      const on = toggleFavorite(r.public_id);
+      e.target.classList.toggle("on", on);
+      e.target.textContent = on ? "★" : "☆";
+      e.target.title = on ? "Убрать из избранного" : "В избранное";
+      if (state.quickFilter === "favorites" && !on) {
+        // Сняли звёздочку, пока смотрим именно на фильтр «Избранное» —
+        // строка должна пропасть из списка сразу, а не только после
+        // следующего «Обновить».
+        state.reports = state.reports.filter(x => x.public_id !== r.public_id);
+        state.total = state.reports.length;
+        renderReports();
+      }
     });
     // Быстрые действия по наведению на строку — открывают тот же диалог,
     // что и чип на карточке отчёта, просто без похода внутрь карточки.
@@ -134,6 +211,32 @@ export function renderReports() {
       changeStatusDialog([r.public_id], () => loadReports(), r.status);
     });
     tr.addEventListener("click", () => openReportDetail(r.public_id));
+    // Правый клик — тот же набор быстрых действий, что уже есть в
+    // строке «Команда» профиля (см. profile.js), только для отчёта:
+    // открыть без выделения текста мышью, сменить статус/исполнителя/
+    // приоритет/срок без похода внутрь карточки, скопировать номер.
+    // Десктопная привычка (проводник, почта) — у мини-аппа такого
+    // жеста просто нет физически.
+    tr.addEventListener("contextmenu", e => {
+      e.preventDefault();
+      const favNow = isFavorite(r.public_id);
+      showContextMenu(e.clientX, e.clientY, [
+        { label: "Открыть карточку", action: () => openReportDetail(r.public_id) },
+        { label: favNow ? "Убрать из избранного" : "В избранное", action: () => {
+          toggleFavorite(r.public_id);
+          if (state.activeTab === "list") renderReports();
+        } },
+        { label: "Сменить статус", action: () => changeStatusDialog([r.public_id], () => loadReports(), r.status) },
+        { label: "Назначить исполнителя", action: () => assignDialog([r.public_id], () => loadReports()) },
+        { label: "Приоритет", action: () => priorityDialog(r.public_id, () => loadReports(), r.priority) },
+        { label: "Срок", action: () => deadlineDialog(r.public_id, r.deadline, () => loadReports()) },
+        { label: "Скопировать номер", action: () => {
+          navigator.clipboard.writeText(r.public_id)
+            .then(() => toast(`${r.public_id} скопирован.`))
+            .catch(() => toast("Не удалось скопировать.", "error"));
+        } },
+      ]);
+    });
     tbody.appendChild(tr);
   });
 
@@ -142,7 +245,7 @@ export function renderReports() {
     (truncated
       ? `Показаны первые ${state.reports.length} из ${state.total} — уточните фильтр или поиск, чтобы увидеть остальные · `
       : `Отчётов: ${state.reports.length} · `) +
-    `клик по строке — открыть карточку, чекбоксы — массовые операции · ` +
+    `клик по строке — открыть карточку, чекбоксы (Shift — диапазоном) — массовые операции · ` +
     `Ctrl+Shift+P — показать/скрыть окно из любого места`;
 
   $("#select-all").checked = state.reports.length > 0 && state.reports.every(r => state.selected.has(r.public_id));
@@ -269,7 +372,7 @@ export function changeStatusDialog(publicIds, onDone, currentStatus) {
       } else {
         await apiPost("/reports/bulk/status", { public_ids: publicIds, status });
       }
-      toast("Статус обновлён.");
+      toast("Статус обновлён.", "success");
       overlay.remove();
       state.selected.clear();
       await loadReports();
@@ -299,7 +402,7 @@ export function assignDialog(publicIds, onDone) {
       } else {
         await apiPost("/reports/bulk/assign", { public_ids: publicIds, telegram_id: telegramId });
       }
-      toast("Исполнитель назначен.");
+      toast("Исполнитель назначен.", "success");
       overlay.remove();
       state.selected.clear();
       await loadReports();
@@ -323,7 +426,7 @@ export function priorityDialog(publicId, onDone, current) {
   overlay.querySelector("#dlg-apply").addEventListener("click", async () => {
     try {
       await apiPost(`/report/${publicId}/details`, { priority: overlay.querySelector("#dlg-priority").value });
-      toast("Приоритет обновлён.");
+      toast("Приоритет обновлён.", "success");
       overlay.remove();
       await loadReports();
       if (onDone) await onDone();
@@ -345,7 +448,7 @@ export function deadlineDialog(publicId, current, onDone) {
   overlay.querySelector("#dlg-clear").addEventListener("click", async () => {
     try {
       await apiPost(`/report/${publicId}/details`, { clear_deadline: true });
-      toast("Срок убран.");
+      toast("Срок убран.", "success");
       overlay.remove();
       await loadReports();
       if (onDone) await onDone();
@@ -356,7 +459,7 @@ export function deadlineDialog(publicId, current, onDone) {
     if (!val) return;
     try {
       await apiPost(`/report/${publicId}/details`, { deadline: val });
-      toast("Срок обновлён.");
+      toast("Срок обновлён.", "success");
       overlay.remove();
       await loadReports();
       if (onDone) await onDone();

@@ -117,14 +117,21 @@ document.addEventListener("keydown", e => {
   if (overlays.length) dismissSheet(overlays[overlays.length - 1]);
 });
 
+// Иконка на тосте — беглый взгляд должен отличить "готово" от "ошибка"
+// раньше, чем глаза дойдут до текста (особенно на периферии зрения,
+// пока смотришь на таблицу, а не на toast-root в углу). Раньше кроме
+// цвета левой полоски у error других сигналов не было.
+const TOAST_ICON = { info: "", error: "⚠️", success: "✓" };
+
 export function toast(text, kind = "info") {
   const root = $("#toast-root");
   if (!root) return;
   const el = document.createElement("div");
   el.className = "toast";
-  if (kind === "error") el.style.borderLeftColor = "var(--s-stop)";
+  el.dataset.kind = kind;
   const duration = 4200;
-  el.innerHTML = `<span class="toast-text"></span><span class="toast-progress" style="animation-duration:${duration}ms;"></span>`;
+  const icon = TOAST_ICON[kind] || "";
+  el.innerHTML = `${icon ? `<span class="toast-icon">${icon}</span>` : ""}<span class="toast-text"></span><span class="toast-progress" style="animation-duration:${duration}ms;"></span>`;
   el.querySelector(".toast-text").textContent = text;
   root.appendChild(el);
   const remove = () => {

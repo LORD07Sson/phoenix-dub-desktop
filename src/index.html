@@ -43,6 +43,7 @@
       <span id="whoami"></span>
     </div>
     <div class="titlebar-right">
+      <button id="open-shortcuts" class="icon-btn" title="Горячие клавиши (?)">⌨️</button>
       <button id="theme-toggle" class="icon-btn" title="Светлая/тёмная тема">🌓</button>
       <button id="open-settings" class="icon-btn" title="Настройки">⚙️</button>
       <button id="open-qc" class="btn">🎧 QC звука</button>
@@ -96,6 +97,7 @@
       <button class="qf-chip" data-qf="mine">👤 Мои</button>
       <button class="qf-chip" data-qf="overdue">⏰ Просрочено</button>
       <button class="qf-chip" data-qf="unassigned">🫥 Без исполнителя</button>
+      <button class="qf-chip" data-qf="favorites">★ Избранное</button>
     </div>
 
     <div class="content">
@@ -122,8 +124,8 @@
         <div class="skeleton-row"></div>
       </div>
       <div id="empty-state" class="empty-state" hidden>
-        <div style="font-size:34px; margin-bottom:8px;">🗂️</div>
-        Ничего не найдено — попробуйте другой фильтр.
+        <div class="empty-state-ic">🗂️</div>
+        <div class="empty-state-text">Ничего не найдено — попробуйте другой фильтр.</div>
       </div>
 
       <div id="bulk-bar" class="bulk-bar" hidden>
@@ -135,7 +137,7 @@
       </div>
     </div>
 
-    <div class="statusbar" id="statusbar">Отчётов: 0 · клик по строке — открыть карточку, чекбоксы — массовые операции · Ctrl+Shift+P — показать/скрыть окно из любого места</div>
+    <div class="statusbar" id="statusbar">Отчётов: 0 · клик по строке — открыть карточку, чекбоксы (Shift — диапазоном) — массовые операции · Ctrl+Shift+P — показать/скрыть окно из любого места</div>
   </div>
 
   <!-- ===== Доска ===== -->
