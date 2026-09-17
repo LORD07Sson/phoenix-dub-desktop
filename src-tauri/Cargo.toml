@@ -23,7 +23,11 @@ custom-protocol = ["tauri/custom-protocol"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# protocol-asset — доступ вебвью к произвольному локальному файлу по asset:
+# URL (convertFileSrc() на JS-стороне), нужен для видео-превью в
+# инструментах ffmpeg (media_tools.rs: register_media_file). Без неё
+# app.asset_protocol_scope() недоступен вовсе.
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"

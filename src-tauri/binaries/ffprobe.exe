@@ -1,0 +1,5 @@
+# placeholder — CI подменяет настоящим ffprobe.exe перед сборкой (шаг
+# "Скачать и проверить статичный ffmpeg.exe" в .github/workflows/build.yml,
+# тот же архив, из которого достаётся ffmpeg.exe).
+# Настоящий бинарник в git не хранится: версия закреплена URL + SHA256 в
+# самом workflow (см. ffmpeg.exe рядом).

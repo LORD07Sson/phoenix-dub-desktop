@@ -9,6 +9,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio_qc;
+mod media_tools;
 mod token_store;
 
 use std::collections::HashSet;
@@ -157,6 +158,65 @@ fn generate_waveform(path: String, buckets: u32) -> Result<audio_qc::WaveformDat
 #[tauri::command(async)]
 fn export_audio_clip(path: String, start: f64, end: f64, save_path: String) -> Result<(), String> {
     audio_qc::export_clip(&path, start, end, &save_path)
+}
+
+// ---------- «Инструменты ffmpeg» (media_tools.rs) ----------
+// Путь приходит из JS-диалога выбора файла (openDialog), не из
+// DroppedFiles — тот же уровень доверия, что уже принят для qc_analyze/
+// generate_waveform/export_audio_clip выше: пользователь сам явно выбрал
+// файл через нативный диалог ОС, это не произвольный путь по запросу
+// вебвью.
+
+#[tauri::command(async)]
+fn mt_probe_media(path: String) -> Result<media_tools::MediaInfo, String> {
+    media_tools::probe_media(&path)
+}
+
+#[tauri::command(async)]
+fn mt_probe_keyframes(path: String) -> Result<Vec<f64>, String> {
+    media_tools::probe_keyframes(&path)
+}
+
+// Не (async): сам вызов — просто регистрация пути в скоупе asset-протокола
+// (запись в память), никакого ffmpeg-субпроцесса здесь нет.
+#[tauri::command]
+fn mt_register_media_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    media_tools::register_media_file(&app, &path)
+}
+
+#[tauri::command(async)]
+fn mt_cut_media(
+    path: String,
+    segments: Vec<media_tools::CutSegment>,
+    out_dir: String,
+    keep_separate: bool,
+    merge: bool,
+) -> Result<media_tools::CutResult, String> {
+    media_tools::cut_media(&path, &segments, &out_dir, keep_separate, merge)
+}
+
+#[tauri::command(async)]
+fn mt_transcode_media(
+    app: tauri::AppHandle,
+    path: String,
+    out_path: String,
+    opts: media_tools::TranscodeOpts,
+) -> Result<(), String> {
+    media_tools::transcode_media(&app, &path, &out_path, &opts)
+}
+
+#[tauri::command(async)]
+fn mt_extract_audio(
+    path: String,
+    out_path: String,
+    opts: media_tools::ExtractAudioOpts,
+) -> Result<(), String> {
+    media_tools::extract_audio(&path, &out_path, &opts)
+}
+
+#[tauri::command(async)]
+fn mt_concat_media(paths: Vec<String>, out_path: String) -> Result<String, String> {
+    media_tools::concat_media(&paths, &out_path)
 }
 
 // Обращение к хранилищу учётных данных ОС тоже блокирующее (на Linux —
@@ -455,6 +515,13 @@ fn main() {
             download_report_file,
             get_update_channel,
             set_update_channel,
+            mt_probe_media,
+            mt_probe_keyframes,
+            mt_register_media_file,
+            mt_cut_media,
+            mt_transcode_media,
+            mt_extract_audio,
+            mt_concat_media,
         ])
         .setup(|app| {
             // Глобальная горячая клавиша — свернуть/показать окно из любого

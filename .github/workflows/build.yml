@@ -122,8 +122,14 @@ jobs:
           fi
           unzip -q ffmpeg.zip -d ffmpeg_extracted
           find ffmpeg_extracted -iname "ffmpeg.exe" -exec cp {} src-tauri/binaries/ffmpeg.exe \;
+          # ffprobe.exe — из того же архива, тот же SHA256 уже проверен выше
+          # (один zip на оба бинарника). Нужен инструментам ffmpeg (media_tools.rs:
+          # probe_media/probe_keyframes) — сам ffmpeg.exe вывод -show_streams
+          # не отдаёт, это отдельная утилита из того же дистрибутива.
+          find ffmpeg_extracted -iname "ffprobe.exe" -exec cp {} src-tauri/binaries/ffprobe.exe \;
           rm -rf ffmpeg.zip ffmpeg_extracted
           test -s src-tauri/binaries/ffmpeg.exe || { echo "::error::ffmpeg.exe не найден в архиве"; exit 1; }
+          test -s src-tauri/binaries/ffprobe.exe || { echo "::error::ffprobe.exe не найден в архиве"; exit 1; }
 
       - name: cargo build --release
         shell: bash
@@ -146,6 +152,7 @@ jobs:
           mkdir -p pack_dir
           cp src-tauri/target/release/phoenix-dub-desktop.exe pack_dir/
           cp src-tauri/binaries/ffmpeg.exe pack_dir/
+          cp src-tauri/binaries/ffprobe.exe pack_dir/
           echo "Автосборка из main (commit ${{ github.sha }})." > release_notes.md
           vpk pack \
             --packId PhoenixDubDesktop \
