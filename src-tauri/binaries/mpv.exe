@@ -1,0 +1,4 @@
+# placeholder — CI подменяет настоящим mpv.exe перед сборкой (шаг
+# "Скачать и проверить статичный mpv.exe" в .github/workflows/build.yml).
+# Настоящий бинарник в git не хранится: версия закреплена URL + SHA256 в
+# самом workflow (см. ffmpeg.exe/ffprobe.exe рядом — тот же принцип).

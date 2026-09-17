@@ -1852,7 +1852,19 @@ body.focus-mode .report-detail-overlay .sheet {
 .mt-file-row .btn { margin-left: auto; padding: 5px 10px; font-size: 12px; }
 .mt-info-line { color: var(--ink-soft); font-size: 12px; font-weight: 400; }
 
-.mt-video { width: 100%; max-height: 260px; border-radius: var(--radius-md); background: #000; display: block; margin-bottom: 8px; }
+/* .mt-video сам по себе ничего не рисует — это просто зарезервированное
+   место, а картинку рисует нативное окно mpv поверх него (см.
+   media-tools.js: videoSurfaceRect/mpv_embed.rs). Фиксированная высота
+   важна: от неё считается прямоугольник, который передаётся в
+   mpv_set_bounds — если бы высота была "auto", до первого кадра
+   плейсхолдер был бы нулевой высоты и окно mpv получило бы 0×0. */
+.mt-video { width: 100%; height: 260px; border-radius: var(--radius-md); background: #000; display: block; margin-bottom: 8px; }
+/* Кнопка play/pause — СНАРУЖИ прямоугольника .mt-video, не оверлеем
+   поверх него: там физически рисует нативное окно mpv (см.
+   mpv_embed.rs), и порядок отрисовки веб-слоя относительно нативного
+   child-окна не гарантирован — оверлей на этом месте рисковал бы быть
+   перекрыт видео и никогда не увиден. */
+.mt-video-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 
 .mt-timeline { display: block; width: 100%; border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; margin-bottom: 10px; }
 
