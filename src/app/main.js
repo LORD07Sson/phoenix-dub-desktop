@@ -18,6 +18,7 @@ import { tryRestoreSession } from "./auth.js";
 import "./density.js";
 import "./tabs.js";
 import "./qc.js";
+import "./media-tools.js";
 import { checkForUpdates } from "./settings.js";
 import "./notifications.js";
 import "./presence.js";

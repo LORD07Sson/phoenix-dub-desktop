@@ -20,14 +20,14 @@
 // вызываются через invoke(); прогресс — событием "update-progress", его и
 // слушаем через listen() ниже).
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 
-export { invoke, listen, emit, getCurrentWindow, WebviewWindow, openDialog, saveDialog, sendNotification };
+export { invoke, listen, emit, getCurrentWindow, WebviewWindow, openDialog, saveDialog, sendNotification, convertFileSrc };
 
 export const appWindow = getCurrentWindow();
 
