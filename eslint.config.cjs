@@ -42,6 +42,7 @@ module.exports = [
         confirm: "readonly",
         prompt: "readonly",
         MutationObserver: "readonly",
+        ResizeObserver: "readonly",
         CustomEvent: "readonly",
         AbortController: "readonly",
         // pin-window.js — читает ?id= из адреса открепленного окна и
