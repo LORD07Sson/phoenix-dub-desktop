@@ -1882,3 +1882,27 @@ body.focus-mode .report-detail-overlay .sheet {
   background: var(--surface-2); color: var(--ink); font: inherit; font-size: 12.5px;
 }
 .mt-form-row label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+
+/* ---------- Муксинг (media-tools.js: muxPanelHtml) ---------- */
+.mt-mux-section { margin-bottom: 16px; }
+.mt-mux-section:last-of-type { margin-bottom: 14px; }
+.mt-mux-section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line-soft);
+}
+.mt-mux-section-head b { font-size: 13px; }
+.mt-mux-section-head .btn { padding: 4px 10px; font-size: 12px; }
+.mt-mux-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--surface-2); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 6px;
+  font-size: 12.5px;
+}
+.mt-mux-label { flex: none; font-weight: 700; color: var(--fire); min-width: 28px; }
+.mt-mux-file { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); }
+.mt-mux-row select, .mt-mux-row input[type="text"] {
+  padding: 6px 9px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--surface-3); color: var(--ink); font: inherit; font-size: 12px;
+}
+.mt-mux-row input[type="text"] { flex: 1 1 140px; min-width: 90px; }
+.mt-mux-default-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
+.mt-mux-default-toggle input { accent-color: var(--fire); width: 15px; height: 15px; }

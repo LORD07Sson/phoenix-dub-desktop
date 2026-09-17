@@ -290,6 +290,11 @@ fn mt_concat_media(paths: Vec<String>, out_path: String) -> Result<String, Strin
     media_tools::concat_media(&paths, &out_path)
 }
 
+#[tauri::command(async)]
+fn mt_mux_media(tracks: Vec<media_tools::MuxTrack>, out_path: String) -> Result<(), String> {
+    media_tools::mux_media(&tracks, &out_path)
+}
+
 // Обращение к хранилищу учётных данных ОС тоже блокирующее (на Linux —
 // синхронный вызов Secret Service по D-Bus).
 #[tauri::command(async)]
@@ -593,6 +598,7 @@ fn main() {
             mt_transcode_media,
             mt_extract_audio,
             mt_concat_media,
+            mt_mux_media,
         ])
         .setup(|app| {
             // Глобальная горячая клавиша — свернуть/показать окно из любого

@@ -11,6 +11,7 @@ import { $, esc, formatTime } from "./utils.js";
 
 const VIDEO_EXTENSIONS = ["mp4", "mkv", "mov", "avi", "webm", "m4v"];
 const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "m4a", "aac", "ogg", "opus"];
+const SUBTITLE_EXTENSIONS = ["srt", "ass", "ssa", "vtt", "sub"];
 const MEDIA_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS];
 
 function baseName(path) {
@@ -555,6 +556,144 @@ function wireConcatPanel(root) {
 }
 
 // ============================================================
+// Муксинг — собрать видео + несколько дублей аудио (каждый уже свой
+// файл, как хранит студия) + субтитры в один контейнер с языком/именем/
+// флагом "по умолчанию" на дорожку, без перекодирования. См. mux_media
+// в media_tools.rs. Разметка секций — по образцу референса пользователя
+// (Leo MultiTools): Видео/Аудио/Субтитры отдельными группами, у каждой
+// дорожки свой язык + имя + переключатель "по умолч.".
+// ============================================================
+
+const LANGUAGE_OPTIONS = [
+  { code: "und", label: "Не указан" },
+  { code: "rus", label: "Русский" },
+  { code: "eng", label: "Английский" },
+  { code: "jpn", label: "Японский" },
+  { code: "chi", label: "Китайский" },
+  { code: "kor", label: "Корейский" },
+  { code: "ger", label: "Немецкий" },
+  { code: "fre", label: "Французский" },
+  { code: "spa", label: "Испанский" },
+];
+
+const MUX_SECTIONS = [
+  { kind: "video", key: "video", label: "Видео", letter: "V", extensions: VIDEO_EXTENSIONS },
+  { kind: "audio", key: "audio", label: "Аудио", letter: "A", extensions: AUDIO_EXTENSIONS },
+  { kind: "subtitle", key: "subtitle", label: "Субтитры", letter: "S", extensions: SUBTITLE_EXTENSIONS },
+];
+
+// Один файл — одна дорожка (без склейки нескольких файлов в одну
+// дорожку, в отличие от референса, где под "V1" может быть несколько
+// файлов сразу) — это покрывает реальный сценарий студии: у каждого
+// дубляжа/сабов свой отдельный файл.
+const muxState = { video: [], audio: [], subtitle: [] };
+
+function muxTrackRowHtml(section, track, i) {
+  return `
+    <div class="mt-mux-row">
+      <span class="mt-mux-label">${section.letter}${i + 1}</span>
+      <span class="mt-mux-file" title="${esc(track.path)}">${esc(baseName(track.path))}</span>
+      <select data-mux-lang data-section="${section.key}" data-i="${i}">
+        ${LANGUAGE_OPTIONS.map(l => `<option value="${l.code}" ${l.code === track.language ? "selected" : ""}>${esc(l.label)}</option>`).join("")}
+      </select>
+      <input type="text" data-mux-title data-section="${section.key}" data-i="${i}" value="${esc(track.title)}" placeholder="Имя дорожки">
+      <label class="mt-mux-default-toggle"><input type="checkbox" data-mux-default data-section="${section.key}" data-i="${i}" ${track.isDefault ? "checked" : ""}> По умолч.</label>
+      <button class="icon-btn" data-mux-remove data-section="${section.key}" data-i="${i}" title="Убрать">✕</button>
+    </div>`;
+}
+
+function muxSectionHtml(section) {
+  const tracks = muxState[section.key];
+  return `
+    <div class="mt-mux-section">
+      <div class="mt-mux-section-head">
+        <b>${esc(section.label)}</b>
+        <button class="btn ghost" data-mux-add="${section.key}">+ Добавить</button>
+      </div>
+      ${tracks.length ? tracks.map((t, i) => muxTrackRowHtml(section, t, i)).join("") : `<div class="no-assignee">Пусто</div>`}
+    </div>`;
+}
+
+function totalMuxTracks() {
+  return muxState.video.length + muxState.audio.length + muxState.subtitle.length;
+}
+
+function muxPanelHtml() {
+  return `
+    ${MUX_SECTIONS.map(muxSectionHtml).join("")}
+    <button class="btn primary" id="mt-mux-run" ${totalMuxTracks() ? "" : "disabled"}>🧩 Смуксить</button>
+  `;
+}
+
+function wireMuxPanel(root) {
+  MUX_SECTIONS.forEach(section => {
+    const addBtn = root.querySelector(`[data-mux-add="${section.key}"]`);
+    if (!addBtn) return;
+    addBtn.addEventListener("click", async () => {
+      const picked = await openDialog({ multiple: true, filters: [{ name: section.label, extensions: section.extensions }] });
+      if (!picked) return;
+      const list = Array.isArray(picked) ? picked : [picked];
+      const tracks = muxState[section.key];
+      for (const path of list) {
+        tracks.push({ path, language: "und", title: stemOf(path), isDefault: tracks.length === 0 });
+      }
+      renderActivePanel(root);
+    });
+  });
+
+  root.querySelectorAll("[data-mux-remove]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      muxState[btn.dataset.section].splice(Number(btn.dataset.i), 1);
+      renderActivePanel(root);
+    });
+  });
+  root.querySelectorAll("[data-mux-lang]").forEach(sel => {
+    sel.addEventListener("change", () => {
+      muxState[sel.dataset.section][Number(sel.dataset.i)].language = sel.value;
+    });
+  });
+  root.querySelectorAll("[data-mux-title]").forEach(inp => {
+    inp.addEventListener("input", () => {
+      muxState[inp.dataset.section][Number(inp.dataset.i)].title = inp.value;
+    });
+  });
+  // Флаг "по умолчанию" — не больше одной дорожки на раздел (видео,
+  // аудио, субтитры отдельно), поэтому включение одной сбрасывает
+  // остальные в том же разделе; ре-рендер нужен, чтобы их чекбоксы
+  // визуально сняли отметку.
+  root.querySelectorAll("[data-mux-default]").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const section = cb.dataset.section;
+      const i = Number(cb.dataset.i);
+      muxState[section].forEach((t, idx) => { t.isDefault = idx === i && cb.checked; });
+      renderActivePanel(root);
+    });
+  });
+
+  const runBtn = root.querySelector("#mt-mux-run");
+  if (!runBtn) return;
+  runBtn.addEventListener("click", async () => {
+    const tracks = MUX_SECTIONS.flatMap(section => muxState[section.key].map(t => ({
+      path: t.path, kind: section.kind, language: t.language, title: t.title, isDefault: t.isDefault,
+    })));
+    if (!tracks.length) return;
+    const outPath = await saveDialog({ defaultPath: "muxed.mkv", filters: [{ name: "Matroska", extensions: ["mkv"] }] });
+    if (!outPath) return;
+    runBtn.disabled = true;
+    runBtn.textContent = "Муксирую…";
+    try {
+      await invoke("mt_mux_media", { tracks, outPath });
+      toast("Готово.", "success", { label: "📂 Показать в папке", onClick: () => revealInFolder(outPath) });
+    } catch (e) {
+      toast(`Не удалось смуксить: ${e}`, "error");
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = "🧩 Смуксить";
+    }
+  });
+}
+
+// ============================================================
 // Общий каркас модалки — реестр операций (переключатель вкладок).
 // Добавить новую операцию позже = ещё одна запись здесь + свой
 // html()/wire(), остальное не трогается.
@@ -565,6 +704,7 @@ const OPERATIONS = {
   convert: { label: "🔄 Конвертация", html: convertPanelHtml, wire: wireConvertPanel },
   audio: { label: "🎵 Аудио", html: audioPanelHtml, wire: wireAudioPanel },
   concat: { label: "🧩 Склейка", html: concatPanelHtml, wire: wireConcatPanel },
+  mux: { label: "🎛 Муксинг", html: muxPanelHtml, wire: wireMuxPanel },
 };
 
 let activeOp = "cut";
