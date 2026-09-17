@@ -131,8 +131,18 @@ jobs:
           test -s src-tauri/binaries/ffmpeg.exe || { echo "::error::ffmpeg.exe не найден в архиве"; exit 1; }
           test -s src-tauri/binaries/ffprobe.exe || { echo "::error::ffprobe.exe не найден в архиве"; exit 1; }
 
+      # PHOENIX_UPDATE_TOKEN — fine-grained PAT с доступом только "Public
+      # Repositories (read-only)" (см. main.rs: GITHUB_UPDATE_TOKEN,
+      # option_env! читает её прямо здесь, во время сборки). Поднимает
+      # лимит проверки обновлений с 60/час на IP до 5000/час — секрет
+      # заводится владельцем репозитория в Settings → Secrets and
+      # variables → Actions, сюда просто передаётся. Если секрет не
+      # заведён, переменная пуста, GITHUB_UPDATE_TOKEN в бинарнике — None,
+      # сборка просто продолжает работать без токена, как раньше.
       - name: cargo build --release
         shell: bash
+        env:
+          PHOENIX_UPDATE_TOKEN: ${{ secrets.PHOENIX_UPDATE_TOKEN }}
         run: cargo build --release --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
       # Velopack вместо tauri-action+NSIS: GithubSource на клиенте читает

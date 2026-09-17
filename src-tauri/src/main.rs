@@ -23,9 +23,24 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 use tauri_plugin_store::StoreExt;
 
 // Репозиторий публичный — GithubSource читает releases напрямую через
-// GitHub API (без токена, лимит 60 запросов/час на IP — с запасом для
-// студийного инструмента), прокси на своём сервере не нужен.
+// GitHub API, прокси на своём сервере не нужен.
 const UPDATE_REPO_URL: &str = "https://github.com/LORD07Sson/phoenix-dub-desktop";
+
+// Токен поднимает лимит запросов к GitHub API с 60/час (без токена, на
+// IP — см. friendly_update_error/check_for_update_cached ниже, этого не
+// хватало) до 5000/час. Зашивается на этапе СБОРКИ из переменной
+// окружения CI (см. .github/workflows/build.yml/build-alpha.yml,
+// секрет PHOENIX_UPDATE_TOKEN) — option_env! читает её во время
+// компиляции, а не во время работы приложения у пользователя, так что
+// сам токен пользователю не виден иначе как разбором бинарника.
+// Ожидаемый токен — fine-grained PAT с доступом ТОЛЬКО "Public
+// Repositories (read-only)", без единого дополнительного права: он
+// читает исключительно то, что и без него публично доступно всем, компрометация
+// не даёт доступа ни к чему приватному, только выше лимит на чтение
+// публичных данных. Локальная сборка без секрета (`cargo build` у
+// разработчика) — токена просто нет, GithubSource откатывается на
+// анонимный доступ, как было всегда; ничего не ломается.
+const GITHUB_UPDATE_TOKEN: Option<&str> = option_env!("PHOENIX_UPDATE_TOKEN");
 
 // Канал обновлений — та же настройка Velopack, что описана в
 // docs.velopack.io/packaging/channels: сборки альфа-канала публикует
@@ -69,7 +84,7 @@ fn velopack_update_manager(app: &tauri::AppHandle) -> Result<velopack::UpdateMan
     // pre-release не нужны: у альфа-релиза в ассетах лежит только
     // releases.alpha.json, стабильный фид (releases.win.json) там искать
     // бессмысленно — поэтому флаг зависит от выбранного канала.
-    let source = velopack::sources::GithubSource::new(UPDATE_REPO_URL, None, is_alpha);
+    let source = velopack::sources::GithubSource::new(UPDATE_REPO_URL, GITHUB_UPDATE_TOKEN.map(str::to_string), is_alpha);
     // AllowVersionDowngrade — иначе переключение обратно на stable
     // после альфы не увидело бы стабильную версию как обновление:
     // "0.5.8-alpha.90" по SemVer СТАРШЕ "0.5.8" (у прешрелиза ниже
@@ -86,10 +101,73 @@ fn velopack_update_manager(app: &tauri::AppHandle) -> Result<velopack::UpdateMan
     velopack::UpdateManager::new(source, Some(options), None).map_err(|e| e.to_string())
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone)]
 struct UpdateInfoOut {
     version: String,
     notes: String,
+}
+
+// Даже с токеном (GITHUB_UPDATE_TOKEN выше, лимит 5000/час) 403 в
+// принципе возможен — сборка без секрета (например, локальная у
+// разработчика) откатывается на анонимный доступ (60/час на IP), плюс
+// сам клиент и один способен дать несколько независимых запросов за
+// сессию: автопроверка на старте (main.js) + открытие Настроек на
+// альфа-канале (settings.js: refreshAlphaBlock тоже зовёт
+// check_for_update отдельно) + ручная кнопка «Проверить обновления».
+// check_for_update_cached ниже схлопывает их в один реальный запрос на
+// короткое окно — независимо от того, что именно исчерпывает лимит.
+fn friendly_update_error(e: impl std::fmt::Display) -> String {
+    let text = e.to_string();
+    if text.contains("403") {
+        "Превышен лимит запросов к GitHub (возможно, IP делите с кем-то ещё, или само \
+         приложение проверяло обновления несколько раз за последние минуты). \
+         Попробуйте проверить вручную позже."
+            .to_string()
+    } else {
+        text
+    }
+}
+
+// TTL короче, чем троттлинг автопроверки на JS-стороне (maybeAutoCheckUpdates,
+// 4 часа) — этот кэш не заменяет его, а закрывает случаи ВНУТРИ одной
+// короткой сессии (открыли Настройки, посмотрели на коммит, закрыли,
+// нажали «Проверить» — три вызова за секунды одного и того же вопроса
+// "есть ли обновление").
+const UPDATE_CHECK_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+struct CachedUpdateCheck {
+    at: std::time::Instant,
+    channel: String,
+    result: Result<Option<UpdateInfoOut>, String>,
+}
+
+fn update_check_cache() -> &'static Mutex<Option<CachedUpdateCheck>> {
+    static CACHE: OnceLock<Mutex<Option<CachedUpdateCheck>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+// Кэш ключуется каналом обновлений — переключение stable/alpha в Настройках
+// должно увидеть актуальные данные немедленно, не ждать протухания TTL.
+fn check_for_update_cached(app: &tauri::AppHandle) -> Result<Option<UpdateInfoOut>, String> {
+    let channel = get_update_channel(app.clone())?;
+    let cache = update_check_cache();
+    if let Some(cached) = cache.lock().unwrap().as_ref() {
+        if cached.channel == channel && cached.at.elapsed() < UPDATE_CHECK_CACHE_TTL {
+            return cached.result.clone();
+        }
+    }
+
+    let um = velopack_update_manager(app)?;
+    let result = match um.check_for_updates().map_err(friendly_update_error) {
+        Ok(velopack::UpdateCheck::UpdateAvailable(info)) => Ok(Some(UpdateInfoOut {
+            version: info.TargetFullRelease.Version.clone(),
+            notes: info.TargetFullRelease.NotesMarkdown.clone(),
+        })),
+        Ok(_) => Ok(None),
+        Err(e) => Err(e),
+    };
+    *cache.lock().unwrap() = Some(CachedUpdateCheck { at: std::time::Instant::now(), channel, result: result.clone() });
+    result
 }
 
 // (async) у синхронной функции — это НЕ косметика: команда без async
@@ -98,14 +176,7 @@ struct UpdateInfoOut {
 // этого атрибута «Проверить обновления» морозило интерфейс.
 #[tauri::command(async)]
 fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfoOut>, String> {
-    let um = velopack_update_manager(&app)?;
-    match um.check_for_updates().map_err(|e| e.to_string())? {
-        velopack::UpdateCheck::UpdateAvailable(info) => Ok(Some(UpdateInfoOut {
-            version: info.TargetFullRelease.Version.clone(),
-            notes: info.TargetFullRelease.NotesMarkdown.clone(),
-        })),
-        _ => Ok(None),
-    }
+    check_for_update_cached(&app)
 }
 
 /// Качает и сразу ставит обновление, перезапуская приложение —
@@ -122,7 +193,7 @@ fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfoOut>, Stri
 #[tauri::command(async)]
 fn download_and_apply_update(app: tauri::AppHandle) -> Result<(), String> {
     let um = velopack_update_manager(&app)?;
-    let info = match um.check_for_updates().map_err(|e| e.to_string())? {
+    let info = match um.check_for_updates().map_err(friendly_update_error)? {
         velopack::UpdateCheck::UpdateAvailable(info) => *info,
         _ => return Err("Обновление больше не доступно — кто-то уже обновился раньше вас?".into()),
     };
@@ -597,4 +668,22 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn friendly_update_error_explains_github_rate_limit() {
+        let msg = friendly_update_error("Http error: http status: 403");
+        assert!(msg.contains("лимит"), "должно объяснять причину, получили: {msg}");
+        assert!(!msg.contains("403"), "пользователю не нужен голый код ответа: {msg}");
+    }
+
+    #[test]
+    fn friendly_update_error_passes_through_other_errors() {
+        let msg = friendly_update_error("Нет связи с сервером: connection refused");
+        assert_eq!(msg, "Нет связи с сервером: connection refused");
+    }
 }

@@ -119,8 +119,11 @@ jobs:
           test -s src-tauri/binaries/ffmpeg.exe || { echo "::error::ffmpeg.exe не найден в архиве"; exit 1; }
           test -s src-tauri/binaries/ffprobe.exe || { echo "::error::ffprobe.exe не найден в архиве"; exit 1; }
 
+      # Тот же секрет, что и в build.yml — см. комментарий там.
       - name: cargo build --release
         shell: bash
+        env:
+          PHOENIX_UPDATE_TOKEN: ${{ secrets.PHOENIX_UPDATE_TOKEN }}
         run: cargo build --release --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
       - name: Собрать альфа-канал через vpk

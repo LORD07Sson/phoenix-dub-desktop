@@ -195,6 +195,35 @@ $("#open-settings").addEventListener("click", openSettings);
 // релизы репозитория напрямую, без прокси на своём сервере). JS только
 // вызывает команды и слушает событие "update-progress" для прогресс-бара.
 
+// Автопроверка на каждом запуске (см. main.js) без троттлинга уходила в
+// GitHub API без токена (60 запросов/час НА IP, не на пользователя — см.
+// friendly_update_error в main.rs) при каждом старте приложения. На одном
+// рабочем месте это несущественно, но студия — несколько компьютеров за
+// одним офисным NAT, и совокупный поток запусков/перезапусков легко
+// выбивает лимит даже без единого ручного клика «Проверить обновления».
+// Ручная проверка из Настроек троттлингу не подчиняется — явный клик
+// пользователя должен сходить на сервер всегда, даже если автопроверка
+// была недавно.
+const AUTO_CHECK_THROTTLE_MS = 4 * 60 * 60 * 1000; // 4 часа
+const AUTO_CHECK_STORAGE_KEY = "phoenix_last_update_check_at";
+
+export function maybeAutoCheckUpdates() {
+  let last = 0;
+  try {
+    last = Number(localStorage.getItem(AUTO_CHECK_STORAGE_KEY) || 0);
+  } catch {
+    // localStorage недоступен (приватный режим и т.п.) — считаем, что
+    // проверять можно, лучше лишний запрос, чем никогда не проверять.
+  }
+  if (Date.now() - last < AUTO_CHECK_THROTTLE_MS) return;
+  try {
+    localStorage.setItem(AUTO_CHECK_STORAGE_KEY, String(Date.now()));
+  } catch {
+    // не критично — просто не притормозит следующий запуск
+  }
+  checkForUpdates(true);
+}
+
 export async function checkForUpdates(silent) {
   try {
     const update = await invoke("check_for_update");
