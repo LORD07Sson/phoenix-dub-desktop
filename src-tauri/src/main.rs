@@ -91,6 +91,28 @@ struct UpdateInfoOut {
     notes: String,
 }
 
+// GithubSource (velopack) ходит на api.github.com без токена (см.
+// velopack_update_manager выше — второй аргумент GithubSource::new
+// сейчас None) — без него GitHub лимитирует 60 запросов/час НА IP, не
+// на пользователя. Приложение проверяет обновления автоматически на
+// каждом запуске (см. main.js: setTimeout(checkForUpdates, 3000)) —
+// если несколько рабочих мест студии сидят за одним офисным NAT,
+// суммарные запросы легко выбивают лимит, и GitHub отвечает голым
+// "403" без пояснений в самой ошибке ureq/velopack. Даём пользователю
+// понятный текст вместо технической строки, а не молча гадаем на UI-
+// стороне по подстроке "403" в произвольном тексте ошибки.
+fn friendly_update_error(e: impl std::fmt::Display) -> String {
+    let text = e.to_string();
+    if text.contains("403") {
+        "Превышен лимит запросов к GitHub без авторизации (60/час на общий IP — вероятно, \
+         несколько рабочих мест студии проверяли обновления почти одновременно). \
+         Попробуйте проверить вручную позже."
+            .to_string()
+    } else {
+        text
+    }
+}
+
 // (async) у синхронной функции — это НЕ косметика: команда без async
 // выполняется прямо в главном потоке приложения и подвешивает окно на
 // всё время работы. Тут внутри сетевой запрос к GitHub, так что без
@@ -98,7 +120,7 @@ struct UpdateInfoOut {
 #[tauri::command(async)]
 fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfoOut>, String> {
     let um = velopack_update_manager(&app)?;
-    match um.check_for_updates().map_err(|e| e.to_string())? {
+    match um.check_for_updates().map_err(friendly_update_error)? {
         velopack::UpdateCheck::UpdateAvailable(info) => Ok(Some(UpdateInfoOut {
             version: info.TargetFullRelease.Version.clone(),
             notes: info.TargetFullRelease.NotesMarkdown.clone(),
@@ -121,7 +143,7 @@ fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfoOut>, Stri
 #[tauri::command(async)]
 fn download_and_apply_update(app: tauri::AppHandle) -> Result<(), String> {
     let um = velopack_update_manager(&app)?;
-    let info = match um.check_for_updates().map_err(|e| e.to_string())? {
+    let info = match um.check_for_updates().map_err(friendly_update_error)? {
         velopack::UpdateCheck::UpdateAvailable(info) => *info,
         _ => return Err("Обновление больше не доступно — кто-то уже обновился раньше вас?".into()),
     };
@@ -530,4 +552,22 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn friendly_update_error_explains_github_rate_limit() {
+        let msg = friendly_update_error("Http error: http status: 403");
+        assert!(msg.contains("лимит"), "должно объяснять причину, получили: {msg}");
+        assert!(!msg.contains("403"), "пользователю не нужен голый код ответа: {msg}");
+    }
+
+    #[test]
+    fn friendly_update_error_passes_through_other_errors() {
+        let msg = friendly_update_error("Нет связи с сервером: connection refused");
+        assert_eq!(msg, "Нет связи с сервером: connection refused");
+    }
 }

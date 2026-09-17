@@ -18,7 +18,7 @@ import { tryRestoreSession } from "./auth.js";
 import "./density.js";
 import "./tabs.js";
 import "./qc.js";
-import { checkForUpdates } from "./settings.js";
+import { maybeAutoCheckUpdates } from "./settings.js";
 import "./notifications.js";
 import "./presence.js";
 import "./command-palette.js";
@@ -31,4 +31,4 @@ import "./title-hover.js";
 
 tryRestoreSession();
 setTimeout(() => appWindow.show(), 0); // DevSkim: ignore DS172411 — функция, не строка
-setTimeout(() => checkForUpdates(true), 3000); // DevSkim: ignore DS172411 — функция, не строка
+setTimeout(maybeAutoCheckUpdates, 3000); // DevSkim: ignore DS172411 — функция, не строка
