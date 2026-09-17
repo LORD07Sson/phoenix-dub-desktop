@@ -24,7 +24,10 @@ use std::sync::OnceLock;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-fn ffmpeg_command(exe: impl AsRef<std::ffi::OsStr>) -> Command {
+// pub(crate), не только для этого модуля — media_tools.rs (ffprobe-команды)
+// нужен тот же приём подавления консольного окна, дублировать его смысла
+// нет: это чисто платформенная деталь запуска процесса, не специфика QC.
+pub(crate) fn ffmpeg_command(exe: impl AsRef<std::ffi::OsStr>) -> Command {
     #[allow(unused_mut)]
     let mut cmd = Command::new(exe);
     #[cfg(windows)]
@@ -160,21 +163,23 @@ pub fn export_clip(path: &str, start: f64, end: f64, out_path: &str) -> Result<(
     Ok(())
 }
 
-/// Путь к ffmpeg рядом с исполняемым файлом приложения, если он там
-/// есть (packaged-вариант) — иначе `None`, и вызывающий код откатится
-/// на системный PATH. `current_exe()` — тот же приём, что использует
-/// сам Tauri для поиска sidecar-бинарников.
-fn bundled_ffmpeg_path() -> Option<PathBuf> {
+/// Путь к бинарнику (ffmpeg/ffprobe) рядом с исполняемым файлом
+/// приложения, если он там есть (packaged-вариант) — иначе `None`, и
+/// вызывающий код откатится на системный PATH. `current_exe()` — тот же
+/// приём, что использует сам Tauri для поиска sidecar-бинарников.
+/// `unix_name`/`windows_name` — разные имена файла на разных ОС (у
+/// Windows-сборки — ".exe", у остальных — без расширения).
+pub(crate) fn bundled_binary_path(unix_name: &str, windows_name: &str) -> Option<PathBuf> {
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    let candidate = exe_dir.join(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" });
+    let candidate = exe_dir.join(if cfg!(windows) { windows_name } else { unix_name });
     candidate.is_file().then_some(candidate)
 }
 
-/// Быстрая проверка, что найденный ffmpeg реально запускается на этой
+/// Быстрая проверка, что найденный бинарник реально запускается на этой
 /// системе (не битый архитектурно/повреждённый файл) — лучше явно
 /// сказать об этом и откатиться на PATH, чем один раз молча упасть на
 /// декодировании реального файла с непонятной ошибкой.
-fn ffmpeg_supported(exe: &std::path::Path) -> bool {
+pub(crate) fn binary_runs(exe: &std::path::Path) -> bool {
     ffmpeg_command(exe)
         .arg("-version")
         .output()
@@ -186,21 +191,24 @@ fn ffmpeg_supported(exe: &std::path::Path) -> bool {
 /// (если он реально запускается), иначе — просто "ffmpeg" из PATH.
 /// Результат кэшируется на процесс: проверка `-version` — это ещё один
 /// запуск процесса, делать его перед КАЖДЫМ анализом файла незачем.
-fn resolve_ffmpeg() -> &'static str {
+pub(crate) fn resolve_ffmpeg() -> &'static str {
     static RESOLVED: OnceLock<String> = OnceLock::new();
-    RESOLVED.get_or_init(resolve_ffmpeg_uncached).as_str()
+    RESOLVED.get_or_init(|| resolve_binary_uncached("ffmpeg", "ffmpeg.exe")).as_str()
 }
 
-fn resolve_ffmpeg_uncached() -> String {
-    if let Some(bundled) = bundled_ffmpeg_path() {
-        if ffmpeg_supported(&bundled) {
+/// Тот же приём резолва, что у resolve_ffmpeg(), но для имени бинарника
+/// и заодно переиспускаемый media_tools.rs для ffprobe — единственное
+/// отличие между ними — искомое имя файла.
+pub(crate) fn resolve_binary_uncached(unix_name: &str, windows_name: &str) -> String {
+    if let Some(bundled) = bundled_binary_path(unix_name, windows_name) {
+        if binary_runs(&bundled) {
             return bundled.to_string_lossy().into_owned();
         }
         // Лежит рядом, но не запускается (например, собран не под ту
         // архитектуру) — не тихо молчим, а пробуем PATH дальше.
-        eprintln!("bundled ffmpeg найден по пути {:?}, но не запустился — используем PATH", bundled);
+        eprintln!("bundled {:?} найден по пути {:?}, но не запустился — используем PATH", windows_name, bundled);
     }
-    "ffmpeg".to_string()
+    unix_name.to_string()
 }
 
 /// Собственно анализ — вынесена из `analyze` отдельно от decode_pcm, чтобы

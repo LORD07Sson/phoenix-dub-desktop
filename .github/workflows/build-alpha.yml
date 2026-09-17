@@ -114,8 +114,10 @@ jobs:
           fi
           unzip -q ffmpeg.zip -d ffmpeg_extracted
           find ffmpeg_extracted -iname "ffmpeg.exe" -exec cp {} src-tauri/binaries/ffmpeg.exe \;
+          find ffmpeg_extracted -iname "ffprobe.exe" -exec cp {} src-tauri/binaries/ffprobe.exe \;
           rm -rf ffmpeg.zip ffmpeg_extracted
           test -s src-tauri/binaries/ffmpeg.exe || { echo "::error::ffmpeg.exe не найден в архиве"; exit 1; }
+          test -s src-tauri/binaries/ffprobe.exe || { echo "::error::ffprobe.exe не найден в архиве"; exit 1; }
 
       # Тот же секрет, что и в build.yml — см. комментарий там.
       - name: cargo build --release
@@ -132,6 +134,7 @@ jobs:
           mkdir -p pack_dir
           cp src-tauri/target/release/phoenix-dub-desktop.exe pack_dir/
           cp src-tauri/binaries/ffmpeg.exe pack_dir/
+          cp src-tauri/binaries/ffprobe.exe pack_dir/
           echo "Альфа-сборка из main (commit ${{ github.sha }}) — тестовая, может быть менее стабильной." > release_notes.md
           vpk pack \
             --packId PhoenixDubDesktop \
