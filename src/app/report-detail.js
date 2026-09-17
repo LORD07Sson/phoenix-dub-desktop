@@ -118,12 +118,12 @@ export async function openReportDetail(publicId) {
       <div class="detail-chips">
         <span class="chip" id="chip-status"><span class="dot ${dotClass}"></span>${esc(detail.status_label)}</span>
         <span class="chip" id="chip-priority">${esc(detail.priority_label)}</span>
-        <span class="chip ${overdue ? "" : ""}" id="chip-deadline" style="${overdue ? "border-color:var(--s-stop); color:var(--s-stop);" : ""}">${overdue ? "⏰ " : "📅 "}${esc(detail.deadline || "без срока")}</span>
+        <span class="chip ${overdue ? "overdue" : ""}" id="chip-deadline">${overdue ? "⏰ " : "📅 "}${esc(detail.deadline || "без срока")}</span>
         <span class="chip" id="chip-assign">👤 Назначить</span>
       </div>
 
       <div class="detail-section">
-        <h3>Исполнители</h3>
+        <h3>👤 Исполнители</h3>
         ${(detail.assignees && detail.assignees.length)
           ? detail.assignees.map(a => `<div class="assignee-row" data-assignee="${a.telegram_id}">
               <span class="avatar-bubble">${esc(initials(a.first_name || a.username))}</span>
@@ -134,7 +134,7 @@ export async function openReportDetail(publicId) {
       </div>
 
       <div class="detail-section">
-        <h3>Чек-лист ${checklist.items.length ? `(${checklist.items.filter(i => i.done).length}/${checklist.items.length})` : ""}</h3>
+        <h3>✅ Чек-лист ${checklist.items.length ? `(${checklist.items.filter(i => i.done).length}/${checklist.items.length})` : ""}</h3>
         <div id="checklist-list">${checklist.items.map(checklistItemHtml).join("") || `<div class="no-assignee">Пусто</div>`}</div>
         <div class="add-row">
           <input id="checklist-new" placeholder="Новый пункт…">
@@ -143,7 +143,7 @@ export async function openReportDetail(publicId) {
       </div>
 
       <div class="detail-section">
-        <h3>Заметки ${notes.notes.length ? `(${notes.notes.length})` : ""}
+        <h3>📝 Заметки ${notes.notes.length ? `(${notes.notes.length})` : ""}
           ${timedCount >= 2 ? `<button class="btn ghost notes-sort" id="notes-sort">${notesByTime ? "По времени добавления" : "По тайм-коду"}</button>` : ""}
         </h3>
         <div id="notes-list">${orderedNotes.map(noteHtml).join("") || `<div class="no-assignee">Пока нет заметок</div>`}</div>
@@ -156,12 +156,12 @@ export async function openReportDetail(publicId) {
 
       ${files.files.length ? `
       <div class="detail-section">
-        <h3>Файлы (${files.files.length})</h3>
+        <h3>📎 Файлы (${files.files.length})</h3>
         <div id="files-list">${files.files.map(fileHtml).join("")}</div>
       </div>` : ""}
 
       <div class="detail-section">
-        <h3>Пайплайн ${detail.pipeline && detail.pipeline.length ? `<span style="color:var(--ink-dim); font-weight:400; font-size:12px;">${detail.pipeline.map(s => esc(s.role)).join(" → ")}</span>` : ""}</h3>
+        <h3>🔗 Пайплайн ${detail.pipeline && detail.pipeline.length ? `<span class="pipeline-summary">${detail.pipeline.map(s => esc(s.role)).join(" → ")}</span>` : ""}</h3>
         ${pipelineChainHtml(detail.pipeline, assignable)}
         <div id="pipeline-draft-list"></div>
         <div class="add-row">
@@ -447,8 +447,8 @@ function pipelineChainHtml(pipeline, assignable) {
   if (!pipeline || !pipeline.length) return "";
   const curIdx = pipeline.findIndex(s => s.current);
   const hasNext = curIdx !== -1 && curIdx < pipeline.length - 1;
-  const chain = `<div class="chip-row" style="margin-bottom:8px;">${pipeline.map(s =>
-    `<span class="chip" style="${s.done ? "opacity:.55;" : (s.current ? "border-color:var(--fire); color:var(--fire);" : "")}">${esc(s.role)}${s.user_name ? ` — ${esc(s.user_name)}` : ""}</span>`
+  const chain = `<div class="chip-row pipeline-chain">${pipeline.map(s =>
+    `<span class="chip pipeline-step${s.done ? " done" : ""}${s.current ? " current" : ""}">${esc(s.role)}${s.user_name ? ` — ${esc(s.user_name)}` : ""}</span>`
   ).join("")}</div>`;
   const advanceRow = hasNext
     ? `<div class="add-row" style="margin-bottom:8px;">

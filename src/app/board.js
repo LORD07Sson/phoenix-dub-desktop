@@ -58,12 +58,14 @@ function boardCardHtml(r, status) {
   const prColor = `var(${PRIORITY_COLOR_VAR[r.priority] || "--ink-soft"})`;
   return `
     <div class="board-card" data-open="${esc(r.public_id)}" data-id="${esc(r.public_id)}" data-status="${esc(status)}" style="border-left: 3px solid ${accent}; --accent-dot: ${accent};">
-      <div class="id">${esc(r.public_id)}</div>
+      <div class="board-card-top">
+        <span class="id">${esc(r.public_id)}</span>
+        ${r.priority ? `<span class="pr-badge" style="color:${prColor}; border-color:${prColor};">${r.priority === "urgent" ? "⚡ " : ""}${esc(PRIORITY_LABELS[r.priority] || r.priority)}</span>` : ""}
+      </div>
       <div class="ttl">${esc(r.title)}</div>
-      ${r.priority ? `<div class="pr" style="color:${prColor};">${r.priority === "urgent" ? "⚡ " : ""}${esc(PRIORITY_LABELS[r.priority] || r.priority)}</div>` : ""}
       <div class="foot">
         ${assigneesHtml(r.assignees)}
-        <span class="deadline ${overdue ? "overdue" : ""}">${overdue ? "⏰ " : ""}${esc(r.deadline || "—")}</span>
+        <span class="deadline-pill ${overdue ? "overdue" : ""}">${overdue ? "⏰ " : "📅 "}${esc(r.deadline || "—")}</span>
       </div>
     </div>`;
 }
@@ -326,6 +328,7 @@ export async function loadBoard() {
             <span class="cnt">${col.total}</span>
             <button class="board-col-collapse" data-collapse="${esc(col.status)}" title="Свернуть/развернуть колонку">‹</button>
           </div>
+          <div class="board-col-progress"><i style="width:${col.total ? Math.round(col.reports.length / col.total * 100) : 100}%; background:var(${STATUS_COLOR_VAR[col.status] || "--s-draft"});"></i></div>
           <div class="board-cards" data-count="${col.reports.length}">
             ${col.reports.length ? col.reports.map(r => boardCardHtml(r, col.status)).join("") : `<div class="board-col-empty">пусто</div>`}
           </div>
@@ -360,6 +363,9 @@ export async function loadBoard() {
         cardsEl.querySelector(".board-col-empty")?.remove();
         cardsEl.insertAdjacentHTML("beforeend", res.reports.map(r => boardCardHtml(r, status)).join(""));
         cardsEl.dataset.count = offset + res.reports.length;
+        const shown = offset + res.reports.length;
+        const progressFill = colEl.querySelector(".board-col-progress i");
+        if (progressFill && res.total) progressFill.style.width = `${Math.round(shown / res.total * 100)}%`;
         wireBoardCards(cardsEl);
         if (res.has_more) {
           btn.disabled = false;

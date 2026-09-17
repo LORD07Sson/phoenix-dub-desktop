@@ -18,7 +18,7 @@ import { $, esc, initials, STATUS_COLOR_VAR } from "./utils.js";
 // donutHtml в charts.js). В JSX его быть не должно: Solid экранирует
 // текстовые узлы сам, и esc() поверх этого даёт двойное экранирование —
 // имя «Иванов & Co» рендерилось как «Иванов &amp; Co».
-import { donutHtml, donutLegendHtml, playDonutIntro } from "./charts.js";
+import { donutHtml, donutLegendHtml, playDonutIntro, sparklineHtml, kpiRingHtml, playRingIntro } from "./charts.js";
 import { avatarHtml, loadAvatars } from "./profile.js";
 
 function TrendChart(props) {
@@ -71,25 +71,41 @@ function Overview(props) {
     - (d.reports.statuses.find(s => s.status === "cancelled")?.count || 0);
 
   let donutRoot;
-  onMount(() => playDonutIntro(donutRoot));
+  onMount(() => { playDonutIntro(donutRoot); playRingIntro(donutRoot); });
+
+  // Спарклайн под «Всего активных» — тренд входящих (created) за то же
+  // окно, что и большой график динамики ниже: показывает, разгоняется
+  // или затихает поток новых серий, не только текущий снимок числа.
+  const createdSeries = props.trend?.days?.map(x => x.created) || null;
+  const overdueFrac = activeTotal ? d.reports.overdue / activeTotal : 0;
 
   return (
     <div class="bento" ref={donutRoot}>
-      <div class="bcell wide" style={{ "animation-delay": "0ms" }}>
+      <div class="bcell wide bcell-hero" style={{ "animation-delay": "0ms" }}>
         <h3>Структура загрузки</h3>
         <div class="donut-wrap">
           <div innerHTML={donutHtml(segments)} />
           <div class="donut-legend" innerHTML={donutLegendHtml(segments)} />
         </div>
       </div>
-      <div class="bcell" style={{ "animation-delay": "60ms" }}>
+      <div class="bcell kpi-cell" style={{ "animation-delay": "60ms" }}>
         <h3>Всего активных</h3>
-        <div class="big-num">{activeTotal}</div>
+        <div class="kpi-row">
+          <div class="big-num">{activeTotal}</div>
+          <Show when={createdSeries}>
+            <div class="kpi-spark" innerHTML={sparklineHtml(createdSeries, { colorVar: "--ember" })} />
+          </Show>
+        </div>
         <div class="sub">из {d.reports.total} всего</div>
       </div>
-      <div class="bcell" style={{ "animation-delay": "100ms" }}>
+      <div class="bcell kpi-cell" style={{ "animation-delay": "100ms" }}>
         <h3>Просрочено</h3>
-        <div class={`big-num ${d.reports.overdue > 0 ? "danger" : ""}`}>{d.reports.overdue}</div>
+        <div class="kpi-row">
+          <div class={`big-num ${d.reports.overdue > 0 ? "danger" : ""}`}>{d.reports.overdue}</div>
+          <Show when={activeTotal > 0}>
+            <div class="kpi-ring-wrap" innerHTML={kpiRingHtml(overdueFrac, { colorVar: d.reports.overdue > 0 ? "--s-stop" : "--s-done" })} />
+          </Show>
+        </div>
         <div class="sub">{d.reports.important} важных (высокий/срочный)</div>
       </div>
       <div class="bcell" style={{ "animation-delay": "140ms" }}>
