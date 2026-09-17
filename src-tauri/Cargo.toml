@@ -39,6 +39,13 @@ tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-store = "2"
+# Файловые логи с ротацией + зеркалирование в webview-консоль — единая
+# точка диагностики для всех модулей (обновления, audio QC, инструменты
+# ffmpeg, mpv, сетевые запросы к своему API), вместо разрозненных toast/
+# eprintln!, после которых при жалобе пользователя остаётся только
+# гадать. Настройка таргетов — в main.rs::run().
+tauri-plugin-log = "2"
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Автообновление — Velopack вместо tauri-plugin-updater+NSIS-инсталлятора:
@@ -59,6 +66,10 @@ reqwest = { version = "0.12", default-features = false, features = ["multipart",
 # уже тянется самим tauri (его runtime исполняет #[tauri::command(async)]),
 # здесь просто явная зависимость на тот же мажор ради net-типов.
 tokio = { version = "1", features = ["net", "io-util"] }
+# reveal_item_in_dir для open_log_folder ("Открыть логи" в настройках) —
+# tauri-plugin-shell::Shell::open той же цели deprecated в пользу этого
+# плагина начиная с tauri 2.
+tauri-plugin-opener = "2.5.5"
 
 # windows-rs — только на Windows: mpv_embed.rs создаёт нативное child-окно
 # (CreateWindowExW) под видео mpv (--wid) и двигает его SetWindowPos при

@@ -15,6 +15,9 @@
 import { invoke, openDialog, saveDialog, convertFileSrc, revealInFolder, listen } from "./tauri.js";
 import { openSheet, toast } from "./api.js";
 import { $, esc, formatTime } from "./utils.js";
+import { tagLogger } from "./applog.js";
+
+const mpvLog = tagLogger("mpv");
 
 const VIDEO_EXTENSIONS = ["mp4", "mkv", "mov", "avi", "webm", "m4v"];
 const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "m4a", "aac", "ogg", "opus"];
@@ -196,12 +199,12 @@ function isVideoFile() {
 function videoSurfaceRect(root) {
   const el = root.querySelector("#mt-cut-video-surface");
   if (!el) {
-    console.warn("[mpv] videoSurfaceRect: #mt-cut-video-surface не найден в root");
+    mpvLog.warn("videoSurfaceRect: #mt-cut-video-surface не найден в root");
     return null;
   }
   const r = el.getBoundingClientRect();
   if (r.width <= 0 || r.height <= 0) {
-    console.warn("[mpv] videoSurfaceRect: нулевой размер плейсхолдера", r);
+    mpvLog.warn("videoSurfaceRect: нулевой размер плейсхолдера", r);
     return null;
   }
   const dpr = window.devicePixelRatio || 1;
@@ -216,12 +219,12 @@ function videoSurfaceRect(root) {
 async function syncMpvBounds(root) {
   const rect = videoSurfaceRect(root);
   if (!rect) return;
-  console.log("[mpv] mpv_create ->", rect);
+  mpvLog.info("mpv_create ->", rect);
   try {
     await invoke("mpv_create", rect);
-    console.log("[mpv] mpv_create ok");
+    mpvLog.info("mpv_create ok");
   } catch (e) {
-    console.error("[mpv] mpv_create failed", e);
+    mpvLog.error("mpv_create failed", e);
     toast(`Не удалось открыть видео-плеер: ${e}`, "error");
   }
 }
@@ -237,7 +240,7 @@ async function closeCutMpv() {
 }
 
 async function openCutMpv(root) {
-  console.log("[mpv] openCutMpv", cutState.path);
+  mpvLog.info("openCutMpv", cutState.path);
   await syncMpvBounds(root);
   if (cutState.path !== cutMpvLoadedPath) {
     cutMpvLoadedPath = cutState.path;
@@ -245,9 +248,9 @@ async function openCutMpv(root) {
       await invoke("mpv_load", { path: cutState.path });
       await invoke("mpv_play");
       cutState.mpvPaused = false;
-      console.log("[mpv] mpv_load + mpv_play ok");
+      mpvLog.info("mpv_load + mpv_play ok");
     } catch (e) {
-      console.error("[mpv] mpv_load/mpv_play failed", e);
+      mpvLog.error("mpv_load/mpv_play failed", e);
       toast(`Не удалось загрузить видео в плеер: ${e}`, "error");
     }
   }
@@ -262,6 +265,7 @@ async function openCutMpv(root) {
         const btn = $("#mt-cut-playpause");
         if (btn) btn.textContent = cutState.mpvPaused ? "▶" : "⏸";
       } else if (name === "exited") {
+        mpvLog.error("процесс mpv завершился неожиданно (пайп закрылся)");
         toast("Плеер mpv неожиданно завершился.", "error");
         cutMpvLoadedPath = null;
       }
