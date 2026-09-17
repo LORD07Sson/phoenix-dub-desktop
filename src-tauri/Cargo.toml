@@ -27,7 +27,11 @@ tauri-build = { version = "2", features = [] }
 # URL (convertFileSrc() на JS-стороне), нужен для видео-превью в
 # инструментах ffmpeg (media_tools.rs: register_media_file). Без неё
 # app.asset_protocol_scope() недоступен вовсе.
-tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
+# devtools — временно, чтобы можно было открыть консоль правой кнопкой
+# ("Осмотреть") в собранном --release, а не только в `tauri dev`: mpv-
+# плеер молча не создаётся на реальной машине (ни toast, ни процесса),
+# и без консоли в проде нечем это диагностировать. Снять после отладки.
+tauri = { version = "2", features = ["tray-icon", "protocol-asset", "devtools"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
