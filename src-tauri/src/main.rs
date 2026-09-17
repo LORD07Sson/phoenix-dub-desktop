@@ -85,7 +85,7 @@ fn velopack_update_manager(app: &tauri::AppHandle) -> Result<velopack::UpdateMan
     velopack::UpdateManager::new(source, Some(options), None).map_err(|e| e.to_string())
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone)]
 struct UpdateInfoOut {
     version: String,
     notes: String,
@@ -93,24 +93,69 @@ struct UpdateInfoOut {
 
 // GithubSource (velopack) ходит на api.github.com без токена (см.
 // velopack_update_manager выше — второй аргумент GithubSource::new
-// сейчас None) — без него GitHub лимитирует 60 запросов/час НА IP, не
-// на пользователя. Приложение проверяет обновления автоматически на
-// каждом запуске (см. main.js: setTimeout(checkForUpdates, 3000)) —
-// если несколько рабочих мест студии сидят за одним офисным NAT,
-// суммарные запросы легко выбивают лимит, и GitHub отвечает голым
-// "403" без пояснений в самой ошибке ureq/velopack. Даём пользователю
-// понятный текст вместо технической строки, а не молча гадаем на UI-
-// стороне по подстроке "403" в произвольном тексте ошибки.
+// сейчас None) — без него GitHub лимитирует 60 запросов/час НА IP.
+// Это IP не обязательно общий на всю студию: за одним не-обязательно-
+// "офисным" IP (CGNAT у провайдера, VPN, корпоративный прокси) может
+// сидеть кто угодно ещё, использующий тот же лимит на совсем другие
+// цели — а сам клиент и один способен исчерпать 60 запросов за сессию:
+// автопроверка на старте (main.js) + открытие Настроек на альфа-канале
+// (settings.js: refreshAlphaBlock тоже зовёт check_for_update отдельно)
+// + ручная кнопка «Проверить обновления» — это уже три независимых
+// сетевых похода, и активный тест альфа-сборок легко даёт больше.
+// check_for_update_cached ниже схлопывает их в один реальный запрос на
+// короткое окно — независимо от того, что именно исчерпывает лимит.
 fn friendly_update_error(e: impl std::fmt::Display) -> String {
     let text = e.to_string();
     if text.contains("403") {
-        "Превышен лимит запросов к GitHub без авторизации (60/час на общий IP — вероятно, \
-         несколько рабочих мест студии проверяли обновления почти одновременно). \
-         Попробуйте проверить вручную позже."
+        "Превышен лимит запросов к GitHub без авторизации (60/час на IP — возможно, \
+         его с кем-то делите, или само приложение проверяло обновления несколько раз \
+         за последние минуты). Попробуйте проверить вручную позже."
             .to_string()
     } else {
         text
     }
+}
+
+// TTL короче, чем троттлинг автопроверки на JS-стороне (maybeAutoCheckUpdates,
+// 4 часа) — этот кэш не заменяет его, а закрывает случаи ВНУТРИ одной
+// короткой сессии (открыли Настройки, посмотрели на коммит, закрыли,
+// нажали «Проверить» — три вызова за секунды одного и того же вопроса
+// "есть ли обновление").
+const UPDATE_CHECK_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+struct CachedUpdateCheck {
+    at: std::time::Instant,
+    channel: String,
+    result: Result<Option<UpdateInfoOut>, String>,
+}
+
+fn update_check_cache() -> &'static Mutex<Option<CachedUpdateCheck>> {
+    static CACHE: OnceLock<Mutex<Option<CachedUpdateCheck>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+// Кэш ключуется каналом обновлений — переключение stable/alpha в Настройках
+// должно увидеть актуальные данные немедленно, не ждать протухания TTL.
+fn check_for_update_cached(app: &tauri::AppHandle) -> Result<Option<UpdateInfoOut>, String> {
+    let channel = get_update_channel(app.clone())?;
+    let cache = update_check_cache();
+    if let Some(cached) = cache.lock().unwrap().as_ref() {
+        if cached.channel == channel && cached.at.elapsed() < UPDATE_CHECK_CACHE_TTL {
+            return cached.result.clone();
+        }
+    }
+
+    let um = velopack_update_manager(app)?;
+    let result = match um.check_for_updates().map_err(friendly_update_error) {
+        Ok(velopack::UpdateCheck::UpdateAvailable(info)) => Ok(Some(UpdateInfoOut {
+            version: info.TargetFullRelease.Version.clone(),
+            notes: info.TargetFullRelease.NotesMarkdown.clone(),
+        })),
+        Ok(_) => Ok(None),
+        Err(e) => Err(e),
+    };
+    *cache.lock().unwrap() = Some(CachedUpdateCheck { at: std::time::Instant::now(), channel, result: result.clone() });
+    result
 }
 
 // (async) у синхронной функции — это НЕ косметика: команда без async
@@ -119,14 +164,7 @@ fn friendly_update_error(e: impl std::fmt::Display) -> String {
 // этого атрибута «Проверить обновления» морозило интерфейс.
 #[tauri::command(async)]
 fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfoOut>, String> {
-    let um = velopack_update_manager(&app)?;
-    match um.check_for_updates().map_err(friendly_update_error)? {
-        velopack::UpdateCheck::UpdateAvailable(info) => Ok(Some(UpdateInfoOut {
-            version: info.TargetFullRelease.Version.clone(),
-            notes: info.TargetFullRelease.NotesMarkdown.clone(),
-        })),
-        _ => Ok(None),
-    }
+    check_for_update_cached(&app)
 }
 
 /// Качает и сразу ставит обновление, перезапуская приложение —
