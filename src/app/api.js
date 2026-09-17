@@ -4,6 +4,9 @@
 
 import { state } from "./state.js";
 import { $ } from "./utils.js";
+import { tagLogger } from "./applog.js";
+
+const toastLog = tagLogger("toast");
 
 export const API_BASE = "https://minitg.shitstudent.com:8443/api";
 
@@ -169,6 +172,12 @@ const TOAST_ICON = { info: "", error: "⚠️", success: "✓" };
 // себе неважное настолько, чтобы держать под него отдельный диалог, но
 // и незаметно потерять его после закрытия шторки не хочется.
 export function toast(text, kind = "info", action = null) {
+  // Единая точка: любой error-тост в приложении (обновления, QC звука,
+  // инструменты ffmpeg, сетевые запросы, авторизация — toast() зовут
+  // отовсюду) попадает и в файловый лог, без правки каждого места
+  // вызова по отдельности. Тег "toast" — по нему легко отличить "это
+  // увидел пользователь" от прочих внутренних debug/info-записей.
+  if (kind === "error") toastLog.error(text);
   const root = $("#toast-root");
   if (!root) return;
   const el = document.createElement("div");

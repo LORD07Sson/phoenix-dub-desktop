@@ -13,8 +13,13 @@
 // импортируется ни одним из уже переходимых отсюда — добавьте import
 // сюда тоже, иначе его код просто никогда не выполнится.
 
+import { installFileLogging } from "./applog.js";
 import { appWindow } from "./tauri.js";
 import { tryRestoreSession } from "./auth.js";
+
+// Максимально рано — до любого другого кода, который уже мог бы
+// что-то залогировать (см. applog.js).
+installFileLogging();
 import "./density.js";
 import "./tabs.js";
 import "./qc.js";

@@ -178,7 +178,7 @@ fn check_for_update_cached(app: &tauri::AppHandle) -> Result<Option<UpdateInfoOu
 // этого атрибута «Проверить обновления» морозило интерфейс.
 #[tauri::command(async)]
 fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfoOut>, String> {
-    check_for_update_cached(&app)
+    log_result("check_for_update", check_for_update_cached(&app))
 }
 
 /// Качает и сразу ставит обновление, перезапуская приложение —
@@ -194,43 +194,62 @@ fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfoOut>, Stri
 /// нуле и прыгал сразу в 100%, ровно то, что этот код и должен чинить.
 #[tauri::command(async)]
 fn download_and_apply_update(app: tauri::AppHandle) -> Result<(), String> {
-    let um = velopack_update_manager(&app)?;
-    let info = match um.check_for_updates().map_err(friendly_update_error)? {
-        velopack::UpdateCheck::UpdateAvailable(info) => *info,
-        _ => return Err("Обновление больше не доступно — кто-то уже обновился раньше вас?".into()),
-    };
+    log_result("download_and_apply_update", (|| {
+        let um = velopack_update_manager(&app)?;
+        let info = match um.check_for_updates().map_err(friendly_update_error)? {
+            velopack::UpdateCheck::UpdateAvailable(info) => *info,
+            _ => return Err("Обновление больше не доступно — кто-то уже обновился раньше вас?".into()),
+        };
+        log::info!("download_and_apply_update: качаем {}", info.TargetFullRelease.Version);
 
-    let (tx, rx) = std::sync::mpsc::channel::<i16>();
-    let progress_app = app.clone();
-    std::thread::spawn(move || {
-        for pct in rx {
-            let _ = progress_app.emit("update-progress", pct);
-        }
-    });
+        let (tx, rx) = std::sync::mpsc::channel::<i16>();
+        let progress_app = app.clone();
+        std::thread::spawn(move || {
+            for pct in rx {
+                let _ = progress_app.emit("update-progress", pct);
+            }
+        });
 
-    um.download_updates(&info, Some(tx)).map_err(|e| e.to_string())?;
-    um.apply_updates_and_restart(&info.TargetFullRelease).map_err(|e| e.to_string())?;
-    Ok(())
+        um.download_updates(&info, Some(tx)).map_err(|e| e.to_string())?;
+        // apply_updates_and_restart сама завершает процесс — строка ниже
+        // в норме никогда не выполняется до конца, но если она вообще
+        // вернула управление, это уже само по себе ошибка на стороне ОС.
+        um.apply_updates_and_restart(&info.TargetFullRelease).map_err(|e| e.to_string())
+    })())
+}
+
+// Логирует Err любой команды с её именем перед тем, как отдать наружу —
+// единая точка диагностики по всем tauri::command в этом файле, вместо
+// разметки логов внутри каждого модуля (audio_qc/media_tools/mpv_embed)
+// отдельно: тот же приём, что toast() на JS-стороне (см. api.js) для
+// error-тостов. Успешный путь намеренно не логируется здесь — иначе
+// файл раздувался бы шумом на каждый клик, а не только там, где
+// реально что-то пошло не так.
+fn log_result<T>(command: &str, result: Result<T, String>) -> Result<T, String> {
+    if let Err(e) = &result {
+        log::error!("[{command}] {e}");
+    }
+    result
 }
 
 // ffmpeg на большом файле работает секундами — в главном потоке это
 // замороженное окно на всё время анализа.
 #[tauri::command(async)]
 fn qc_analyze(path: String) -> Result<audio_qc::QcReport, String> {
-    audio_qc::analyze(&path)
+    log_result("qc_analyze", audio_qc::analyze(&path))
 }
 
 // Тоже через ffmpeg (полное декодирование в PCM) — на большом файле
 // секунды, поэтому (async) по той же причине, что и у qc_analyze выше.
 #[tauri::command(async)]
 fn generate_waveform(path: String, buckets: u32) -> Result<audio_qc::WaveformData, String> {
-    audio_qc::generate_waveform(&path, buckets)
+    log_result("generate_waveform", audio_qc::generate_waveform(&path, buckets))
 }
 
 // Запускает ffmpeg-субпроцесс и пишет файл на диск — блокирующее.
 #[tauri::command(async)]
 fn export_audio_clip(path: String, start: f64, end: f64, save_path: String) -> Result<(), String> {
-    audio_qc::export_clip(&path, start, end, &save_path)
+    log_result("export_audio_clip", audio_qc::export_clip(&path, start, end, &save_path))
 }
 
 // ---------- «Инструменты ffmpeg» (media_tools.rs) ----------
@@ -242,19 +261,19 @@ fn export_audio_clip(path: String, start: f64, end: f64, save_path: String) -> R
 
 #[tauri::command(async)]
 fn mt_probe_media(path: String) -> Result<media_tools::MediaInfo, String> {
-    media_tools::probe_media(&path)
+    log_result("mt_probe_media", media_tools::probe_media(&path))
 }
 
 #[tauri::command(async)]
 fn mt_probe_keyframes(path: String) -> Result<Vec<f64>, String> {
-    media_tools::probe_keyframes(&path)
+    log_result("mt_probe_keyframes", media_tools::probe_keyframes(&path))
 }
 
 // Не (async): сам вызов — просто регистрация пути в скоупе asset-протокола
 // (запись в память), никакого ffmpeg-субпроцесса здесь нет.
 #[tauri::command]
 fn mt_register_media_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    media_tools::register_media_file(&app, &path)
+    log_result("mt_register_media_file", media_tools::register_media_file(&app, &path))
 }
 
 #[tauri::command(async)]
@@ -265,7 +284,7 @@ fn mt_cut_media(
     keep_separate: bool,
     merge: bool,
 ) -> Result<media_tools::CutResult, String> {
-    media_tools::cut_media(&path, &segments, &out_dir, keep_separate, merge)
+    log_result("mt_cut_media", media_tools::cut_media(&path, &segments, &out_dir, keep_separate, merge))
 }
 
 #[tauri::command(async)]
@@ -275,7 +294,7 @@ fn mt_transcode_media(
     out_path: String,
     opts: media_tools::TranscodeOpts,
 ) -> Result<(), String> {
-    media_tools::transcode_media(&app, &path, &out_path, &opts)
+    log_result("mt_transcode_media", media_tools::transcode_media(&app, &path, &out_path, &opts))
 }
 
 #[tauri::command(async)]
@@ -284,17 +303,17 @@ fn mt_extract_audio(
     out_path: String,
     opts: media_tools::ExtractAudioOpts,
 ) -> Result<(), String> {
-    media_tools::extract_audio(&path, &out_path, &opts)
+    log_result("mt_extract_audio", media_tools::extract_audio(&path, &out_path, &opts))
 }
 
 #[tauri::command(async)]
 fn mt_concat_media(paths: Vec<String>, out_path: String) -> Result<String, String> {
-    media_tools::concat_media(&paths, &out_path)
+    log_result("mt_concat_media", media_tools::concat_media(&paths, &out_path))
 }
 
 #[tauri::command(async)]
 fn mt_mux_media(tracks: Vec<media_tools::MuxTrack>, out_path: String) -> Result<(), String> {
-    media_tools::mux_media(&tracks, &out_path)
+    log_result("mt_mux_media", media_tools::mux_media(&tracks, &out_path))
 }
 
 // ---------- встроенный mpv-плеер (mpv_embed.rs, только Windows) ----------
@@ -308,96 +327,103 @@ fn mt_mux_media(tracks: Vec<media_tools::MuxTrack>, out_path: String) -> Result<
 #[tauri::command(async)]
 async fn mpv_create(app: tauri::AppHandle, x: i32, y: i32, width: i32, height: i32) -> Result<(), String> {
     #[cfg(windows)]
-    {
-        mpv_embed::mpv_create(&app, mpv_embed::MpvBounds { x, y, width, height }).await
-    }
+    let result = mpv_embed::mpv_create(&app, mpv_embed::MpvBounds { x, y, width, height }).await;
     #[cfg(not(windows))]
-    {
+    let result = {
         let _ = (app, x, y, width, height);
         Err("Встроенный плеер поддерживается только на Windows.".into())
-    }
+    };
+    log_result("mpv_create", result)
 }
 
 #[tauri::command(async)]
 async fn mpv_set_bounds(x: i32, y: i32, width: i32, height: i32) -> Result<(), String> {
     #[cfg(windows)]
-    {
-        mpv_embed::mpv_set_bounds(mpv_embed::MpvBounds { x, y, width, height }).await
-    }
+    let result = mpv_embed::mpv_set_bounds(mpv_embed::MpvBounds { x, y, width, height }).await;
     #[cfg(not(windows))]
-    {
+    let result = {
         let _ = (x, y, width, height);
         Err("Встроенный плеер поддерживается только на Windows.".into())
-    }
+    };
+    log_result("mpv_set_bounds", result)
 }
 
 #[tauri::command(async)]
 async fn mpv_load(path: String) -> Result<(), String> {
     #[cfg(windows)]
-    {
-        mpv_embed::mpv_load(&path).await
-    }
+    let result = mpv_embed::mpv_load(&path).await;
     #[cfg(not(windows))]
-    {
+    let result = {
         let _ = path;
         Err("Встроенный плеер поддерживается только на Windows.".into())
-    }
+    };
+    log_result("mpv_load", result)
 }
 
 #[tauri::command(async)]
 async fn mpv_play() -> Result<(), String> {
     #[cfg(windows)]
-    {
-        mpv_embed::mpv_play().await
-    }
+    let result = mpv_embed::mpv_play().await;
     #[cfg(not(windows))]
-    {
-        Err("Встроенный плеер поддерживается только на Windows.".into())
-    }
+    let result = Err("Встроенный плеер поддерживается только на Windows.".into());
+    log_result("mpv_play", result)
 }
 
 #[tauri::command(async)]
 async fn mpv_pause() -> Result<(), String> {
     #[cfg(windows)]
-    {
-        mpv_embed::mpv_pause().await
-    }
+    let result = mpv_embed::mpv_pause().await;
     #[cfg(not(windows))]
-    {
-        Err("Встроенный плеер поддерживается только на Windows.".into())
-    }
+    let result = Err("Встроенный плеер поддерживается только на Windows.".into());
+    log_result("mpv_pause", result)
 }
 
 #[tauri::command(async)]
 async fn mpv_seek(seconds: f64) -> Result<(), String> {
     #[cfg(windows)]
-    {
-        mpv_embed::mpv_seek(seconds).await
-    }
+    let result = mpv_embed::mpv_seek(seconds).await;
     #[cfg(not(windows))]
-    {
+    let result = {
         let _ = seconds;
         Err("Встроенный плеер поддерживается только на Windows.".into())
-    }
+    };
+    log_result("mpv_seek", result)
 }
 
 #[tauri::command(async)]
 async fn mpv_close() -> Result<(), String> {
     #[cfg(windows)]
-    {
-        mpv_embed::mpv_close().await
-    }
+    let result = mpv_embed::mpv_close().await;
     #[cfg(not(windows))]
-    {
-        Ok(())
-    }
+    let result = Ok(());
+    log_result("mpv_close", result)
+}
+
+// Открыть папку с файловыми логами (tauri-plugin-log, см. run()) —
+// кнопка в настройках, чтобы при жалобе пользователь мог просто
+// прислать файл, а не пересказывать своими словами, что было на экране.
+// app_log_dir() — тот же путь, что резолвит сам плагин под капотом
+// (TargetKind::LogDir), так что открывается ровно та папка, куда
+// реально пишутся логи, без риска разъехаться с ним. reveal_item_in_dir
+// (а не shell::open, который у tauri 2 к тому же deprecated в пользу
+// этого же opener) открывает родителя и подсвечивает саму папку logs —
+// этого достаточно, чтобы её найти и зайти внутрь.
+#[tauri::command(async)]
+fn open_log_folder(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    app.opener().reveal_item_in_dir(&dir).map_err(|e| e.to_string())
 }
 
 // Обращение к хранилищу учётных данных ОС тоже блокирующее (на Linux —
 // синхронный вызов Secret Service по D-Bus).
 #[tauri::command(async)]
 fn token_save(token: String) -> Result<(), String> {
-    token_store::save(&token)
+    // log_result безопасен и здесь: он логирует только текст Err (общая
+    // ошибка хранилища ОС), сам токен никогда не попадает в лог ни на
+    // успешном, ни на неудачном пути.
+    log_result("token_save", token_store::save(&token))
 }
 
 #[tauri::command(async)]
@@ -407,7 +433,7 @@ fn token_load() -> Option<String> {
 
 #[tauri::command(async)]
 fn token_clear() -> Result<(), String> {
-    token_store::clear()
+    log_result("token_clear", token_store::clear())
 }
 
 // Прогресс пакетного QC (runQcBatch в qc.js) — на иконке в панели
@@ -441,11 +467,8 @@ fn set_window_progress(app: tauri::AppHandle, progress: Option<u64>) -> Result<(
 async fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     let mgr = app.autolaunch();
-    if enabled {
-        mgr.enable().map_err(|e| e.to_string())
-    } else {
-        mgr.disable().map_err(|e| e.to_string())
-    }
+    let result = if enabled { mgr.enable() } else { mgr.disable() }.map_err(|e| e.to_string());
+    log_result("set_autostart", result)
 }
 
 #[tauri::command]
@@ -551,34 +574,38 @@ async fn upload_report_file(
     file_path: String,
     init_data: String,
 ) -> Result<serde_json::Value, String> {
-    let path = checked_upload_path(&app.state::<DroppedFiles>(), &file_path)?;
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "file".to_string());
+    let result = async {
+        let path = checked_upload_path(&app.state::<DroppedFiles>(), &file_path)?;
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "file".to_string());
 
-    // std::fs::read (блокирующий), не tokio::fs — не тащим отдельно
-    // зависимость на tokio ради одного чтения файла.
-    let bytes = std::fs::read(&path).map_err(|e| format!("Не удалось прочитать файл: {e}"))?;
+        // std::fs::read (блокирующий), не tokio::fs — не тащим отдельно
+        // зависимость на tokio ради одного чтения файла.
+        let bytes = std::fs::read(&path).map_err(|e| format!("Не удалось прочитать файл: {e}"))?;
 
-    let part = reqwest::multipart::Part::bytes(bytes).file_name(file_name);
-    let form = reqwest::multipart::Form::new().part("file", part);
+        let part = reqwest::multipart::Part::bytes(bytes).file_name(file_name);
+        let form = reqwest::multipart::Form::new().part("file", part);
 
-    let resp = http()
-        .post(format!("{API_BASE}/report/{report_id}/files/upload"))
-        .header("X-Init-Data", init_data)
-        .multipart(form)
-        .send()
-        .await
-        .map_err(|e| format!("Не удалось отправить файл: {e}"))?;
+        let resp = http()
+            .post(format!("{API_BASE}/report/{report_id}/files/upload"))
+            .header("X-Init-Data", init_data)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| format!("Не удалось отправить файл: {e}"))?;
 
-    if !resp.status().is_success() {
-        return Err(error_detail(resp, "сервер отклонил файл").await);
+        if !resp.status().is_success() {
+            return Err(error_detail(resp, "сервер отклонил файл").await);
+        }
+
+        resp.json::<serde_json::Value>()
+            .await
+            .map_err(|e| format!("Некорректный ответ сервера: {e}"))
     }
-
-    resp.json::<serde_json::Value>()
-        .await
-        .map_err(|e| format!("Некорректный ответ сервера: {e}"))
+    .await;
+    log_result("upload_report_file", result)
 }
 
 /// Скачивание вложения отчёта. Раньше это была обычная ссылка
@@ -595,24 +622,28 @@ async fn download_report_file(
     init_data: String,
     save_path: String,
 ) -> Result<(), String> {
-    let resp = http()
-        .get(format!(
-            "{API_BASE}/report/{report_id}/files/{file_id}/download"
-        ))
-        .header("X-Init-Data", init_data)
-        .send()
-        .await
-        .map_err(|e| format!("Не удалось скачать файл: {e}"))?;
+    let result = async {
+        let resp = http()
+            .get(format!(
+                "{API_BASE}/report/{report_id}/files/{file_id}/download"
+            ))
+            .header("X-Init-Data", init_data)
+            .send()
+            .await
+            .map_err(|e| format!("Не удалось скачать файл: {e}"))?;
 
-    if !resp.status().is_success() {
-        return Err(error_detail(resp, "сервер отказал в скачивании").await);
+        if !resp.status().is_success() {
+            return Err(error_detail(resp, "сервер отказал в скачивании").await);
+        }
+
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| format!("Обрыв при скачивании: {e}"))?;
+        std::fs::write(&save_path, &bytes).map_err(|e| format!("Не удалось сохранить файл: {e}"))
     }
-
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("Обрыв при скачивании: {e}"))?;
-    std::fs::write(&save_path, &bytes).map_err(|e| format!("Не удалось сохранить файл: {e}"))
+    .await;
+    log_result("download_report_file", result)
 }
 
 /// Текст ошибки из тела ответа сервера ({"detail": "..."}), если он там
@@ -656,7 +687,38 @@ fn main() {
                 let _ = win.set_focus();
             }
         }))
+        // Файловые логи с ротацией — единая точка диагностики вместо
+        // разрозненных toast/eprintln!, после которых при жалобе из
+        // реальной студии оставалось только гадать (см. историю с mpv-
+        // плеером: ни toast, ни процесса, а eprintln! в --release без
+        // консоли уходил в никуда — оба факта стали видны только после
+        // добавления этого плагина). Webview-таргет зеркалит и то, что
+        // шлёт console.* из JS (media-tools.js и т.д.), в тот же файл —
+        // не только в devtools-консоль, которую пользователь не откроет
+        // сам. Info по умолчанию (сторонние крейты — reqwest/tauri сами
+        // не должны заваливать файл своим trace/debug), Debug — для
+        // собственного кода (level_for), максимум 5 МБ на файл, храним
+        // 3 последних ротации, остального обычно достаточно, чтобы
+        // покрыть один сеанс работы студии.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::LogDir { file_name: Some("phoenix-dub".into()) },
+                ))
+                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout))
+                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview))
+                .max_file_size(5_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
+                .level(log::LevelFilter::Info)
+                .level_for("phoenix_dub_desktop", log::LevelFilter::Debug)
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
+        // reveal_item_in_dir для open_log_folder (кнопка «Открыть логи»
+        // в настройках) — не тот же плагин, что shell:allow-open,
+        // который open_log_folder раньше использовал через deprecated
+        // Shell::open.
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -704,15 +766,22 @@ fn main() {
             mpv_pause,
             mpv_seek,
             mpv_close,
+            open_log_folder,
         ])
         .setup(|app| {
+            // Первая строка в файловом логе за сеанс — якорь, от которого
+            // считать всё остальное при разборе присланного лога (версия
+            // сборки — иначе непонятно, к какому коммиту относится баг-
+            // репорт присланного файла).
+            log::info!("PHOENIX DUB Desktop {} запускается", app.package_info().version);
+
             // Глобальная горячая клавиша — свернуть/показать окно из любого
             // места (Ctrl+Shift+P). Не через `?`: если комбинацию уже занял
             // кто-то другой в системе, ошибка отсюда уронила бы весь запуск
             // приложения — из-за необязательной горячей клавиши.
             let toggle = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyP);
             if let Err(e) = app.global_shortcut().register(toggle) {
-                eprintln!("Не удалось зарегистрировать Ctrl+Shift+P (занята другим приложением?): {e}");
+                log::warn!("Не удалось зарегистрировать Ctrl+Shift+P (занята другим приложением?): {e}");
             }
 
             // Иконка в трее с меню — открыть/скрыть окно и выйти по-настоящему.

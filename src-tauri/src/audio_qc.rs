@@ -202,11 +202,14 @@ pub(crate) fn resolve_ffmpeg() -> &'static str {
 pub(crate) fn resolve_binary_uncached(unix_name: &str, windows_name: &str) -> String {
     if let Some(bundled) = bundled_binary_path(unix_name, windows_name) {
         if binary_runs(&bundled) {
+            log::info!("{windows_name}: используем bundled-версию {bundled:?}");
             return bundled.to_string_lossy().into_owned();
         }
         // Лежит рядом, но не запускается (например, собран не под ту
         // архитектуру) — не тихо молчим, а пробуем PATH дальше.
-        eprintln!("bundled {:?} найден по пути {:?}, но не запустился — используем PATH", windows_name, bundled);
+        log::warn!("bundled {windows_name:?} найден по пути {bundled:?}, но не запустился — используем PATH");
+    } else {
+        log::warn!("{windows_name}: bundled-копия не найдена рядом с .exe — используем PATH ({unix_name})");
     }
     unix_name.to_string()
 }

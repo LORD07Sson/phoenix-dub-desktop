@@ -15,6 +15,9 @@
 import { invoke, openDialog, saveDialog, convertFileSrc, revealInFolder, listen } from "./tauri.js";
 import { openSheet, toast } from "./api.js";
 import { $, esc, formatTime } from "./utils.js";
+import { tagLogger } from "./applog.js";
+
+const mpvLog = tagLogger("mpv");
 
 const VIDEO_EXTENSIONS = ["mp4", "mkv", "mov", "avi", "webm", "m4v"];
 const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "m4a", "aac", "ogg", "opus"];
@@ -195,9 +198,15 @@ function isVideoFile() {
 // здесь нужна поправка на смещение.
 function videoSurfaceRect(root) {
   const el = root.querySelector("#mt-cut-video-surface");
-  if (!el) return null;
+  if (!el) {
+    mpvLog.warn("videoSurfaceRect: #mt-cut-video-surface не найден в root");
+    return null;
+  }
   const r = el.getBoundingClientRect();
-  if (r.width <= 0 || r.height <= 0) return null;
+  if (r.width <= 0 || r.height <= 0) {
+    mpvLog.warn("videoSurfaceRect: нулевой размер плейсхолдера", r);
+    return null;
+  }
   const dpr = window.devicePixelRatio || 1;
   return {
     x: Math.round(r.left * dpr),
@@ -210,9 +219,12 @@ function videoSurfaceRect(root) {
 async function syncMpvBounds(root) {
   const rect = videoSurfaceRect(root);
   if (!rect) return;
+  mpvLog.info("mpv_create ->", rect);
   try {
     await invoke("mpv_create", rect);
+    mpvLog.info("mpv_create ok");
   } catch (e) {
+    mpvLog.error("mpv_create failed", e);
     toast(`Не удалось открыть видео-плеер: ${e}`, "error");
   }
 }
@@ -228,6 +240,7 @@ async function closeCutMpv() {
 }
 
 async function openCutMpv(root) {
+  mpvLog.info("openCutMpv", cutState.path);
   await syncMpvBounds(root);
   if (cutState.path !== cutMpvLoadedPath) {
     cutMpvLoadedPath = cutState.path;
@@ -235,7 +248,9 @@ async function openCutMpv(root) {
       await invoke("mpv_load", { path: cutState.path });
       await invoke("mpv_play");
       cutState.mpvPaused = false;
+      mpvLog.info("mpv_load + mpv_play ok");
     } catch (e) {
+      mpvLog.error("mpv_load/mpv_play failed", e);
       toast(`Не удалось загрузить видео в плеер: ${e}`, "error");
     }
   }
@@ -250,6 +265,7 @@ async function openCutMpv(root) {
         const btn = $("#mt-cut-playpause");
         if (btn) btn.textContent = cutState.mpvPaused ? "▶" : "⏸";
       } else if (name === "exited") {
+        mpvLog.error("процесс mpv завершился неожиданно (пайп закрылся)");
         toast("Плеер mpv неожиданно завершился.", "error");
         cutMpvLoadedPath = null;
       }

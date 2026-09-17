@@ -9,6 +9,9 @@ import { applyDensity, currentDensity } from "./density.js";
 import { focusModePreferred, setFocusModePreferred } from "./focus-mode.js";
 import { isDevModeOn, setDevModeOn } from "./devmode.js";
 import { openAdminPanel } from "./admin.js";
+import { tagLogger } from "./applog.js";
+
+const updateLog = tagLogger("updates");
 
 // Версию подставляет Vite на этапе сборки (define: __APP_VERSION__ в
 // vite.config.js — читает файл VERSION, а в CI ещё и переменную
@@ -113,6 +116,14 @@ async function openSettings() {
       </div>
     </div>
 
+    <div class="settings-group">
+      <div class="settings-group-title">🩺 Диагностика</div>
+      <div class="settings-row">
+        <span>Файловые логи приложения (обновления, QC звука, инструменты ffmpeg, плеер)</span>
+        <button class="btn" id="s-open-logs">📂 Открыть логи</button>
+      </div>
+    </div>
+
     <div class="settings-hint">
       <b>Ctrl+Shift+P</b> — показать/скрыть окно из любого места, даже когда оно свёрнуто в трей.<br>
       <b>⌨️</b> в шапке (или клавиша «?») — полный список горячих клавиш.<br>
@@ -185,6 +196,13 @@ async function openSettings() {
     }
   });
   overlay.querySelector("#s-open-admin").addEventListener("click", openAdminPanel);
+  overlay.querySelector("#s-open-logs").addEventListener("click", async () => {
+    try {
+      await invoke("open_log_folder");
+    } catch (err) {
+      toast(`Не удалось открыть папку с логами: ${err}`, "error");
+    }
+  });
   overlay.querySelector("[data-close]").addEventListener("click", () => dismissSheet(overlay));
 }
 $("#open-settings").addEventListener("click", openSettings);
@@ -235,7 +253,13 @@ export async function checkForUpdates(silent) {
     if (!yes) return;
     await installUpdate();
   } catch (e) {
+    // Тихую автопроверку при старте (silent=true) пользователь никогда
+    // не видит тостом — раньше падение здесь (тот самый 403 на общем IP
+    // студии) не оставляло вообще никакого следа. error-тост ниже уже
+    // сам логируется через toast() (см. api.js), поэтому явный вызов
+    // нужен именно на silent-ветке.
     if (!silent) toast(`Не удалось проверить обновления: ${e}`, "error");
+    else updateLog.error(`тихая автопроверка при старте не удалась: ${e}`);
   }
 }
 

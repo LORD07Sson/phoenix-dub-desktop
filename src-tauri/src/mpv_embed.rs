@@ -165,6 +165,7 @@ pub async fn mpv_create(app: &tauri::AppHandle, bounds: MpvBounds) -> Result<(),
 
     let pipe_name = format!(r"\\.\pipe\phoenix-mpv-{}", std::process::id());
     let mpv = resolve_mpv();
+    log::info!("spawn {mpv} --wid={hwnd_raw} bounds={}x{}+{},{}", bounds.width, bounds.height, bounds.x, bounds.y);
     let child = Command::new(mpv)
         .args([
             format!("--wid={hwnd_raw}"),
@@ -180,10 +181,13 @@ pub async fn mpv_create(app: &tauri::AppHandle, bounds: MpvBounds) -> Result<(),
             format!("mpv не найден или не запустился ({mpv}): {e}.")
         })?;
 
+    log::info!("spawned pid={:?}, подключаемся к пайпу {pipe_name}...", child.id());
     let client = connect_with_retry(&pipe_name).await.map_err(|e| {
         unsafe { let _ = DestroyWindow(HWND(hwnd_raw as _)); }
+        log::error!("не удалось подключиться к mpv IPC за 5с: {e}");
         format!("не удалось подключиться к mpv IPC: {e}")
     })?;
+    log::info!("пайп подключён");
     let (read_half, mut write_half) = tokio::io::split(client);
 
     // Подписка на позицию/паузу — раньше это давали события <video>
@@ -212,6 +216,7 @@ pub async fn mpv_create(app: &tauri::AppHandle, bounds: MpvBounds) -> Result<(),
         // Пайп закрылся (mpv умер сам, например файл битый) — сообщаем
         // фронтенду тем же каналом, чтобы не показывать замёршую кнопку
         // play вечно.
+        log::warn!("пайп IPC закрылся — mpv, судя по всему, завершился сам");
         let _ = app_events.emit("mpv-state", json!({ "name": "exited", "data": true }));
     });
 
