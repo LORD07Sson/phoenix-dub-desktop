@@ -1894,3 +1894,56 @@ body.focus-mode .report-detail-overlay .sheet {
   background: var(--surface-2); color: var(--ink); font: inherit; font-size: 12.5px;
 }
 .mt-form-row label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+
+/* ---------- Муксинг (media-tools.js: muxPanelHtml) ---------- */
+.mt-mux-section { margin-bottom: 16px; }
+.mt-mux-section:last-of-type { margin-bottom: 14px; }
+.mt-mux-section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line-soft);
+}
+.mt-mux-section-head b { font-size: 13px; }
+.mt-mux-section-head .btn { padding: 4px 10px; font-size: 12px; }
+.mt-mux-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--surface-2); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 6px;
+  font-size: 12.5px;
+}
+.mt-mux-label { flex: none; font-weight: 700; color: var(--fire); min-width: 28px; }
+.mt-mux-file { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); }
+.mt-mux-row select, .mt-mux-row input[type="text"] {
+  padding: 6px 9px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--surface-3); color: var(--ink); font: inherit; font-size: 12px;
+}
+.mt-mux-row input[type="text"] { flex: 1 1 140px; min-width: 90px; }
+.mt-mux-default-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
+.mt-mux-default-toggle input { accent-color: var(--fire); width: 15px; height: 15px; }
+.mt-mux-section-add { display: flex; align-items: center; gap: 8px; }
+.mt-mux-section-add .btn { padding: 4px 10px; font-size: 12px; }
+
+/* ---------- Общий пул файлов (media-tools.js: poolBarHtml) ----------
+   Живёт над вкладками-операциями, не пересобирается при переключении
+   между ними (renderActivePanel трогает только #mt-body) — файл,
+   добавленный один раз, доступен в любой вкладке через <select>. */
+.mt-pool-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--radius-md);
+  padding: 10px 12px; margin-bottom: 14px;
+}
+.mt-pool-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+.mt-pool-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface-3); border-radius: 999px; padding: 4px 6px 4px 10px;
+  font-size: 12px; max-width: 220px;
+}
+.mt-pool-chip-remove {
+  border: none; background: none; color: var(--ink-dim); cursor: pointer;
+  width: 18px; height: 18px; border-radius: 50%; font-size: 11px; line-height: 1; flex: none;
+}
+.mt-pool-chip-remove:hover { background: var(--surface-4); color: var(--s-stop); }
+.mt-pool-bar .btn { flex: none; padding: 5px 12px; font-size: 12.5px; }
+.mt-pool-select {
+  padding: 6px 9px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--surface-3); color: var(--ink); font: inherit; font-size: 12.5px;
+  max-width: 220px;
+}

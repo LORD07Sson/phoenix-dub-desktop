@@ -1,9 +1,16 @@
 // «Инструменты ffmpeg» — библиотека операций поверх media_tools.rs:
 // обрезка без перекодирования (lossless keyframe cut, как в LosslessCut),
-// конвертация, извлечение/нормализация звука, склейка нескольких файлов.
-// Каждая операция — отдельная панель с обычной формой (без «сырого» поля
-// произвольных аргументов ffmpeg), переключаемая вкладками внутри одной
-// модалки. Кнопка входа — #open-media-tools в шапке, рядом с QC звука.
+// конвертация, извлечение/нормализация звука, склейка и муксинг
+// нескольких файлов. Каждая операция — отдельная панель с обычной формой
+// (без «сырого» поля произвольных аргументов ffmpeg), переключаемая
+// вкладками внутри одной модалки. Кнопка входа — #open-media-tools в
+// шапке, рядом с QC звука.
+//
+// Файлы выбираются не из каждой вкладки отдельным системным диалогом, а
+// один раз в общий пул (см. filePool/poolBarHtml ниже) — панель пула
+// видна на любой вкладке, а каждая операция берёт нужный(е) файл(ы) из
+// него через <select>. Так один и тот же файл (например, для обрезки
+// и следом конвертации) не нужно выбирать заново на каждой вкладке.
 
 import { invoke, openDialog, saveDialog, convertFileSrc, revealInFolder, listen } from "./tauri.js";
 import { openSheet, toast } from "./api.js";
@@ -11,7 +18,9 @@ import { $, esc, formatTime } from "./utils.js";
 
 const VIDEO_EXTENSIONS = ["mp4", "mkv", "mov", "avi", "webm", "m4v"];
 const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "m4a", "aac", "ogg", "opus"];
+const SUBTITLE_EXTENSIONS = ["srt", "ass", "ssa", "vtt", "sub"];
 const MEDIA_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS];
+const POOL_EXTENSIONS = [...MEDIA_EXTENSIONS, ...SUBTITLE_EXTENSIONS];
 
 function baseName(path) {
   return String(path).split(/[\\/]/).pop() || path;
@@ -24,18 +33,110 @@ function extOf(path) {
   return m ? m[1].toLowerCase() : "";
 }
 
-// Открыть файл выбором пользователя → пустить его в вебвью через
-// asset-протокол (mt_register_media_file — без этого <video src> ничего
-// не покажет, см. tauri.conf.json: security.assetProtocol) → снять
-// метаданные. Общая первая половина у обрезки/конвертации/аудио —
-// у склейки свой поток (список файлов, не один).
-async function pickAndProbe(extensions) {
-  const picked = await openDialog({ multiple: false, filters: [{ name: "Медиа", extensions }] });
-  if (!picked) return null;
-  const path = Array.isArray(picked) ? picked[0] : picked;
-  await invoke("mt_register_media_file", { path });
-  const info = await invoke("mt_probe_media", { path });
-  return { path, info };
+// ============================================================
+// Общий пул файлов — раньше каждая вкладка (Обрезка/Конвертация/Аудио/
+// Склейка/Муксинг) сама открывала диалог выбора файла, и один и тот же
+// файл для двух операций нужно было выбирать дважды. Теперь файлы
+// добавляются один раз в общий пул (панель сверху модалки, видна на
+// любой вкладке), а каждая операция выбирает нужный(е) файл(ы) из него
+// через <select>, не через новый системный диалог.
+// ============================================================
+
+const filePool = []; // { path, info } — info может быть null (напр. .srt — ffprobe не видит в нём медиапотока)
+
+// mt_register_media_file — допуск файла в asset-протокол для <video src>
+// (см. tauri.conf.json: security.assetProtocol) — делаем на добавление в
+// пул один раз, не на каждый выбор в конкретной вкладке.
+async function addFilesToPool(extensions) {
+  const picked = await openDialog({ multiple: true, filters: [{ name: "Медиа", extensions }] });
+  if (!picked) return [];
+  const list = Array.isArray(picked) ? picked : [picked];
+  const indices = [];
+  for (const path of list) {
+    const existing = filePool.findIndex(f => f.path === path);
+    if (existing !== -1) { indices.push(existing); continue; }
+    let info = null;
+    try {
+      await invoke("mt_register_media_file", { path });
+      info = await invoke("mt_probe_media", { path });
+    } catch {
+      // не медиаконтейнер в понимании ffprobe (например, .srt) —
+      // не критично, кладём в пул без метаданных.
+    }
+    filePool.push({ path, info });
+    indices.push(filePool.length - 1);
+  }
+  return indices;
+}
+
+// Убирает файл из пула и подчищает ссылки на него во всех вкладках —
+// иначе за отваливающийся путь могли бы держаться cutState.path
+// (что-то откроет несуществующий файл) или список склейки/муксинга.
+function removeFromPool(index) {
+  const removedPath = filePool[index]?.path;
+  if (removedPath == null) return;
+  filePool.splice(index, 1);
+  const reindex = i => (i == null ? i : i === index ? null : i > index ? i - 1 : i);
+
+  if (cutState.path === removedPath) { cutState.path = null; cutState.info = null; cutState.poolIndex = null; closeCutMpv(); }
+  else cutState.poolIndex = reindex(cutState.poolIndex);
+
+  if (convertState.path === removedPath) { convertState.path = null; convertState.info = null; convertState.poolIndex = null; }
+  else convertState.poolIndex = reindex(convertState.poolIndex);
+
+  if (audioState.path === removedPath) { audioState.path = null; audioState.info = null; audioState.poolIndex = null; }
+  else audioState.poolIndex = reindex(audioState.poolIndex);
+
+  concatState.paths = concatState.paths.filter(p => p !== removedPath);
+  MUX_SECTIONS.forEach(section => {
+    muxState[section.key] = muxState[section.key].filter(t => t.path !== removedPath);
+  });
+}
+
+function poolBarHtml() {
+  return `
+    <div class="mt-pool-bar">
+      <div class="mt-pool-chips" id="mt-pool-chips">
+        ${filePool.length
+          ? filePool.map((f, i) => `<span class="mt-pool-chip" title="${esc(f.path)}">${esc(baseName(f.path))}<button class="mt-pool-chip-remove" data-pool-remove="${i}" title="Убрать из пула">✕</button></span>`).join("")
+          : `<span class="mt-info-line">Файлов пока нет — добавьте, они станут доступны во всех вкладках.</span>`}
+      </div>
+      <button class="btn ghost" id="mt-pool-add">📂 Добавить файлы</button>
+    </div>`;
+}
+
+function wirePoolBar(overlay) {
+  overlay.querySelector("#mt-pool-add")?.addEventListener("click", async () => {
+    await addFilesToPool(POOL_EXTENSIONS);
+    renderPoolBar(overlay);
+    renderActivePanel(overlay);
+  });
+  overlay.querySelectorAll("[data-pool-remove]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      removeFromPool(Number(btn.dataset.poolRemove));
+      renderPoolBar(overlay);
+      renderActivePanel(overlay);
+    });
+  });
+}
+
+function renderPoolBar(overlay) {
+  overlay.querySelector("#mt-pool-bar-mount").innerHTML = poolBarHtml();
+  wirePoolBar(overlay);
+}
+
+// selectedIndex — какой пункт пула отметить выбранным; filterFn(entry) —
+// необязательный предикат, чтобы показать не весь пул (например, только
+// файлы со звуковой дорожкой в панели «Аудио»).
+function poolSelectHtml(selectId, selectedIndex, filterFn) {
+  const options = filePool
+    .map((f, i) => ({ f, i }))
+    .filter(({ f }) => !filterFn || filterFn(f));
+  return `
+    <select id="${selectId}" class="mt-pool-select">
+      <option value="">— выбрать из пула —</option>
+      ${options.map(({ f, i }) => `<option value="${i}" ${i === selectedIndex ? "selected" : ""} title="${esc(f.path)}">${esc(baseName(f.path))}</option>`).join("")}
+    </select>`;
 }
 
 function infoLineHtml(info) {
@@ -56,6 +157,7 @@ function infoLineHtml(info) {
 // ============================================================
 
 const cutState = {
+  poolIndex: null,
   path: null,
   info: null,
   keyframes: [],
@@ -179,21 +281,18 @@ async function seekTo(root, seconds) {
 }
 
 function cutPanelHtml() {
+  const picker = `<div class="mt-file-row">${poolSelectHtml("mt-cut-pick", cutState.poolIndex, f => f.info && (f.info.video || f.info.audio))}${cutState.path ? infoLineHtml(cutState.info) : ""}</div>`;
   if (!cutState.path) {
     return `
+      ${picker}
       <div class="mt-empty">
-        <p>Выберите видео или аудиофайл — резка идёт без перекодирования
-        (мгновенно, без потери качества), начало каждого сегмента
-        подъезжает к ближайшему опорному кадру.</p>
-        <button class="btn primary" id="mt-cut-pick">📂 Выбрать файл</button>
+        <p>Выберите видео или аудиофайл из пула выше — резка идёт без
+        перекодирования (мгновенно, без потери качества), начало каждого
+        сегмента подъезжает к ближайшему опорному кадру.</p>
       </div>`;
   }
   return `
-    <div class="mt-file-row">
-      <span title="${esc(cutState.path)}">${esc(baseName(cutState.path))}</span>
-      ${infoLineHtml(cutState.info)}
-      <button class="btn ghost" id="mt-cut-pick">Сменить файл</button>
-    </div>
+    ${picker}
     ${isVideoFile()
       ? `<div class="mt-video" id="mt-cut-video-surface"></div>
          <div class="mt-video-controls">
@@ -293,13 +392,14 @@ function drawCutTimeline(canvas) {
 }
 
 function wireCutPanel(root) {
-  const pickBtn = root.querySelector("#mt-cut-pick");
-  if (pickBtn) pickBtn.addEventListener("click", async () => {
-    const picked = await pickAndProbe(MEDIA_EXTENSIONS);
-    if (!picked) return;
+  const pickSel = root.querySelector("#mt-cut-pick");
+  if (pickSel) pickSel.addEventListener("change", async () => {
+    if (pickSel.value === "") return;
+    const entry = filePool[Number(pickSel.value)];
     const wasVideo = isVideoFile();
-    cutState.path = picked.path;
-    cutState.info = picked.info;
+    cutState.poolIndex = Number(pickSel.value);
+    cutState.path = entry.path;
+    cutState.info = entry.info;
     cutState.segments = [];
     cutState.markIn = null;
     cutState.markOut = null;
@@ -308,9 +408,9 @@ function wireCutPanel(root) {
     // Сменили видео на аудио (или наоборот) — старое mpv-окно неоткуда
     // взять новый смысл, закрываем; переоткроется в openCutMpv ниже, если
     // новый файл снова видео.
-    if (wasVideo && !picked.info.video) await closeCutMpv();
+    if (wasVideo && !(entry.info && entry.info.video)) await closeCutMpv();
     try {
-      cutState.keyframes = picked.info.video ? await invoke("mt_probe_keyframes", { path: picked.path }) : [];
+      cutState.keyframes = entry.info && entry.info.video ? await invoke("mt_probe_keyframes", { path: entry.path }) : [];
     } catch {
       cutState.keyframes = [];
     }
@@ -439,23 +539,20 @@ const CONVERT_PRESETS = {
   custom: { label: "Свои параметры", container: "mp4", opts: {} },
 };
 
-const convertState = { path: null, info: null, preset: "mp4_h264" };
+const convertState = { poolIndex: null, path: null, info: null, preset: "mp4_h264" };
 
 function convertPanelHtml() {
+  const picker = `<div class="mt-file-row">${poolSelectHtml("mt-convert-pick", convertState.poolIndex, f => f.info && (f.info.video || f.info.audio))}${convertState.path ? infoLineHtml(convertState.info) : ""}</div>`;
   if (!convertState.path) {
     return `
+      ${picker}
       <div class="mt-empty">
-        <p>Выберите файл для перекодирования в другой контейнер/кодек/разрешение.</p>
-        <button class="btn primary" id="mt-convert-pick">📂 Выбрать файл</button>
+        <p>Выберите файл из пула выше для перекодирования в другой контейнер/кодек/разрешение.</p>
       </div>`;
   }
   const custom = convertState.preset === "custom";
   return `
-    <div class="mt-file-row">
-      <span title="${esc(convertState.path)}">${esc(baseName(convertState.path))}</span>
-      ${infoLineHtml(convertState.info)}
-      <button class="btn ghost" id="mt-convert-pick">Сменить файл</button>
-    </div>
+    ${picker}
     <div class="mt-form-row">
       <span>Пресет</span>
       <select id="mt-convert-preset">
@@ -493,12 +590,13 @@ function convertPanelHtml() {
 }
 
 function wireConvertPanel(root) {
-  const pickBtn = root.querySelector("#mt-convert-pick");
-  if (pickBtn) pickBtn.addEventListener("click", async () => {
-    const picked = await pickAndProbe(MEDIA_EXTENSIONS);
-    if (!picked) return;
-    convertState.path = picked.path;
-    convertState.info = picked.info;
+  const pickSel = root.querySelector("#mt-convert-pick");
+  if (pickSel) pickSel.addEventListener("change", () => {
+    if (pickSel.value === "") return;
+    const entry = filePool[Number(pickSel.value)];
+    convertState.poolIndex = Number(pickSel.value);
+    convertState.path = entry.path;
+    convertState.info = entry.info;
     renderActivePanel(root);
   });
   if (!convertState.path) return;
@@ -550,23 +648,23 @@ function wireConvertPanel(root) {
 // ============================================================
 
 const AUDIO_CODEC_EXT = { copy: null, aac: "m4a", mp3: "mp3", flac: "flac", libopus: "opus" };
-const audioState = { path: null, info: null };
+const audioState = { poolIndex: null, path: null, info: null };
 
 function audioPanelHtml() {
+  // Фильтр по наличию звуковой дорожки — сразу в самом списке выбора,
+  // не отдельной проверкой-тостом после пика, как было раньше.
+  const picker = `<div class="mt-file-row">${poolSelectHtml("mt-audio-pick", audioState.poolIndex, f => f.info && f.info.audio)}${audioState.path ? infoLineHtml(audioState.info) : ""}</div>`;
   if (!audioState.path) {
     return `
+      ${picker}
       <div class="mt-empty">
-        <p>Извлечь звук из видео, перевести в другой формат или
-        нормализовать громкость (EBU R128 loudnorm).</p>
-        <button class="btn primary" id="mt-audio-pick">📂 Выбрать файл</button>
+        <p>Выберите файл со звуковой дорожкой из пула выше — извлечь звук
+        из видео, перевести в другой формат или нормализовать громкость
+        (EBU R128 loudnorm).</p>
       </div>`;
   }
   return `
-    <div class="mt-file-row">
-      <span title="${esc(audioState.path)}">${esc(baseName(audioState.path))}</span>
-      ${infoLineHtml(audioState.info)}
-      <button class="btn ghost" id="mt-audio-pick">Сменить файл</button>
-    </div>
+    ${picker}
     <div class="mt-form-row">
       <span>Кодек</span>
       <select id="mt-audio-codec">
@@ -589,16 +687,13 @@ function audioPanelHtml() {
 }
 
 function wireAudioPanel(root) {
-  const pickBtn = root.querySelector("#mt-audio-pick");
-  if (pickBtn) pickBtn.addEventListener("click", async () => {
-    const picked = await pickAndProbe(MEDIA_EXTENSIONS);
-    if (!picked) return;
-    if (!picked.info.audio) {
-      toast("В этом файле не найдено звуковой дорожки.", "error");
-      return;
-    }
-    audioState.path = picked.path;
-    audioState.info = picked.info;
+  const pickSel = root.querySelector("#mt-audio-pick");
+  if (pickSel) pickSel.addEventListener("change", () => {
+    if (pickSel.value === "") return;
+    const entry = filePool[Number(pickSel.value)];
+    audioState.poolIndex = Number(pickSel.value);
+    audioState.path = entry.path;
+    audioState.info = entry.info;
     renderActivePanel(root);
   });
   if (!audioState.path) return;
@@ -641,6 +736,10 @@ const concatState = { paths: [] };
 
 function concatPanelHtml() {
   return `
+    <div class="mt-form-row">
+      ${poolSelectHtml("mt-concat-pick", null, f => f.info && (f.info.video || f.info.audio))}
+      <button class="btn" id="mt-concat-add-picked">+ В список</button>
+    </div>
     <div class="mt-concat-list" id="mt-concat-list">
       ${concatState.paths.length ? concatState.paths.map((p, i) => `
         <div class="mt-segment-row" data-i="${i}">
@@ -651,17 +750,15 @@ function concatPanelHtml() {
           <button class="icon-btn" data-remove-concat="${i}" title="Убрать">✕</button>
         </div>`).join("") : `<div class="no-assignee">Добавьте хотя бы два файла — порядок в списке и есть порядок склейки.</div>`}
     </div>
-    <button class="btn" id="mt-concat-add">📂 Добавить файл(ы)</button>
     <button class="btn primary" id="mt-concat-run" ${concatState.paths.length >= 2 ? "" : "disabled"}>🧩 Склеить</button>
   `;
 }
 
 function wireConcatPanel(root) {
-  root.querySelector("#mt-concat-add").addEventListener("click", async () => {
-    const picked = await openDialog({ multiple: true, filters: [{ name: "Медиа", extensions: MEDIA_EXTENSIONS }] });
-    if (!picked) return;
-    const list = Array.isArray(picked) ? picked : [picked];
-    concatState.paths.push(...list);
+  root.querySelector("#mt-concat-add-picked").addEventListener("click", () => {
+    const sel = root.querySelector("#mt-concat-pick");
+    if (sel.value === "") { toast("Выберите файл из пула.", "error"); return; }
+    concatState.paths.push(filePool[Number(sel.value)].path);
     renderActivePanel(root);
   });
   root.querySelectorAll("[data-remove-concat]").forEach(btn => {
@@ -708,6 +805,145 @@ function wireConcatPanel(root) {
 }
 
 // ============================================================
+// Муксинг — собрать видео + несколько дублей аудио (каждый уже свой
+// файл, как хранит студия) + субтитры в один контейнер с языком/именем/
+// флагом "по умолчанию" на дорожку, без перекодирования. См. mux_media
+// в media_tools.rs. Разметка секций — по образцу референса пользователя
+// (Leo MultiTools): Видео/Аудио/Субтитры отдельными группами, у каждой
+// дорожки свой язык + имя + переключатель "по умолч.".
+// ============================================================
+
+const LANGUAGE_OPTIONS = [
+  { code: "und", label: "Не указан" },
+  { code: "rus", label: "Русский" },
+  { code: "eng", label: "Английский" },
+  { code: "jpn", label: "Японский" },
+  { code: "chi", label: "Китайский" },
+  { code: "kor", label: "Корейский" },
+  { code: "ger", label: "Немецкий" },
+  { code: "fre", label: "Французский" },
+  { code: "spa", label: "Испанский" },
+];
+
+const MUX_SECTIONS = [
+  { kind: "video", key: "video", label: "Видео", letter: "V", extensions: VIDEO_EXTENSIONS },
+  { kind: "audio", key: "audio", label: "Аудио", letter: "A", extensions: AUDIO_EXTENSIONS },
+  { kind: "subtitle", key: "subtitle", label: "Субтитры", letter: "S", extensions: SUBTITLE_EXTENSIONS },
+];
+
+// Один файл — одна дорожка (без склейки нескольких файлов в одну
+// дорожку, в отличие от референса, где под "V1" может быть несколько
+// файлов сразу) — это покрывает реальный сценарий студии: у каждого
+// дубляжа/сабов свой отдельный файл.
+const muxState = { video: [], audio: [], subtitle: [] };
+
+function muxTrackRowHtml(section, track, i) {
+  return `
+    <div class="mt-mux-row">
+      <span class="mt-mux-label">${section.letter}${i + 1}</span>
+      <span class="mt-mux-file" title="${esc(track.path)}">${esc(baseName(track.path))}</span>
+      <select data-mux-lang data-section="${section.key}" data-i="${i}">
+        ${LANGUAGE_OPTIONS.map(l => `<option value="${l.code}" ${l.code === track.language ? "selected" : ""}>${esc(l.label)}</option>`).join("")}
+      </select>
+      <input type="text" data-mux-title data-section="${section.key}" data-i="${i}" value="${esc(track.title)}" placeholder="Имя дорожки">
+      <label class="mt-mux-default-toggle"><input type="checkbox" data-mux-default data-section="${section.key}" data-i="${i}" ${track.isDefault ? "checked" : ""}> По умолч.</label>
+      <button class="icon-btn" data-mux-remove data-section="${section.key}" data-i="${i}" title="Убрать">✕</button>
+    </div>`;
+}
+
+function muxSectionHtml(section) {
+  const tracks = muxState[section.key];
+  return `
+    <div class="mt-mux-section">
+      <div class="mt-mux-section-head">
+        <b>${esc(section.label)}</b>
+        <div class="mt-mux-section-add">
+          ${poolSelectHtml(`mt-mux-pick-${section.key}`, null)}
+          <button class="btn ghost" data-mux-add="${section.key}">+ Добавить</button>
+        </div>
+      </div>
+      ${tracks.length ? tracks.map((t, i) => muxTrackRowHtml(section, t, i)).join("") : `<div class="no-assignee">Пусто</div>`}
+    </div>`;
+}
+
+function totalMuxTracks() {
+  return muxState.video.length + muxState.audio.length + muxState.subtitle.length;
+}
+
+function muxPanelHtml() {
+  return `
+    ${MUX_SECTIONS.map(muxSectionHtml).join("")}
+    <button class="btn primary" id="mt-mux-run" ${totalMuxTracks() ? "" : "disabled"}>🧩 Смуксить</button>
+  `;
+}
+
+function wireMuxPanel(root) {
+  MUX_SECTIONS.forEach(section => {
+    const addBtn = root.querySelector(`[data-mux-add="${section.key}"]`);
+    if (!addBtn) return;
+    addBtn.addEventListener("click", () => {
+      const sel = root.querySelector(`#mt-mux-pick-${section.key}`);
+      if (sel.value === "") { toast("Выберите файл из пула.", "error"); return; }
+      const path = filePool[Number(sel.value)].path;
+      const tracks = muxState[section.key];
+      tracks.push({ path, language: "und", title: stemOf(path), isDefault: tracks.length === 0 });
+      renderActivePanel(root);
+    });
+  });
+
+  root.querySelectorAll("[data-mux-remove]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      muxState[btn.dataset.section].splice(Number(btn.dataset.i), 1);
+      renderActivePanel(root);
+    });
+  });
+  root.querySelectorAll("[data-mux-lang]").forEach(sel => {
+    sel.addEventListener("change", () => {
+      muxState[sel.dataset.section][Number(sel.dataset.i)].language = sel.value;
+    });
+  });
+  root.querySelectorAll("[data-mux-title]").forEach(inp => {
+    inp.addEventListener("input", () => {
+      muxState[inp.dataset.section][Number(inp.dataset.i)].title = inp.value;
+    });
+  });
+  // Флаг "по умолчанию" — не больше одной дорожки на раздел (видео,
+  // аудио, субтитры отдельно), поэтому включение одной сбрасывает
+  // остальные в том же разделе; ре-рендер нужен, чтобы их чекбоксы
+  // визуально сняли отметку.
+  root.querySelectorAll("[data-mux-default]").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const section = cb.dataset.section;
+      const i = Number(cb.dataset.i);
+      muxState[section].forEach((t, idx) => { t.isDefault = idx === i && cb.checked; });
+      renderActivePanel(root);
+    });
+  });
+
+  const runBtn = root.querySelector("#mt-mux-run");
+  if (!runBtn) return;
+  runBtn.addEventListener("click", async () => {
+    const tracks = MUX_SECTIONS.flatMap(section => muxState[section.key].map(t => ({
+      path: t.path, kind: section.kind, language: t.language, title: t.title, isDefault: t.isDefault,
+    })));
+    if (!tracks.length) return;
+    const outPath = await saveDialog({ defaultPath: "muxed.mkv", filters: [{ name: "Matroska", extensions: ["mkv"] }] });
+    if (!outPath) return;
+    runBtn.disabled = true;
+    runBtn.textContent = "Муксирую…";
+    try {
+      await invoke("mt_mux_media", { tracks, outPath });
+      toast("Готово.", "success", { label: "📂 Показать в папке", onClick: () => revealInFolder(outPath) });
+    } catch (e) {
+      toast(`Не удалось смуксить: ${e}`, "error");
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = "🧩 Смуксить";
+    }
+  });
+}
+
+// ============================================================
 // Общий каркас модалки — реестр операций (переключатель вкладок).
 // Добавить новую операцию позже = ещё одна запись здесь + свой
 // html()/wire(), остальное не трогается.
@@ -718,6 +954,7 @@ const OPERATIONS = {
   convert: { label: "🔄 Конвертация", html: convertPanelHtml, wire: wireConvertPanel },
   audio: { label: "🎵 Аудио", html: audioPanelHtml, wire: wireAudioPanel },
   concat: { label: "🧩 Склейка", html: concatPanelHtml, wire: wireConcatPanel },
+  mux: { label: "🎛 Муксинг", html: muxPanelHtml, wire: wireMuxPanel },
 };
 
 let activeOp = "cut";
@@ -731,6 +968,7 @@ function renderActivePanel(overlay) {
 export function openMediaTools() {
   const overlay = openSheet(`
     <h2>🎬 Инструменты ffmpeg</h2>
+    <div id="mt-pool-bar-mount"></div>
     <div class="mt-op-tabs">
       ${Object.entries(OPERATIONS).map(([key, op]) => `<button class="mt-op-tab ${key === activeOp ? "active" : ""}" data-op="${key}">${op.label}</button>`).join("")}
     </div>
@@ -752,6 +990,7 @@ export function openMediaTools() {
       renderActivePanel(overlay);
     });
   });
+  renderPoolBar(overlay);
   renderActivePanel(overlay);
 }
 

@@ -500,6 +500,80 @@ pub fn concat_media(paths: &[String], out_path: &str) -> Result<String, String> 
     }
 }
 
+// ---------- mux_media ----------
+// Муксинг — собрать несколько отдельных дорожек (видео + несколько
+// дублей аудио + субтитры, каждая уже свой файл) в один контейнер с
+// подписанными языком/названием/флагом "по умолчанию" на дорожку —
+// ровно то, чем в студии закрывают "видео отдельно, дубляж на разных
+// языках отдельными файлами" перед раздачей зрителю. См. интерфейс-
+// референс пользователя (Leo MultiTools) — секции Видео/Аудио/Субтитры,
+// у каждой дорожки язык + имя + переключатель "по умолч.".
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MuxTrack {
+    pub path: String,
+    pub kind: String, // "video" | "audio" | "subtitle"
+    pub language: Option<String>,
+    pub title: Option<String>,
+    pub is_default: bool,
+}
+
+/// Каждая дорожка — свой `-i` (проще и надёжнее, чем угадывать номер
+/// потока внутри уже готового мультидорожечного файла: студия и так
+/// хранит каждый дубляж/сабы отдельным файлом, см. референс), поэтому
+/// `-map {i}:0` — просто первый (и обычно единственный) поток входа i.
+/// `-c copy` — без перекодирования: муксинг меняет только контейнер и
+/// метаданные, не сам сигнал. language/title/disposition пишутся через
+/// `-metadata:s:{v|a|s}:{N}`/`-disposition:{v|a|s}:{N}` с отдельным
+/// счётчиком N на каждый тип потока (нумерация потоков одного типа в
+/// выходном файле, не общий индекс среди всех -map).
+pub fn mux_media(tracks: &[MuxTrack], out_path: &str) -> Result<(), String> {
+    if tracks.is_empty() {
+        return Err("Не выбрано ни одной дорожки для муксинга.".into());
+    }
+    let ffmpeg = resolve_ffmpeg();
+    let mut cmd = ffmpeg_command(ffmpeg);
+    cmd.args(["-v", "error", "-y"]);
+    for t in tracks {
+        cmd.args(["-i", &t.path]);
+    }
+    for i in 0..tracks.len() {
+        cmd.args(["-map", &format!("{i}:0")]);
+    }
+    cmd.args(["-c", "copy"]);
+
+    let mut counters: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for t in tracks {
+        let type_code = match t.kind.as_str() {
+            "video" => "v",
+            "audio" => "a",
+            "subtitle" => "s",
+            other => return Err(format!("Неизвестный тип дорожки: {other}")),
+        };
+        let idx = *counters.entry(type_code).or_insert(0);
+        if let Some(lang) = t.language.as_deref().filter(|l| !l.is_empty()) {
+            cmd.args([format!("-metadata:s:{type_code}:{idx}"), format!("language={lang}")]);
+        }
+        if let Some(title) = t.title.as_deref().filter(|s| !s.is_empty()) {
+            cmd.args([format!("-metadata:s:{type_code}:{idx}"), format!("title={title}")]);
+        }
+        cmd.args([
+            format!("-disposition:{type_code}:{idx}"),
+            if t.is_default { "default".to_string() } else { "0".to_string() },
+        ]);
+        counters.insert(type_code, idx + 1);
+    }
+    cmd.arg(out_path);
+
+    let output = cmd.output().map_err(|e| format!("ffmpeg не найден или не запустился ({ffmpeg}): {e}."))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("ffmpeg не смог смуксить файлы: {}", err.trim()));
+    }
+    Ok(())
+}
+
 // ---------- прогресс длинных операций ----------
 
 /// Запускает ffmpeg с `-progress pipe:2` (пишет ключ=значение построчно в
@@ -754,6 +828,77 @@ mod tests {
         assert!((info.duration - 4.0).abs() < 0.5, "2с+2с ~ 4с, получили {}", info.duration);
         let _ = std::fs::remove_file(&a);
         let _ = std::fs::remove_file(&b);
+        let _ = std::fs::remove_file(&out);
+    }
+
+    #[test]
+    fn mux_media_rejects_empty_tracks() {
+        assert!(mux_media(&[], "/tmp/out.mkv").is_err());
+    }
+
+    #[test]
+    fn mux_media_rejects_unknown_kind() {
+        let tracks = vec![MuxTrack {
+            path: "whatever.mp4".into(),
+            kind: "banana".into(),
+            language: None,
+            title: None,
+            is_default: false,
+        }];
+        assert!(mux_media(&tracks, "/tmp/out.mkv").is_err());
+    }
+
+    fn make_test_audio(dir: &std::path::Path, name: &str, seconds: u32) -> String {
+        let out = dir.join(name);
+        let output = Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", &format!("sine=frequency=440:duration={seconds}"), "-c:a", "aac"])
+            .arg(&out)
+            .output()
+            .expect("не удалось сгенерировать тестовое аудио");
+        assert!(output.status.success(), "ffmpeg sine: {}", String::from_utf8_lossy(&output.stderr));
+        out.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn mux_media_combines_video_and_audio_with_language_and_default() {
+        if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
+        let dir = std::env::temp_dir();
+        let video = make_test_video(&dir, "phoenix_mt_mux_video.mp4", 2);
+        let audio_ru = make_test_audio(&dir, "phoenix_mt_mux_audio_ru.aac", 2);
+        let audio_en = make_test_audio(&dir, "phoenix_mt_mux_audio_en.aac", 2);
+        let out = dir.join("phoenix_mt_mux_out.mkv").to_string_lossy().into_owned();
+
+        let tracks = vec![
+            MuxTrack { path: video.clone(), kind: "video".into(), language: None, title: None, is_default: true },
+            MuxTrack { path: audio_ru.clone(), kind: "audio".into(), language: Some("rus".into()), title: Some("DUB - Тест".into()), is_default: true },
+            MuxTrack { path: audio_en.clone(), kind: "audio".into(), language: Some("eng".into()), title: Some("DUB - Test".into()), is_default: false },
+        ];
+        mux_media(&tracks, &out).expect("mux_media не должен падать на валидном входе");
+
+        let info = probe_media(&out).expect("результат должен читаться probe_media");
+        assert!(info.video.is_some(), "видео-поток должен быть в результате");
+        assert!(info.audio.is_some(), "хотя бы один аудио-поток должен быть в результате");
+
+        // Число аудио-потоков и их language/disposition — probe_media
+        // отдаёт только первый поток каждого типа, для точной проверки
+        // метаданных читаем ffprobe напрямую тем же приёмом, что и сам
+        // probe_media (JSON), без расширения MediaInfo ради одного теста.
+        let ffprobe_out = Command::new(resolve_ffprobe())
+            .args(["-v", "error", "-select_streams", "a", "-show_entries", "stream_tags=language,title:stream_disposition=default", "-of", "json"])
+            .arg(&out)
+            .output()
+            .expect("ffprobe должен запуститься");
+        let json: serde_json::Value = serde_json::from_slice(&ffprobe_out.stdout).expect("ffprobe должен отдать валидный JSON");
+        let streams = json["streams"].as_array().expect("streams должен быть массивом");
+        assert_eq!(streams.len(), 2, "должно быть ровно два аудио-потока");
+        assert_eq!(streams[0]["tags"]["language"], "rus");
+        assert_eq!(streams[0]["disposition"]["default"], 1);
+        assert_eq!(streams[1]["tags"]["language"], "eng");
+        assert_eq!(streams[1]["disposition"]["default"], 0);
+
+        let _ = std::fs::remove_file(&video);
+        let _ = std::fs::remove_file(&audio_ru);
+        let _ = std::fs::remove_file(&audio_en);
         let _ = std::fs::remove_file(&out);
     }
 }

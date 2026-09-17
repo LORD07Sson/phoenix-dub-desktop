@@ -292,6 +292,11 @@ fn mt_concat_media(paths: Vec<String>, out_path: String) -> Result<String, Strin
     media_tools::concat_media(&paths, &out_path)
 }
 
+#[tauri::command(async)]
+fn mt_mux_media(tracks: Vec<media_tools::MuxTrack>, out_path: String) -> Result<(), String> {
+    media_tools::mux_media(&tracks, &out_path)
+}
+
 // ---------- встроенный mpv-плеер (mpv_embed.rs, только Windows) ----------
 // Тела команд ветвятся по платформе, а не сами команды — иначе
 // `generate_handler!` ниже пришлось бы собирать двумя разными списками
@@ -691,6 +696,7 @@ fn main() {
             mt_transcode_media,
             mt_extract_audio,
             mt_concat_media,
+            mt_mux_media,
             mpv_create,
             mpv_set_bounds,
             mpv_load,
