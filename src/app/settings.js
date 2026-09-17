@@ -43,65 +43,82 @@ async function openSettings() {
 
   const overlay = openSheet(`
     <h2>Настройки</h2>
-    <div class="row" style="align-items:center; justify-content:space-between;">
-      <span>Запускать при старте системы</span>
-      <input type="checkbox" id="s-autostart" ${autostartOn ? "checked" : ""}>
-    </div>
-    <div class="row" style="align-items:center; justify-content:space-between;">
-      <span>Тема</span>
-      <select id="s-theme">
-        <option value="dark">Тёмная</option>
-        <option value="light">Светлая</option>
-      </select>
-    </div>
-    <div class="row" style="align-items:center; justify-content:space-between;">
-      <span>Плотность таблиц</span>
-      <select id="s-density">
-        <option value="comfortable">Обычная</option>
-        <option value="compact">Компактная</option>
-      </select>
-    </div>
-    <div class="row" style="align-items:center; justify-content:space-between;">
-      <span>🧘 Фокус-режим при открытии отчёта</span>
-      <input type="checkbox" id="s-focus-mode" ${focusModePreferred() ? "checked" : ""}>
-    </div>
-    ${state.isDeveloper ? `
-    <div class="row dev-pill-toggle" style="align-items:center; justify-content:space-between;">
-      <span>🛠 Режим разработчика</span>
-      <input type="checkbox" id="s-dev-mode" ${isDevModeOn() ? "checked" : ""}>
-    </div>` : ""}
-    <div class="row" style="align-items:center; justify-content:space-between;">
-      <span>Версия ${esc(APP_VERSION)}</span>
-      <button class="btn" id="s-check-update" style="padding:5px 12px; font-size:12.5px;">Проверить обновления</button>
-    </div>
-    <div class="row" style="align-items:center; justify-content:space-between;">
-      <span>🧪 Канал обновлений</span>
-      <select id="s-update-channel">
-        <option value="stable" ${updateChannel === "stable" ? "selected" : ""}>Стабильный</option>
-        <option value="alpha" ${updateChannel === "alpha" ? "selected" : ""}>Альфа (тестовые сборки)</option>
-      </select>
-    </div>
-    <div id="s-alpha-block" hidden>
-      <div class="alpha-warn">⚠️ Альфа-сборки собираются на каждый коммит в main и не являются стабильными релизами — автоматического отката нет.</div>
-      <div class="row" style="align-items:center; justify-content:space-between;">
-        <span>Текущий коммит</span>
-        <code id="s-commit-current">—</code>
+
+    <div class="settings-group">
+      <div class="settings-group-title">🎨 Внешний вид</div>
+      <div class="settings-row">
+        <span>Тема</span>
+        <select id="s-theme">
+          <option value="dark">Тёмная</option>
+          <option value="light">Светлая</option>
+        </select>
       </div>
-      <div class="row" style="align-items:center; justify-content:space-between;">
-        <span>Последний коммит</span>
-        <code id="s-commit-latest">—</code>
+      <div class="settings-row">
+        <span>Плотность таблиц</span>
+        <select id="s-density">
+          <option value="comfortable">Обычная</option>
+          <option value="compact">Компактная</option>
+        </select>
       </div>
     </div>
-    <div class="row" style="align-items:center; justify-content:space-between;">
-      <span>Доступ участников и состояние системы</span>
-      <button class="btn" id="s-open-admin" style="padding:5px 12px; font-size:12.5px;">🔐 Админ-панель</button>
+
+    <div class="settings-group">
+      <div class="settings-group-title">🧭 Поведение</div>
+      <div class="settings-row">
+        <span>Запускать при старте системы</span>
+        <input type="checkbox" id="s-autostart" ${autostartOn ? "checked" : ""}>
+      </div>
+      <div class="settings-row">
+        <span>🧘 Фокус-режим при открытии отчёта</span>
+        <input type="checkbox" id="s-focus-mode" ${focusModePreferred() ? "checked" : ""}>
+      </div>
+      ${state.isDeveloper ? `
+      <div class="settings-row dev-pill-toggle">
+        <span>🛠 Режим разработчика</span>
+        <input type="checkbox" id="s-dev-mode" ${isDevModeOn() ? "checked" : ""}>
+      </div>` : ""}
     </div>
-    <p style="color:var(--ink-soft); font-size:12.5px;">
-      Ctrl+Shift+P — показать/скрыть окно из любого места, даже когда оно свёрнуто в трей.<br>
-      ⌨️ в шапке (или клавиша «?») — полный список горячих клавиш.<br>
+
+    <div class="settings-group">
+      <div class="settings-group-title">🔄 Обновления</div>
+      <div class="settings-row">
+        <span>Версия ${esc(APP_VERSION)}</span>
+        <button class="btn" id="s-check-update">Проверить обновления</button>
+      </div>
+      <div class="settings-row">
+        <span>🧪 Канал обновлений</span>
+        <select id="s-update-channel">
+          <option value="stable" ${updateChannel === "stable" ? "selected" : ""}>Стабильный</option>
+          <option value="alpha" ${updateChannel === "alpha" ? "selected" : ""}>Альфа (тестовые сборки)</option>
+        </select>
+      </div>
+      <div id="s-alpha-block" hidden>
+        <div class="alpha-warn">⚠️ Альфа-сборки собираются на каждый коммит в main и не являются стабильными релизами — автоматического отката нет.</div>
+        <div class="settings-row">
+          <span>Текущий коммит</span>
+          <code id="s-commit-current">—</code>
+        </div>
+        <div class="settings-row">
+          <span>Последний коммит</span>
+          <code id="s-commit-latest">—</code>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">🔐 Доступ и система</div>
+      <div class="settings-row">
+        <span>Доступ участников и состояние системы</span>
+        <button class="btn" id="s-open-admin">🔐 Админ-панель</button>
+      </div>
+    </div>
+
+    <div class="settings-hint">
+      <b>Ctrl+Shift+P</b> — показать/скрыть окно из любого места, даже когда оно свёрнуто в трей.<br>
+      <b>⌨️</b> в шапке (или клавиша «?») — полный список горячих клавиш.<br>
       Крестик у окна сворачивает в трей — опрос новых назначений продолжает идти в фоне.
       ${state.isDeveloper ? "<br>Режим разработчика открывает правку чужих ролей/профиля/даты вступления/наград — на карточке коллеги (клик по тизеру команды)." : ""}
-    </p>
+    </div>
     <div class="sheet-actions"><button class="btn primary" data-close>Готово</button></div>
   `);
   overlay.querySelector("#s-theme").value = document.documentElement.dataset.theme || "dark";
