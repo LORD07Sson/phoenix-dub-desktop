@@ -10,6 +10,8 @@
 
 mod audio_qc;
 mod media_tools;
+#[cfg(windows)]
+mod mpv_embed;
 mod token_store;
 
 use std::collections::HashSet;
@@ -293,6 +295,102 @@ fn mt_concat_media(paths: Vec<String>, out_path: String) -> Result<String, Strin
 #[tauri::command(async)]
 fn mt_mux_media(tracks: Vec<media_tools::MuxTrack>, out_path: String) -> Result<(), String> {
     media_tools::mux_media(&tracks, &out_path)
+}
+
+// ---------- встроенный mpv-плеер (mpv_embed.rs, только Windows) ----------
+// Тела команд ветвятся по платформе, а не сами команды — иначе
+// `generate_handler!` ниже пришлось бы собирать двумя разными списками
+// под cfg(windows)/cfg(not(windows)), а этот проект и так никогда не
+// собирается не под Windows (ffmpeg.exe/ffprobe.exe/mpv.exe — не
+// кросс-платформенные бинарники); так хотя бы `cargo check` на другой ОС
+// не ломается на отсутствующих Win32-символах.
+
+#[tauri::command(async)]
+async fn mpv_create(app: tauri::AppHandle, x: i32, y: i32, width: i32, height: i32) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        mpv_embed::mpv_create(&app, mpv_embed::MpvBounds { x, y, width, height }).await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, x, y, width, height);
+        Err("Встроенный плеер поддерживается только на Windows.".into())
+    }
+}
+
+#[tauri::command(async)]
+async fn mpv_set_bounds(x: i32, y: i32, width: i32, height: i32) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        mpv_embed::mpv_set_bounds(mpv_embed::MpvBounds { x, y, width, height }).await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (x, y, width, height);
+        Err("Встроенный плеер поддерживается только на Windows.".into())
+    }
+}
+
+#[tauri::command(async)]
+async fn mpv_load(path: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        mpv_embed::mpv_load(&path).await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Err("Встроенный плеер поддерживается только на Windows.".into())
+    }
+}
+
+#[tauri::command(async)]
+async fn mpv_play() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        mpv_embed::mpv_play().await
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Встроенный плеер поддерживается только на Windows.".into())
+    }
+}
+
+#[tauri::command(async)]
+async fn mpv_pause() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        mpv_embed::mpv_pause().await
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Встроенный плеер поддерживается только на Windows.".into())
+    }
+}
+
+#[tauri::command(async)]
+async fn mpv_seek(seconds: f64) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        mpv_embed::mpv_seek(seconds).await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = seconds;
+        Err("Встроенный плеер поддерживается только на Windows.".into())
+    }
+}
+
+#[tauri::command(async)]
+async fn mpv_close() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        mpv_embed::mpv_close().await
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
 }
 
 // Обращение к хранилищу учётных данных ОС тоже блокирующее (на Linux —
@@ -599,6 +697,13 @@ fn main() {
             mt_extract_audio,
             mt_concat_media,
             mt_mux_media,
+            mpv_create,
+            mpv_set_bounds,
+            mpv_load,
+            mpv_play,
+            mpv_pause,
+            mpv_seek,
+            mpv_close,
         ])
         .setup(|app| {
             // Глобальная горячая клавиша — свернуть/показать окно из любого

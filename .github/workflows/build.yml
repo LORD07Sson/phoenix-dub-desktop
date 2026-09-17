@@ -131,6 +131,36 @@ jobs:
           test -s src-tauri/binaries/ffmpeg.exe || { echo "::error::ffmpeg.exe не найден в архиве"; exit 1; }
           test -s src-tauri/binaries/ffprobe.exe || { echo "::error::ffprobe.exe не найден в архиве"; exit 1; }
 
+      # mpv — настоящий видеоплеер внутри «Обрезки» (media-tools.js,
+      # mpv_embed.rs): встроен как нативное окно (--wid), не браузерный
+      # <video> — тот не декодирует HEVC/ProRes и т.п. без системных
+      # кодеков. Источник — тот же принцип, что у ffmpeg.exe выше:
+      # закреплённый (не "latest") дистрибутив с проверкой SHA256, чтобы
+      # апстрим не мог тихо подменить содержимое под тем же именем.
+      # d3dcompiler_43.dll лежит в архиве рядом и обязателен для рендер-
+      # бэкенда mpv — без него mpv.exe не запускается на части систем.
+      # 7-Zip на windows-latest идёт предустановленным (`7z` в PATH) —
+      # если это когда-нибудь перестанет быть так, здесь понадобится
+      # `choco install 7zip` шагом раньше.
+      - name: Скачать и проверить статичный mpv.exe
+        shell: bash
+        run: |
+          set -e
+          url="https://sourceforge.net/projects/mpv-player-windows/files/64bit/mpv-x86_64-20260830-git-e8673660ab.7z/download"
+          expected_sha256="464ab69b2248e7b592f0c27a927ffd1f016f7fa2d6d8b46b1a98254c5f2b670a"
+          curl -sL --max-time 180 -o mpv.7z "$url"
+          actual_sha256=$(sha256sum mpv.7z | cut -d' ' -f1)
+          if [ "$actual_sha256" != "$expected_sha256" ]; then
+            echo "::error::SHA256 не совпал — ожидали $expected_sha256, получили $actual_sha256"
+            exit 1
+          fi
+          7z x mpv.7z -ompv_extracted mpv.exe d3dcompiler_43.dll
+          cp mpv_extracted/mpv.exe src-tauri/binaries/mpv.exe
+          cp mpv_extracted/d3dcompiler_43.dll src-tauri/binaries/d3dcompiler_43.dll
+          rm -rf mpv.7z mpv_extracted
+          test -s src-tauri/binaries/mpv.exe || { echo "::error::mpv.exe не найден в архиве"; exit 1; }
+          test -s src-tauri/binaries/d3dcompiler_43.dll || { echo "::error::d3dcompiler_43.dll не найден в архиве"; exit 1; }
+
       # PHOENIX_UPDATE_TOKEN — fine-grained PAT с доступом только "Public
       # Repositories (read-only)" (см. main.rs: GITHUB_UPDATE_TOKEN,
       # option_env! читает её прямо здесь, во время сборки). Поднимает
@@ -163,6 +193,8 @@ jobs:
           cp src-tauri/target/release/phoenix-dub-desktop.exe pack_dir/
           cp src-tauri/binaries/ffmpeg.exe pack_dir/
           cp src-tauri/binaries/ffprobe.exe pack_dir/
+          cp src-tauri/binaries/mpv.exe pack_dir/
+          cp src-tauri/binaries/d3dcompiler_43.dll pack_dir/
           echo "Автосборка из main (commit ${{ github.sha }})." > release_notes.md
           vpk pack \
             --packId PhoenixDubDesktop \

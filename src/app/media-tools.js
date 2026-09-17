@@ -78,7 +78,7 @@ function removeFromPool(index) {
   filePool.splice(index, 1);
   const reindex = i => (i == null ? i : i === index ? null : i > index ? i - 1 : i);
 
-  if (cutState.path === removedPath) { cutState.path = null; cutState.info = null; cutState.poolIndex = null; }
+  if (cutState.path === removedPath) { cutState.path = null; cutState.info = null; cutState.poolIndex = null; closeCutMpv(); }
   else cutState.poolIndex = reindex(cutState.poolIndex);
 
   if (convertState.path === removedPath) { convertState.path = null; convertState.info = null; convertState.poolIndex = null; }
@@ -164,7 +164,121 @@ const cutState = {
   segments: [], // { start, end }
   markIn: null,
   markOut: null,
+  // Только для видео — аудиофайлы играют обычным <audio>, см. isVideo()
+  // ниже. lastKnownTime обновляется и оптимистично (сразу после клика/
+  // сика), и по событию "time-pos" от mpv (mpv-state, см. wireCutPanel) —
+  // раньше эту роль играл video.currentTime, mpv сам не даёт синхронный
+  // доступ к позиции, только асинхронные события по IPC.
+  mpvPaused: true,
+  lastKnownTime: 0,
 };
+
+// Путь, который сейчас реально загружен в mpv — null, если плеер не
+// поднят вовсе (аудио или файл ещё не выбран). Отдельно от cutState,
+// потому что переживает полный re-render #mt-body (renderActivePanel
+// перерисовывает всё содержимое на каждое действие — добавили сегмент,
+// отметили I/O — а окно/процесс mpv должны оставаться тем же самым, не
+// пересоздаваться на каждый клик).
+let cutMpvLoadedPath = null;
+let cutMpvUnlisten = null;
+
+function isVideoFile() {
+  return !!(cutState.info && cutState.info.video);
+}
+
+// Прямоугольник плейсхолдера в физических пикселях client area главного
+// окна — mpv-окно рисуется НАД этим div нативно (см. mpv_embed.rs),
+// поэтому HTML тут не рисует ничего своего, только резервирует место.
+// Предполагаем, что вебвью занимает весь client area главного окна без
+// смещения (decorations:true в tauri.conf.json — заголовок рисует ОС
+// СНАРУЖИ client area) — если на реальной машине окажется не так,
+// здесь нужна поправка на смещение.
+function videoSurfaceRect(root) {
+  const el = root.querySelector("#mt-cut-video-surface");
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return null;
+  const dpr = window.devicePixelRatio || 1;
+  return {
+    x: Math.round(r.left * dpr),
+    y: Math.round(r.top * dpr),
+    width: Math.round(r.width * dpr),
+    height: Math.round(r.height * dpr),
+  };
+}
+
+async function syncMpvBounds(root) {
+  const rect = videoSurfaceRect(root);
+  if (!rect) return;
+  try {
+    await invoke("mpv_create", rect);
+  } catch (e) {
+    toast(`Не удалось открыть видео-плеер: ${e}`, "error");
+  }
+}
+
+// Закрывает нативное окно/процесс mpv — обязательно перед сменой файла
+// на аудио, переключением на другую операцию и закрытием модалки:
+// иначе процесс/окно mpv переживают закрытую панель осиротевшими.
+async function closeCutMpv() {
+  if (cutMpvUnlisten) { cutMpvUnlisten(); cutMpvUnlisten = null; }
+  if (cutMpvLoadedPath == null) return;
+  cutMpvLoadedPath = null;
+  try { await invoke("mpv_close"); } catch { /* не критично при закрытии */ }
+}
+
+async function openCutMpv(root) {
+  await syncMpvBounds(root);
+  if (cutState.path !== cutMpvLoadedPath) {
+    cutMpvLoadedPath = cutState.path;
+    try {
+      await invoke("mpv_load", { path: cutState.path });
+      await invoke("mpv_play");
+      cutState.mpvPaused = false;
+    } catch (e) {
+      toast(`Не удалось загрузить видео в плеер: ${e}`, "error");
+    }
+  }
+  if (!cutMpvUnlisten) {
+    cutMpvUnlisten = await listen("mpv-state", event => {
+      const { name, data } = event.payload || {};
+      if (name === "time-pos" && typeof data === "number") {
+        cutState.lastKnownTime = data;
+        drawCutTimeline($("#mt-cut-timeline"));
+      } else if (name === "pause") {
+        cutState.mpvPaused = !!data;
+        const btn = $("#mt-cut-playpause");
+        if (btn) btn.textContent = cutState.mpvPaused ? "▶" : "⏸";
+      } else if (name === "exited") {
+        toast("Плеер mpv неожиданно завершился.", "error");
+        cutMpvLoadedPath = null;
+      }
+    });
+  }
+}
+
+async function mpvTogglePlay(root) {
+  cutState.mpvPaused = !cutState.mpvPaused;
+  const btn = root.querySelector("#mt-cut-playpause");
+  if (btn) btn.textContent = cutState.mpvPaused ? "▶" : "⏸";
+  try {
+    await invoke(cutState.mpvPaused ? "mpv_pause" : "mpv_play");
+  } catch (e) {
+    toast(`Плеер: ${e}`, "error");
+  }
+}
+
+async function seekTo(root, seconds) {
+  const clamped = Math.max(0, Math.min(cutState.info.duration, seconds));
+  cutState.lastKnownTime = clamped;
+  drawCutTimeline(root.querySelector("#mt-cut-timeline"));
+  if (isVideoFile()) {
+    try { await invoke("mpv_seek", { seconds: clamped }); } catch (e) { toast(`Плеер: ${e}`, "error"); }
+  } else {
+    const media = root.querySelector("#mt-cut-audio");
+    if (media) media.currentTime = clamped;
+  }
+}
 
 function cutPanelHtml() {
   const picker = `<div class="mt-file-row">${poolSelectHtml("mt-cut-pick", cutState.poolIndex, f => f.info && (f.info.video || f.info.audio))}${cutState.path ? infoLineHtml(cutState.info) : ""}</div>`;
@@ -179,7 +293,13 @@ function cutPanelHtml() {
   }
   return `
     ${picker}
-    ${cutState.info && cutState.info.video ? `<video class="mt-video" id="mt-cut-video" src="${esc(convertFileSrc(cutState.path))}" controls></video>` : `<audio id="mt-cut-video" src="${esc(convertFileSrc(cutState.path))}" controls style="width:100%;"></audio>`}
+    ${isVideoFile()
+      ? `<div class="mt-video" id="mt-cut-video-surface"></div>
+         <div class="mt-video-controls">
+           <button class="icon-btn" id="mt-cut-playpause" title="Play/pause">${cutState.mpvPaused ? "▶" : "⏸"}</button>
+           <span class="mt-info-line">mpv</span>
+         </div>`
+      : `<audio id="mt-cut-audio" src="${esc(convertFileSrc(cutState.path))}" controls style="width:100%;"></audio>`}
     <canvas class="mt-timeline" id="mt-cut-timeline"></canvas>
     <div class="mt-io-row">
       <button class="btn" id="mt-mark-in">⏮ I — отметить начало</button>
@@ -256,17 +376,19 @@ function drawCutTimeline(canvas) {
   drawMark(cutState.markIn, "#6bc694");
   drawMark(cutState.markOut, "#ff8b82");
 
-  // Плейхед — текущая позиция видео/аудио.
-  const media = $("#mt-cut-video");
-  if (media) {
-    const x = (media.currentTime / duration) * cssWidth;
-    ctx.strokeStyle = "#ffc773";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, cssHeight);
-    ctx.stroke();
-  }
+  // Плейхед — текущая позиция. Для видео это cutState.lastKnownTime
+  // (обновляется по событию mpv-state/time-pos и оптимистично при сике —
+  // у mpv, в отличие от <video>.currentTime, нет синхронного доступа к
+  // позиции), для аудио — сам элемент <audio> даёт currentTime напрямую.
+  const audioEl = $("#mt-cut-audio");
+  const t = audioEl ? audioEl.currentTime : cutState.lastKnownTime;
+  const x = (t / duration) * cssWidth;
+  ctx.strokeStyle = "#ffc773";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x, cssHeight);
+  ctx.stroke();
 }
 
 function wireCutPanel(root) {
@@ -274,12 +396,19 @@ function wireCutPanel(root) {
   if (pickSel) pickSel.addEventListener("change", async () => {
     if (pickSel.value === "") return;
     const entry = filePool[Number(pickSel.value)];
+    const wasVideo = isVideoFile();
     cutState.poolIndex = Number(pickSel.value);
     cutState.path = entry.path;
     cutState.info = entry.info;
     cutState.segments = [];
     cutState.markIn = null;
     cutState.markOut = null;
+    cutState.lastKnownTime = 0;
+    cutState.mpvPaused = true;
+    // Сменили видео на аудио (или наоборот) — старое mpv-окно неоткуда
+    // взять новый смысл, закрываем; переоткроется в openCutMpv ниже, если
+    // новый файл снова видео.
+    if (wasVideo && !(entry.info && entry.info.video)) await closeCutMpv();
     try {
       cutState.keyframes = entry.info && entry.info.video ? await invoke("mt_probe_keyframes", { path: entry.path }) : [];
     } catch {
@@ -289,26 +418,50 @@ function wireCutPanel(root) {
   });
   if (!cutState.path) return;
 
-  const media = root.querySelector("#mt-cut-video");
   const canvas = root.querySelector("#mt-cut-timeline");
+  const audioEl = root.querySelector("#mt-cut-audio");
   drawCutTimeline(canvas);
-  if (media) {
-    media.addEventListener("timeupdate", () => drawCutTimeline(canvas));
-    media.addEventListener("loadedmetadata", () => drawCutTimeline(canvas));
+
+  if (isVideoFile()) {
+    openCutMpv(root);
+    const playBtn = root.querySelector("#mt-cut-playpause");
+    if (playBtn) playBtn.addEventListener("click", () => mpvTogglePlay(root));
+    // Плейсхолдер пересобирается на каждый re-render (renderActivePanel
+    // перерисовывает всё #mt-body) — ResizeObserver навешиваем на новый
+    // узел каждый раз; старый просто перестаёт получать события вместе
+    // с удалённым узлом, копиться ему не на чём.
+    const surface = root.querySelector("#mt-cut-video-surface");
+    if (surface && typeof ResizeObserver !== "undefined") {
+      new ResizeObserver(() => syncMpvBounds(root)).observe(surface);
+    }
+    // window resize/scroll — глобальные, а не на плейсхолдер, поэтому
+    // вешаем один раз на весь модуль-сессию (root = overlay модалки,
+    // он не пересобирается на re-render, только #mt-body внутри него) —
+    // data-атрибут как флаг «уже подписаны», тот же приём, что и в
+    // board.js: wireBoardCards (data-wired guard).
+    if (!root.dataset.mpvResizeWired) {
+      root.dataset.mpvResizeWired = "1";
+      window.addEventListener("resize", () => syncMpvBounds(root));
+      root.addEventListener("scroll", () => syncMpvBounds(root), true);
+    }
+  } else if (audioEl) {
+    audioEl.addEventListener("timeupdate", () => drawCutTimeline(canvas));
+    audioEl.addEventListener("loadedmetadata", () => drawCutTimeline(canvas));
   }
+
   canvas.addEventListener("click", e => {
-    if (!media || !cutState.info.duration) return;
+    if (!cutState.info.duration) return;
     const rect = canvas.getBoundingClientRect();
     const frac = (e.clientX - rect.left) / rect.width;
-    media.currentTime = Math.max(0, Math.min(cutState.info.duration, frac * cutState.info.duration));
+    seekTo(root, frac * cutState.info.duration);
   });
 
   root.querySelector("#mt-mark-in").addEventListener("click", () => {
-    cutState.markIn = media ? media.currentTime : 0;
+    cutState.markIn = isVideoFile() ? cutState.lastKnownTime : (audioEl ? audioEl.currentTime : 0);
     renderActivePanel(root);
   });
   root.querySelector("#mt-mark-out").addEventListener("click", () => {
-    cutState.markOut = media ? media.currentTime : 0;
+    cutState.markOut = isVideoFile() ? cutState.lastKnownTime : (audioEl ? audioEl.currentTime : 0);
     renderActivePanel(root);
   });
   root.querySelector("#mt-add-segment").addEventListener("click", () => {
@@ -331,7 +484,7 @@ function wireCutPanel(root) {
   root.querySelectorAll("[data-seek-segment]").forEach(btn => {
     btn.addEventListener("click", () => {
       const s = cutState.segments[Number(btn.dataset.seekSegment)];
-      if (media && s) media.currentTime = s.start;
+      if (s) seekTo(root, s.start);
     });
   });
   root.querySelectorAll("[data-remove-segment]").forEach(btn => {
@@ -822,9 +975,16 @@ export function openMediaTools() {
     <div id="mt-body"></div>
     <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
   `, "wide");
-  overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  // closeCutMpv() — на закрытии модалки и на уходе со вкладки «Обрезка»
+  // (переключились на «Конвертацию» — плейсхолдер видео исчез из DOM,
+  // нативное окно/процесс mpv без него — осиротевшая утечка).
+  overlay.querySelector("[data-close]").addEventListener("click", async () => {
+    await closeCutMpv();
+    overlay.remove();
+  });
   overlay.querySelectorAll(".mt-op-tab").forEach(btn => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
+      if (activeOp === "cut" && btn.dataset.op !== "cut") await closeCutMpv();
       activeOp = btn.dataset.op;
       overlay.querySelectorAll(".mt-op-tab").forEach(b => b.classList.toggle("active", b === btn));
       renderActivePanel(overlay);
