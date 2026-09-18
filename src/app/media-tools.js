@@ -11,8 +11,16 @@
 // видна на любой вкладке, а каждая операция берёт нужный(е) файл(ы) из
 // него через <select>. Так один и тот же файл (например, для обрезки
 // и следом конвертации) не нужно выбирать заново на каждой вкладке.
+//
+// Диалоги выбора файлов открывает Rust (pickInputFiles/pickOutputFile/
+// pickOutputDir в tauri.js), а не JS-плагин: бэкенд должен САМ знать,
+// какие пути пользователь разрешил трогать, иначе любая команда
+// становится «прочитай/перезапиши что скажут» — см. file_scope.rs.
 
-import { invoke, openDialog, saveDialog, convertFileSrc, revealInFolder, listen } from "./tauri.js";
+import {
+  invoke, pickInputFiles, pickOutputFile, pickOutputDir,
+  convertFileSrc, revealInFolder, listen,
+} from "./tauri.js";
 import { openSheet, toast } from "./api.js";
 import { $, esc, formatTime } from "./utils.js";
 import { tagLogger } from "./applog.js";
@@ -36,6 +44,15 @@ function extOf(path) {
   return m ? m[1].toLowerCase() : "";
 }
 
+// Длительность с долями секунды — на укладке дубляжа «0:04» и «0:04.7»
+// это разные места, а formatTime() из utils.js округляет до секунды.
+function formatTimePrecise(sec) {
+  if (!Number.isFinite(sec)) return "0:00.0";
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s < 10 ? "0" : ""}${s.toFixed(1)}`;
+}
+
 // ============================================================
 // Общий пул файлов — раньше каждая вкладка (Обрезка/Конвертация/Аудио/
 // Склейка/Муксинг) сама открывала диалог выбора файла, и один и тот же
@@ -51,9 +68,7 @@ const filePool = []; // { path, info } — info может быть null (нап
 // (см. tauri.conf.json: security.assetProtocol) — делаем на добавление в
 // пул один раз, не на каждый выбор в конкретной вкладке.
 async function addFilesToPool(extensions) {
-  const picked = await openDialog({ multiple: true, filters: [{ name: "Медиа", extensions }] });
-  if (!picked) return [];
-  const list = Array.isArray(picked) ? picked : [picked];
+  const list = await pickInputFiles({ multiple: true, filters: [{ name: "Медиа", extensions }] });
   const indices = [];
   for (const path of list) {
     const existing = filePool.findIndex(f => f.path === path);
@@ -145,12 +160,101 @@ function poolSelectHtml(selectId, selectedIndex, filterFn) {
 function infoLineHtml(info) {
   const parts = [`⏱ ${formatTime(info.duration)}`];
   if (info.video) {
-    parts.push(`🎞 ${esc(info.video.codec)}${info.video.width ? ` ${info.video.width}×${info.video.height}` : ""}`);
+    parts.push(`🎞 ${esc(info.video.codec)}${info.video.width ? ` ${info.video.width}×${info.video.height}` : ""}${info.video.fps ? ` · ${info.video.fps.toFixed(2)} fps` : ""}`);
   }
   if (info.audio) {
-    parts.push(`🔊 ${esc(info.audio.codec)}${info.audio.channels ? ` · ${info.audio.channels}ch` : ""}`);
+    parts.push(`🔊 ${esc(info.audio.codec)}${info.audio.channels ? ` · ${info.audio.channels}ch` : ""}${info.audio.sampleRate ? ` · ${Math.round(info.audio.sampleRate / 1000)} кГц` : ""}`);
   }
   return `<div class="mt-info-line">${parts.join(" · ")}</div>`;
+}
+
+// ============================================================
+// Общий бегунок длинных операций.
+//
+// Раньше прогресс был только у конвертации, а остановить начатое было
+// нельзя вовсе: единственным способом прервать сорокаминутный транскод
+// оставалось закрыть приложение — и даже это оставляло ffmpeg дожёвывать
+// файл в фоне. Теперь любая операция идёт через runJob: одна полоса с
+// подписью текущего прохода («Сегмент 3 из 7», «Измеряю громкость») и
+// кнопка «Отмена», которая доходит до самого процесса (mt_cancel).
+// ============================================================
+
+// Параллельно две операции ffmpeg запускать нечем (бэкенд держит один
+// текущий процесс) — и незачем: они делят диск и процессор.
+let jobRunning = false;
+
+function jobHtml() {
+  return `
+    <div class="mt-job" id="mt-job" hidden>
+      <div class="mt-job-head">
+        <span class="mt-job-label" id="mt-job-label"></span>
+        <span class="mt-job-pct" id="mt-job-pct">0%</span>
+      </div>
+      <div class="update-progress-track"><div class="update-progress-fill" id="mt-job-fill"></div></div>
+      <button class="btn ghost mt-job-cancel" id="mt-job-cancel" type="button">✕ Отмена</button>
+    </div>`;
+}
+
+/**
+ * Выполняет длинную операцию с общей полосой прогресса и отменой.
+ * button — кнопка запуска (блокируется и меняет подпись на время работы).
+ */
+async function runJob(overlay, { button, busyLabel, run }) {
+  if (jobRunning) {
+    toast("Дождитесь окончания текущей операции.", "error");
+    return null;
+  }
+  const box = overlay.querySelector("#mt-job");
+  const fill = overlay.querySelector("#mt-job-fill");
+  const pct = overlay.querySelector("#mt-job-pct");
+  const label = overlay.querySelector("#mt-job-label");
+  const cancelBtn = overlay.querySelector("#mt-job-cancel");
+
+  const idleLabel = button ? button.textContent : "";
+  jobRunning = true;
+  if (button) { button.disabled = true; button.textContent = busyLabel; }
+  box.hidden = false;
+  fill.style.width = "0%";
+  pct.textContent = "0%";
+  label.textContent = busyLabel;
+  cancelBtn.disabled = false;
+
+  const onCancel = async () => {
+    cancelBtn.disabled = true;
+    label.textContent = "Останавливаю…";
+    try { await invoke("mt_cancel"); } catch (e) { toast(String(e), "error"); cancelBtn.disabled = false; }
+  };
+  cancelBtn.addEventListener("click", onCancel);
+
+  const unlisten = await listen("mediatool-progress", event => {
+    const { fraction = 0, label: stage = "" } = event.payload || {};
+    const percent = Math.round(fraction * 100);
+    fill.style.width = `${percent}%`;
+    pct.textContent = `${percent}%`;
+    if (stage) label.textContent = stage;
+  });
+
+  try {
+    return await run();
+  } catch (e) {
+    // Отмена — это не сбой: пользователь сам нажал кнопку, ругаться
+    // красным тостом на собственное действие незачем.
+    if (String(e).includes("отменена")) toast("Операция отменена.");
+    else toast(String(e), "error");
+    return null;
+  } finally {
+    unlisten();
+    cancelBtn.removeEventListener("click", onCancel);
+    box.hidden = true;
+    jobRunning = false;
+    if (button) { button.disabled = false; button.textContent = idleLabel; }
+  }
+}
+
+// Успешный результат — с кнопкой «показать в папке», один хелпер на все
+// операции вместо пяти одинаковых блоков.
+function toastDone(text, path) {
+  toast(text, "success", { label: "📂 Показать в папке", onClick: () => revealInFolder(path) });
 }
 
 // ============================================================
@@ -174,26 +278,38 @@ const cutState = {
   // доступ к позиции, только асинхронные события по IPC.
   mpvPaused: true,
   lastKnownTime: 0,
+  // Длительность от самого mpv точнее, чем от ffprobe, на файлах с
+  // кривым контейнером; ffprobe-значение остаётся запасным.
+  mpvDuration: null,
+  // Громкость/скорость живут между файлами: выставил один раз — работает
+  // дальше, а не сбрасывается на каждый новый дубль.
+  volume: 100,
+  muted: false,
+  speed: 1,
 };
+
+function cutDuration() {
+  return cutState.mpvDuration || (cutState.info && cutState.info.duration) || 0;
+}
 
 // Путь, который сейчас реально загружен в mpv — null, если плеер не
 // поднят вовсе (аудио или файл ещё не выбран). Отдельно от cutState,
-// потому что переживает полный re-render #mt-body (renderActivePanel
-// перерисовывает всё содержимое на каждое действие — добавили сегмент,
-// отметили I/O — а окно/процесс mpv должны оставаться тем же самым, не
-// пересоздаваться на каждый клик).
+// потому что переживает перерисовку панели: нативное окно/процесс mpv
+// должны оставаться теми же самыми, не пересоздаваться на каждый клик.
 let cutMpvLoadedPath = null;
 let cutMpvUnlisten = null;
-// ResizeObserver, следящий за плейсхолдером видео — не только "старый
-// узел удалили и он тихо умер", как гласил прежний комментарий здесь:
-// по спецификации ResizeObserver при отключении/удалении наблюдаемого
-// элемента шлёт ЕЩЁ ОДИН callback с нулевым размером, а сам инстанс
-// живёт, пока explicitly не .disconnect(). Без disconnect() каждый
-// re-render (клик I/O, добавление/удаление сегмента — все они зовут
-// renderActivePanel) плодил новый ResizeObserver поверх старых —
-// подтверждено логами: mpv_create вызывался 2-3 раза на один
-// openCutMpv и число росло за сессию.
+// ResizeObserver, следящий за плейсхолдером видео — по спецификации при
+// отключении/удалении наблюдаемого элемента он шлёт ЕЩЁ ОДИН callback с
+// нулевым размером, а сам инстанс живёт, пока explicitly не
+// .disconnect(). Без disconnect() каждая перерисовка плодила новый
+// ResizeObserver поверх старых (подтверждено логами: mpv_create
+// вызывался 2-3 раза на один openCutMpv и число росло за сессию).
 let cutMpvResizeObserver = null;
+// Обработчик resize окна вешается на window, а не на плейсхолдер, и
+// потому НЕ умирает вместе с закрытой модалкой: раньше каждое открытие
+// инструментов добавляло ещё один, навсегда удерживая ссылку на уже
+// удалённый оверлей. Держим ссылку, чтобы снять при закрытии.
+let cutMpvWindowResizeHandler = null;
 
 function isVideoFile() {
   return !!(cutState.info && cutState.info.video);
@@ -208,15 +324,9 @@ function isVideoFile() {
 // здесь нужна поправка на смещение.
 function videoSurfaceRect(root) {
   const el = root.querySelector("#mt-cut-video-surface");
-  if (!el) {
-    mpvLog.warn("videoSurfaceRect: #mt-cut-video-surface не найден в root");
-    return null;
-  }
+  if (!el) return null;
   const r = el.getBoundingClientRect();
-  if (r.width <= 0 || r.height <= 0) {
-    mpvLog.warn("videoSurfaceRect: нулевой размер плейсхолдера", r);
-    return null;
-  }
+  if (r.width <= 0 || r.height <= 0) return null;
   const dpr = window.devicePixelRatio || 1;
   return {
     x: Math.round(r.left * dpr),
@@ -227,67 +337,115 @@ function videoSurfaceRect(root) {
 }
 
 async function syncMpvBounds(root) {
+  // Модалку могли уже закрыть — тогда двигать нечего, а не жаловаться
+  // в лог на каждый тик ResizeObserver.
+  if (!root.isConnected || cutMpvLoadedPath == null) return;
   const rect = videoSurfaceRect(root);
   if (!rect) return;
-  mpvLog.info("mpv_create ->", rect);
   try {
-    await invoke("mpv_create", rect);
-    mpvLog.info("mpv_create ok");
+    await invoke("mpv_set_bounds", rect);
   } catch (e) {
-    mpvLog.error("mpv_create failed", e);
-    toast(`Не удалось открыть видео-плеер: ${e}`, "error");
+    mpvLog.warn("mpv_set_bounds не прошёл", e);
   }
 }
 
 // Закрывает нативное окно/процесс mpv — обязательно перед сменой файла
-// на аудио, переключением на другую операцию и закрытием модалки:
-// иначе процесс/окно mpv переживают закрытую панель осиротевшими.
+// на аудио, переключением на другую операцию и закрытием модалки (любым
+// способом, включая Escape и клик по фону): иначе процесс и нативное
+// окно переживают закрытую панель и остаются висеть ПОВЕРХ интерфейса —
+// чёрный прямоугольник с чужим видео на весь список отчётов.
 async function closeCutMpv() {
   if (cutMpvUnlisten) { cutMpvUnlisten(); cutMpvUnlisten = null; }
   if (cutMpvResizeObserver) { cutMpvResizeObserver.disconnect(); cutMpvResizeObserver = null; }
-  if (cutMpvLoadedPath == null) return;
+  if (cutMpvWindowResizeHandler) {
+    window.removeEventListener("resize", cutMpvWindowResizeHandler);
+    cutMpvWindowResizeHandler = null;
+  }
   cutMpvLoadedPath = null;
   try { await invoke("mpv_close"); } catch { /* не критично при закрытии */ }
 }
 
 async function openCutMpv(root) {
-  mpvLog.info("openCutMpv", cutState.path);
-  await syncMpvBounds(root);
+  const rect = videoSurfaceRect(root);
+  if (!rect) { mpvLog.warn("плейсхолдер видео ещё не разложен — плеер не создаём"); return; }
+  mpvLog.info("mpv_create", rect);
+  try {
+    await invoke("mpv_create", rect);
+  } catch (e) {
+    mpvLog.error("mpv_create failed", e);
+    toast(`Не удалось открыть видео-плеер: ${e}`, "error");
+    return;
+  }
   if (cutState.path !== cutMpvLoadedPath) {
     cutMpvLoadedPath = cutState.path;
     try {
       await invoke("mpv_load", { path: cutState.path });
+      await invoke("mpv_set_volume", { volume: cutState.volume });
+      await invoke("mpv_set_mute", { mute: cutState.muted });
+      await invoke("mpv_set_speed", { speed: cutState.speed });
       await invoke("mpv_play");
       cutState.mpvPaused = false;
-      mpvLog.info("mpv_load + mpv_play ok");
     } catch (e) {
       mpvLog.error("mpv_load/mpv_play failed", e);
       toast(`Не удалось загрузить видео в плеер: ${e}`, "error");
     }
   }
   if (!cutMpvUnlisten) {
-    cutMpvUnlisten = await listen("mpv-state", event => {
-      const { name, data } = event.payload || {};
-      if (name === "time-pos" && typeof data === "number") {
-        cutState.lastKnownTime = data;
-        drawCutTimeline($("#mt-cut-timeline"));
-      } else if (name === "pause") {
-        cutState.mpvPaused = !!data;
-        const btn = $("#mt-cut-playpause");
-        if (btn) btn.textContent = cutState.mpvPaused ? "▶" : "⏸";
-      } else if (name === "exited") {
-        mpvLog.error("процесс mpv завершился неожиданно (пайп закрылся)");
-        toast("Плеер mpv неожиданно завершился.", "error");
-        cutMpvLoadedPath = null;
-      }
-    });
+    cutMpvUnlisten = await listen("mpv-state", event => onMpvState(root, event.payload || {}));
   }
+}
+
+function onMpvState(root, { name, data }) {
+  switch (name) {
+    case "time-pos":
+      if (typeof data === "number") {
+        cutState.lastKnownTime = data;
+        refreshCutPlayhead(root);
+      }
+      break;
+    case "duration":
+      if (typeof data === "number" && data > 0) {
+        cutState.mpvDuration = data;
+        refreshCutPlayhead(root);
+      }
+      break;
+    case "pause":
+      cutState.mpvPaused = !!data;
+      updatePlayButton(root);
+      break;
+    case "eof-reached":
+      if (data) { cutState.mpvPaused = true; updatePlayButton(root); }
+      break;
+    case "volume":
+      if (typeof data === "number") cutState.volume = data;
+      break;
+    case "speed":
+      if (typeof data === "number") cutState.speed = data;
+      break;
+    case "file-error":
+      toast(`Плеер не смог открыть файл: ${data}`, "error");
+      break;
+    case "exited":
+      // Бэкенд уже убрал своё состояние — следующий выбор файла поднимет
+      // плеер заново, поэтому здесь только сбрасываем свою половину.
+      cutMpvLoadedPath = null;
+      cutState.mpvPaused = true;
+      updatePlayButton(root);
+      toast("Плеер mpv неожиданно завершился.", "error");
+      break;
+    default:
+      break;
+  }
+}
+
+function updatePlayButton(root) {
+  const btn = root.querySelector("#mt-cut-playpause");
+  if (btn) btn.textContent = cutState.mpvPaused ? "▶" : "⏸";
 }
 
 async function mpvTogglePlay(root) {
   cutState.mpvPaused = !cutState.mpvPaused;
-  const btn = root.querySelector("#mt-cut-playpause");
-  if (btn) btn.textContent = cutState.mpvPaused ? "▶" : "⏸";
+  updatePlayButton(root);
   try {
     await invoke(cutState.mpvPaused ? "mpv_pause" : "mpv_play");
   } catch (e) {
@@ -295,16 +453,58 @@ async function mpvTogglePlay(root) {
   }
 }
 
+async function frameStep(root, forward) {
+  // Покадровый шаг у mpv всегда ставит на паузу — отражаем это в кнопке,
+  // иначе она врёт до следующего события.
+  cutState.mpvPaused = true;
+  updatePlayButton(root);
+  try { await invoke("mpv_frame_step", { forward }); } catch (e) { toast(`Плеер: ${e}`, "error"); }
+}
+
 async function seekTo(root, seconds) {
-  const clamped = Math.max(0, Math.min(cutState.info.duration, seconds));
+  const clamped = Math.max(0, Math.min(cutDuration() || seconds, seconds));
   cutState.lastKnownTime = clamped;
-  drawCutTimeline(root.querySelector("#mt-cut-timeline"));
+  refreshCutPlayhead(root);
   if (isVideoFile()) {
     try { await invoke("mpv_seek", { seconds: clamped }); } catch (e) { toast(`Плеер: ${e}`, "error"); }
   } else {
     const media = root.querySelector("#mt-cut-audio");
     if (media) media.currentTime = clamped;
   }
+}
+
+const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
+
+function playerBarHtml() {
+  return `
+    <div class="mt-player-bar">
+      <button class="icon-btn" id="mt-cut-frame-back" title="Кадр назад (,)">⯇|</button>
+      <button class="icon-btn mt-play" id="mt-cut-playpause" title="Play/pause (пробел)">${cutState.mpvPaused ? "▶" : "⏸"}</button>
+      <button class="icon-btn" id="mt-cut-frame-fwd" title="Кадр вперёд (.)">|⯈</button>
+      <span class="mt-time" id="mt-cut-time">0:00.0 / 0:00.0</span>
+      <span class="mt-player-spacer"></span>
+      <button class="icon-btn" id="mt-cut-mute" title="Без звука (m)">${cutState.muted ? "🔇" : "🔊"}</button>
+      <input type="range" id="mt-cut-volume" class="mt-volume" min="0" max="130" step="1" value="${cutState.volume}" title="Громкость">
+      <select id="mt-cut-speed" class="mt-speed" title="Скорость воспроизведения">
+        ${SPEED_OPTIONS.map(v => `<option value="${v}" ${v === cutState.speed ? "selected" : ""}>${v}×</option>`).join("")}
+      </select>
+    </div>`;
+}
+
+function segmentListHtml() {
+  if (!cutState.segments.length) {
+    return `<div class="no-assignee">Пока нет сегментов — отметьте I/O и добавьте.</div>`;
+  }
+  const total = cutState.segments.reduce((sum, s) => sum + (s.end - s.start), 0);
+  return cutState.segments.map((s, i) => `
+    <div class="mt-segment-row" data-i="${i}">
+      <span>${i + 1}.</span>
+      <span>${formatTimePrecise(s.start)} – ${formatTimePrecise(s.end)}</span>
+      <span class="mt-segment-dur">(${formatTimePrecise(s.end - s.start)})</span>
+      <button class="icon-btn" data-seek-segment="${i}" title="Перейти">▶</button>
+      <button class="icon-btn" data-remove-segment="${i}" title="Удалить">✕</button>
+    </div>`).join("")
+    + `<div class="mt-info-line">Итого к экспорту: ${formatTimePrecise(total)}</div>`;
 }
 
 function cutPanelHtml() {
@@ -321,75 +521,89 @@ function cutPanelHtml() {
   return `
     ${picker}
     ${isVideoFile()
-      ? `<div class="mt-video" id="mt-cut-video-surface"></div>
-         <div class="mt-video-controls">
-           <button class="icon-btn" id="mt-cut-playpause" title="Play/pause">${cutState.mpvPaused ? "▶" : "⏸"}</button>
-           <span class="mt-info-line">mpv</span>
-         </div>`
+      ? `<div class="mt-video" id="mt-cut-video-surface"></div>${playerBarHtml()}`
       : `<audio id="mt-cut-audio" src="${esc(convertFileSrc(cutState.path))}" controls style="width:100%;"></audio>`}
     <canvas class="mt-timeline" id="mt-cut-timeline"></canvas>
     <div class="mt-io-row">
-      <button class="btn" id="mt-mark-in">⏮ I — отметить начало</button>
-      <span id="mt-mark-in-val">${cutState.markIn == null ? "—" : formatTime(cutState.markIn)}</span>
-      <button class="btn" id="mt-mark-out">⏭ O — отметить конец</button>
-      <span id="mt-mark-out-val">${cutState.markOut == null ? "—" : formatTime(cutState.markOut)}</span>
+      <button class="btn" id="mt-mark-in">⏮ I — начало</button>
+      <span id="mt-mark-in-val">—</span>
+      <button class="btn" id="mt-mark-out">⏭ O — конец</button>
+      <span id="mt-mark-out-val">—</span>
       <button class="btn primary" id="mt-add-segment">+ Добавить сегмент</button>
     </div>
-    <div class="mt-segment-list" id="mt-segment-list">
-      ${cutState.segments.length ? cutState.segments.map((s, i) => `
-        <div class="mt-segment-row" data-i="${i}">
-          <span>${i + 1}.</span>
-          <span>${formatTime(s.start)} – ${formatTime(s.end)}</span>
-          <span class="mt-segment-dur">(${formatTime(s.end - s.start)})</span>
-          <button class="icon-btn" data-seek-segment="${i}" title="Перейти">▶</button>
-          <button class="icon-btn" data-remove-segment="${i}" title="Удалить">✕</button>
-        </div>`).join("") : `<div class="no-assignee">Пока нет сегментов — отметьте I/O и добавьте.</div>`}
-    </div>
+    <div class="mt-segment-list" id="mt-segment-list"></div>
     <div class="mt-export-row">
       <label><input type="checkbox" id="mt-keep-separate" checked> Экспортировать сегменты отдельно</label>
       <label><input type="checkbox" id="mt-merge"> Склеить всё в один файл</label>
-      <button class="btn primary" id="mt-cut-export" ${cutState.segments.length ? "" : "disabled"}>✂ Экспортировать</button>
+      <button class="btn primary" id="mt-cut-export">✂ Экспортировать</button>
     </div>
-    <div class="update-progress-track" id="mt-cut-progress-track" hidden><div class="update-progress-fill" id="mt-cut-progress-fill"></div></div>
+    <div class="mt-hotkeys">Пробел — play/pause · I / O — метки · , / . — кадр назад/вперёд · ← → — ±1 с (с Shift ±10 с) · Enter — добавить сегмент</div>
   `;
 }
 
 function drawCutTimeline(canvas) {
-  if (!canvas || !cutState.info) return;
+  if (!canvas) return;
+  const duration = cutDuration();
+  if (!duration) return;
   const dpr = window.devicePixelRatio || 1;
   const cssWidth = canvas.clientWidth || 560;
-  const cssHeight = 44;
+  const cssHeight = 56;
   canvas.width = Math.round(cssWidth * dpr);
   canvas.height = Math.round(cssHeight * dpr);
   canvas.style.height = `${cssHeight}px`;
   const ctx = canvas.getContext("2d");
-  ctx.scale(dpr, dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-  const duration = cutState.info.duration || 1;
+  const trackTop = cssHeight / 2 - 3;
   ctx.fillStyle = "#251a20";
-  ctx.fillRect(0, cssHeight / 2 - 3, cssWidth, 6);
+  ctx.fillRect(0, trackTop, cssWidth, 6);
 
   // Сегменты — заливка полосой во всю высоту.
   cutState.segments.forEach(s => {
     const x1 = (s.start / duration) * cssWidth;
     const x2 = (s.end / duration) * cssWidth;
     ctx.fillStyle = "rgba(255, 106, 77, .35)";
-    ctx.fillRect(x1, 4, Math.max(1.5, x2 - x1), cssHeight - 8);
+    ctx.fillRect(x1, 4, Math.max(1.5, x2 - x1), cssHeight - 20);
   });
 
-  // Засечки опорных кадров — тонкие вертикальные штрихи.
+  // Незакоммиченный интервал между метками — видно, что именно уедет в
+  // сегмент, ещё до нажатия «Добавить».
+  if (cutState.markIn != null && cutState.markOut != null) {
+    const a = Math.min(cutState.markIn, cutState.markOut);
+    const b = Math.max(cutState.markIn, cutState.markOut);
+    ctx.fillStyle = "rgba(107, 198, 148, .18)";
+    ctx.fillRect((a / duration) * cssWidth, 4, Math.max(1.5, ((b - a) / duration) * cssWidth), cssHeight - 20);
+  }
+
+  // Засечки опорных кадров — тонкие вертикальные штрихи. На длинном
+  // видео их тысячи; рисуем не больше одной на пиксель, иначе нижняя
+  // полоса превращается в сплошную заливку и перестаёт что-либо значить.
   ctx.strokeStyle = "rgba(255,255,255,.25)";
   ctx.lineWidth = 1;
+  let lastX = -2;
   cutState.keyframes.forEach(k => {
-    const x = (k / duration) * cssWidth;
+    const x = Math.round((k / duration) * cssWidth);
+    if (x - lastX < 2) return;
+    lastX = x;
     ctx.beginPath();
-    ctx.moveTo(x, cssHeight - 8);
-    ctx.lineTo(x, cssHeight);
+    ctx.moveTo(x, cssHeight - 20);
+    ctx.lineTo(x, cssHeight - 12);
     ctx.stroke();
   });
 
-  // Незакоммиченные метки I/O.
+  // Шкала времени — раньше таймлайн был безразмерной полосой без единой
+  // подписи, и понять, где на ней 3 минуты, было нельзя.
+  const stepSec = niceTimeStep(duration, cssWidth);
+  ctx.fillStyle = "rgba(255,255,255,.45)";
+  ctx.font = "10px ui-monospace, monospace";
+  ctx.textBaseline = "bottom";
+  for (let t = 0; t <= duration; t += stepSec) {
+    const x = (t / duration) * cssWidth;
+    ctx.fillRect(x, cssHeight - 12, 1, 4);
+    if (x < cssWidth - 28) ctx.fillText(formatTime(t), x + 2, cssHeight - 1);
+  }
+
   const drawMark = (t, color) => {
     if (t == null) return;
     const x = (t / duration) * cssWidth;
@@ -397,7 +611,7 @@ function drawCutTimeline(canvas) {
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, cssHeight);
+    ctx.lineTo(x, cssHeight - 12);
     ctx.stroke();
   };
   drawMark(cutState.markIn, "#6bc694");
@@ -414,8 +628,83 @@ function drawCutTimeline(canvas) {
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(x, 0);
-  ctx.lineTo(x, cssHeight);
+  ctx.lineTo(x, cssHeight - 12);
   ctx.stroke();
+}
+
+// Шаг подписей шкалы: круглое число, при котором подписи не сливаются
+// (примерно одна на 70 пикселей).
+function niceTimeStep(duration, width) {
+  const target = duration / Math.max(1, Math.floor(width / 70));
+  const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+  return steps.find(s => s >= target) || 3600;
+}
+
+// Перерисовка только «живых» частей панели. Полный re-render (который
+// был раньше на каждый клик) пересобирал и плейсхолдер видео — то есть
+// на каждую метку I/O пересоздавалось нативное окно mpv, со всеми
+// вытекающими: мигание картинки, лишние mpv_create, новый ResizeObserver.
+function refreshCutPlayhead(root) {
+  drawCutTimeline(root.querySelector("#mt-cut-timeline"));
+  const timeEl = root.querySelector("#mt-cut-time");
+  if (timeEl) {
+    const audioEl = root.querySelector("#mt-cut-audio");
+    const t = audioEl ? audioEl.currentTime : cutState.lastKnownTime;
+    timeEl.textContent = `${formatTimePrecise(t)} / ${formatTimePrecise(cutDuration())}`;
+  }
+}
+
+function refreshCutMarks(root) {
+  const inEl = root.querySelector("#mt-mark-in-val");
+  const outEl = root.querySelector("#mt-mark-out-val");
+  if (inEl) inEl.textContent = cutState.markIn == null ? "—" : formatTimePrecise(cutState.markIn);
+  if (outEl) outEl.textContent = cutState.markOut == null ? "—" : formatTimePrecise(cutState.markOut);
+  const list = root.querySelector("#mt-segment-list");
+  if (list) {
+    list.innerHTML = segmentListHtml();
+    wireSegmentRows(root);
+  }
+  const exportBtn = root.querySelector("#mt-cut-export");
+  if (exportBtn) exportBtn.disabled = !cutState.segments.length || jobRunning;
+  refreshCutPlayhead(root);
+}
+
+function wireSegmentRows(root) {
+  root.querySelectorAll("[data-seek-segment]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const s = cutState.segments[Number(btn.dataset.seekSegment)];
+      if (s) seekTo(root, s.start);
+    });
+  });
+  root.querySelectorAll("[data-remove-segment]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      cutState.segments.splice(Number(btn.dataset.removeSegment), 1);
+      refreshCutMarks(root);
+    });
+  });
+}
+
+function currentPlayTime(root) {
+  const audioEl = root.querySelector("#mt-cut-audio");
+  return audioEl ? audioEl.currentTime : cutState.lastKnownTime;
+}
+
+function addSegment(root) {
+  if (cutState.markIn == null || cutState.markOut == null) {
+    toast("Отметьте и начало (I), и конец (O) сегмента.", "error");
+    return;
+  }
+  const start = Math.min(cutState.markIn, cutState.markOut);
+  const end = Math.max(cutState.markIn, cutState.markOut);
+  if (end - start < 0.05) {
+    toast("Сегмент слишком короткий.", "error");
+    return;
+  }
+  cutState.segments.push({ start, end });
+  cutState.segments.sort((a, b) => a.start - b.start);
+  cutState.markIn = null;
+  cutState.markOut = null;
+  refreshCutMarks(root);
 }
 
 function wireCutPanel(root) {
@@ -431,6 +720,7 @@ function wireCutPanel(root) {
     cutState.markIn = null;
     cutState.markOut = null;
     cutState.lastKnownTime = 0;
+    cutState.mpvDuration = null;
     cutState.mpvPaused = true;
     // Сменили видео на аудио (или наоборот) — старое mpv-окно неоткуда
     // взять новый смысл, закрываем; переоткроется в openCutMpv ниже, если
@@ -447,82 +737,86 @@ function wireCutPanel(root) {
 
   const canvas = root.querySelector("#mt-cut-timeline");
   const audioEl = root.querySelector("#mt-cut-audio");
-  drawCutTimeline(canvas);
 
   if (isVideoFile()) {
     openCutMpv(root);
-    const playBtn = root.querySelector("#mt-cut-playpause");
-    if (playBtn) playBtn.addEventListener("click", () => mpvTogglePlay(root));
-    // Плейсхолдер пересобирается на каждый re-render (renderActivePanel
-    // перерисовывает всё #mt-body) — ResizeObserver навешиваем на новый
-    // узел каждый раз, но СНАЧАЛА отключаем предыдущий инстанс: иначе
-    // он не исчезает сам (см. cutMpvResizeObserver выше) и копится с
-    // каждым кликом I/O/добавлением сегмента.
+    root.querySelector("#mt-cut-playpause").addEventListener("click", () => mpvTogglePlay(root));
+    root.querySelector("#mt-cut-frame-back").addEventListener("click", () => frameStep(root, false));
+    root.querySelector("#mt-cut-frame-fwd").addEventListener("click", () => frameStep(root, true));
+    const volume = root.querySelector("#mt-cut-volume");
+    volume.addEventListener("input", async () => {
+      cutState.volume = Number(volume.value);
+      try { await invoke("mpv_set_volume", { volume: cutState.volume }); } catch { /* плеер мог закрыться */ }
+    });
+    root.querySelector("#mt-cut-mute").addEventListener("click", async e => {
+      cutState.muted = !cutState.muted;
+      e.currentTarget.textContent = cutState.muted ? "🔇" : "🔊";
+      try { await invoke("mpv_set_mute", { mute: cutState.muted }); } catch { /* плеер мог закрыться */ }
+    });
+    const speed = root.querySelector("#mt-cut-speed");
+    speed.addEventListener("change", async () => {
+      cutState.speed = Number(speed.value);
+      try { await invoke("mpv_set_speed", { speed: cutState.speed }); } catch { /* плеер мог закрыться */ }
+    });
+
+    // Плейсхолдер пересобирается при полной перерисовке панели —
+    // ResizeObserver навешиваем на новый узел, но СНАЧАЛА отключаем
+    // предыдущий инстанс: сам он не исчезает и копится.
     if (cutMpvResizeObserver) { cutMpvResizeObserver.disconnect(); cutMpvResizeObserver = null; }
     const surface = root.querySelector("#mt-cut-video-surface");
     if (surface && typeof ResizeObserver !== "undefined") {
       cutMpvResizeObserver = new ResizeObserver(() => syncMpvBounds(root));
       cutMpvResizeObserver.observe(surface);
     }
-    // window resize/scroll — глобальные, а не на плейсхолдер, поэтому
-    // вешаем один раз на весь модуль-сессию (root = overlay модалки,
-    // он не пересобирается на re-render, только #mt-body внутри него) —
-    // data-атрибут как флаг «уже подписаны», тот же приём, что и в
-    // board.js: wireBoardCards (data-wired guard).
-    if (!root.dataset.mpvResizeWired) {
-      root.dataset.mpvResizeWired = "1";
-      window.addEventListener("resize", () => syncMpvBounds(root));
-      root.addEventListener("scroll", () => syncMpvBounds(root), true);
+    // resize окна — событие глобальное, на плейсхолдер его не повесить;
+    // держим ссылку, чтобы снять обработчик в closeCutMpv (иначе каждое
+    // открытие инструментов оставляло в window ещё один, навсегда
+    // удерживая ссылку на уже удалённый оверлей).
+    if (!cutMpvWindowResizeHandler) {
+      cutMpvWindowResizeHandler = () => syncMpvBounds(root);
+      window.addEventListener("resize", cutMpvWindowResizeHandler);
     }
   } else if (audioEl) {
-    audioEl.addEventListener("timeupdate", () => drawCutTimeline(canvas));
-    audioEl.addEventListener("loadedmetadata", () => drawCutTimeline(canvas));
+    audioEl.addEventListener("timeupdate", () => refreshCutPlayhead(root));
+    audioEl.addEventListener("loadedmetadata", () => refreshCutPlayhead(root));
+    audioEl.volume = Math.min(1, cutState.volume / 100);
   }
 
-  canvas.addEventListener("click", e => {
-    if (!cutState.info.duration) return;
+  // Клик и перетаскивание по таймлайну — раньше работал только клик,
+  // то есть «проскрести» до нужного места было нельзя.
+  let scrubbing = false;
+  const seekFromEvent = e => {
+    const duration = cutDuration();
+    if (!duration) return;
     const rect = canvas.getBoundingClientRect();
-    const frac = (e.clientX - rect.left) / rect.width;
-    seekTo(root, frac * cutState.info.duration);
+    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    seekTo(root, frac * duration);
+  };
+  canvas.addEventListener("pointerdown", e => {
+    scrubbing = true;
+    canvas.setPointerCapture(e.pointerId);
+    seekFromEvent(e);
   });
+  canvas.addEventListener("pointermove", e => { if (scrubbing) seekFromEvent(e); });
+  const stopScrub = e => {
+    if (!scrubbing) return;
+    scrubbing = false;
+    try { canvas.releasePointerCapture(e.pointerId); } catch { /* указателя уже нет */ }
+  };
+  canvas.addEventListener("pointerup", stopScrub);
+  canvas.addEventListener("pointercancel", stopScrub);
 
   root.querySelector("#mt-mark-in").addEventListener("click", () => {
-    cutState.markIn = isVideoFile() ? cutState.lastKnownTime : (audioEl ? audioEl.currentTime : 0);
-    renderActivePanel(root);
+    cutState.markIn = currentPlayTime(root);
+    refreshCutMarks(root);
   });
   root.querySelector("#mt-mark-out").addEventListener("click", () => {
-    cutState.markOut = isVideoFile() ? cutState.lastKnownTime : (audioEl ? audioEl.currentTime : 0);
-    renderActivePanel(root);
+    cutState.markOut = currentPlayTime(root);
+    refreshCutMarks(root);
   });
-  root.querySelector("#mt-add-segment").addEventListener("click", () => {
-    if (cutState.markIn == null || cutState.markOut == null) {
-      toast("Отметьте и начало (I), и конец (O) сегмента.", "error");
-      return;
-    }
-    const start = Math.min(cutState.markIn, cutState.markOut);
-    const end = Math.max(cutState.markIn, cutState.markOut);
-    if (end - start < 0.05) {
-      toast("Сегмент слишком короткий.", "error");
-      return;
-    }
-    cutState.segments.push({ start, end });
-    cutState.segments.sort((a, b) => a.start - b.start);
-    cutState.markIn = null;
-    cutState.markOut = null;
-    renderActivePanel(root);
-  });
-  root.querySelectorAll("[data-seek-segment]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const s = cutState.segments[Number(btn.dataset.seekSegment)];
-      if (s) seekTo(root, s.start);
-    });
-  });
-  root.querySelectorAll("[data-remove-segment]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      cutState.segments.splice(Number(btn.dataset.removeSegment), 1);
-      renderActivePanel(root);
-    });
-  });
+  root.querySelector("#mt-add-segment").addEventListener("click", () => addSegment(root));
+
+  refreshCutMarks(root);
 
   root.querySelector("#mt-cut-export").addEventListener("click", async () => {
     const keepSeparate = root.querySelector("#mt-keep-separate").checked;
@@ -531,31 +825,84 @@ function wireCutPanel(root) {
       toast("Выберите хотя бы один вариант экспорта.", "error");
       return;
     }
-    const outDir = await openDialog({ directory: true });
+    const outDir = await pickOutputDir();
     if (!outDir) return;
     const btn = root.querySelector("#mt-cut-export");
-    btn.disabled = true;
-    btn.textContent = "Режу…";
-    try {
-      const result = await invoke("mt_cut_media", {
+    const result = await runJob(root, {
+      button: btn,
+      busyLabel: "Режу…",
+      run: () => invoke("mt_cut_media", {
         path: cutState.path,
         segments: cutState.segments,
         outDir,
         keepSeparate,
         merge,
-      });
-      const count = result.segmentPaths.length + (result.mergedPath ? 1 : 0);
-      toast(`Готово: ${count} файл(ов).`, "success", {
-        label: "📂 Показать в папке",
-        onClick: () => revealInFolder(result.mergedPath || result.segmentPaths[0] || outDir),
-      });
-    } catch (e) {
-      toast(`Не удалось вырезать: ${e}`, "error");
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "✂ Экспортировать";
-    }
+      }),
+    });
+    if (!result) return;
+    const count = result.segmentPaths.length + (result.mergedPath ? 1 : 0);
+    toastDone(`Готово: ${count} файл(ов).`, result.mergedPath || result.segmentPaths[0] || outDir);
   });
+}
+
+// Горячие клавиши панели «Обрезка» — вешаются на модалку один раз (см.
+// openMediaTools), а не на каждый re-render. Игнорируем нажатия внутри
+// полей ввода: там те же буквы — это просто текст.
+function isTypingTarget(el) {
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+}
+
+function handleCutHotkey(root, e) {
+  if (activeOp !== "cut" || !cutState.path || isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+  const step = e.shiftKey ? 10 : 1;
+  // Раскладка: клавиша, а не символ — «i»/«ш» и «o»/«щ» это одна и та же
+  // физическая клавиша, а в студии печатают по-русски.
+  switch (e.code) {
+    case "Space":
+      e.preventDefault();
+      if (isVideoFile()) mpvTogglePlay(root);
+      else { const a = root.querySelector("#mt-cut-audio"); if (a) (a.paused ? a.play() : a.pause()); }
+      break;
+    case "KeyI":
+      e.preventDefault();
+      cutState.markIn = currentPlayTime(root);
+      refreshCutMarks(root);
+      break;
+    case "KeyO":
+      e.preventDefault();
+      cutState.markOut = currentPlayTime(root);
+      refreshCutMarks(root);
+      break;
+    case "KeyM":
+      if (!isVideoFile()) break;
+      e.preventDefault();
+      root.querySelector("#mt-cut-mute")?.click();
+      break;
+    case "Comma":
+      if (!isVideoFile()) break;
+      e.preventDefault();
+      frameStep(root, false);
+      break;
+    case "Period":
+      if (!isVideoFile()) break;
+      e.preventDefault();
+      frameStep(root, true);
+      break;
+    case "ArrowLeft":
+      e.preventDefault();
+      seekTo(root, currentPlayTime(root) - step);
+      break;
+    case "ArrowRight":
+      e.preventDefault();
+      seekTo(root, currentPlayTime(root) + step);
+      break;
+    case "Enter":
+      e.preventDefault();
+      addSegment(root);
+      break;
+    default:
+      break;
+  }
 }
 
 // ============================================================
@@ -566,10 +913,23 @@ const CONVERT_PRESETS = {
   mp4_h264: { label: "MP4 (H.264/AAC) — универсальный", container: "mp4", opts: { videoCodec: "libx264", audioCodec: "aac", crf: 23 } },
   telegram: { label: "Сжать для Telegram (720p, ~2 Мбит/с)", container: "mp4", opts: { videoCodec: "libx264", audioCodec: "aac", height: 720, videoBitrate: "2M", audioBitrate: "128k" } },
   webm_vp9: { label: "WebM (VP9/Opus)", container: "webm", opts: { videoCodec: "libvpx-vp9", audioCodec: "libopus", crf: 32 } },
+  prores: { label: "ProRes 422 (монтажный мастер)", container: "mov", opts: { videoCodec: "prores_ks", audioCodec: "pcm_s16le" } },
   custom: { label: "Свои параметры", container: "mp4", opts: {} },
 };
 
-const convertState = { poolIndex: null, path: null, info: null, preset: "mp4_h264" };
+// Поля «своих параметров» переживают перерисовку панели — иначе смена
+// пресета или добавление файла в пул стирали уже введённые значения.
+const convertState = {
+  poolIndex: null, path: null, info: null, preset: "mp4_h264",
+  container: null,
+  custom: { videoCodec: "", audioCodec: "", width: "", height: "", videoBitrate: "", audioBitrate: "", crf: "" },
+};
+
+const CONTAINERS = ["mp4", "mkv", "mov", "webm"];
+
+function convertContainer() {
+  return convertState.container || CONVERT_PRESETS[convertState.preset].container;
+}
 
 function convertPanelHtml() {
   const picker = `<div class="mt-file-row">${poolSelectHtml("mt-convert-pick", convertState.poolIndex, f => f.info && (f.info.video || f.info.audio))}${convertState.path ? infoLineHtml(convertState.info) : ""}</div>`;
@@ -581,6 +941,7 @@ function convertPanelHtml() {
       </div>`;
   }
   const custom = convertState.preset === "custom";
+  const c = convertState.custom;
   return `
     ${picker}
     <div class="mt-form-row">
@@ -591,31 +952,36 @@ function convertPanelHtml() {
     </div>
     <div id="mt-convert-custom" ${custom ? "" : "hidden"}>
       <div class="mt-form-row"><span>Видео-кодек</span>
-        <select id="mt-c-vcodec"><option value="">не менять</option><option value="libx264">H.264</option><option value="libx265">H.265</option><option value="libvpx-vp9">VP9</option></select>
+        <select id="mt-c-vcodec">
+          ${[["", "не менять"], ["libx264", "H.264"], ["libx265", "H.265"], ["libvpx-vp9", "VP9"], ["prores_ks", "ProRes"]]
+            .map(([v, l]) => `<option value="${v}" ${v === c.videoCodec ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
       </div>
       <div class="mt-form-row"><span>Аудио-кодек</span>
-        <select id="mt-c-acodec"><option value="">не менять</option><option value="aac">AAC</option><option value="libopus">Opus</option><option value="mp3">MP3</option></select>
+        <select id="mt-c-acodec">
+          ${[["", "не менять"], ["aac", "AAC"], ["libopus", "Opus"], ["libmp3lame", "MP3"], ["flac", "FLAC"], ["pcm_s16le", "PCM 16 бит"]]
+            .map(([v, l]) => `<option value="${v}" ${v === c.audioCodec ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
       </div>
       <div class="mt-form-row"><span>Ширина / высота (px)</span>
-        <input id="mt-c-width" type="number" min="1" placeholder="авто" style="width:90px;">
-        <input id="mt-c-height" type="number" min="1" placeholder="авто" style="width:90px;">
+        <input id="mt-c-width" type="number" min="1" max="16384" placeholder="авто" style="width:90px;" value="${esc(c.width)}">
+        <input id="mt-c-height" type="number" min="1" max="16384" placeholder="авто" style="width:90px;" value="${esc(c.height)}">
       </div>
       <div class="mt-form-row"><span>Битрейт видео / аудио</span>
-        <input id="mt-c-vbitrate" type="text" placeholder="напр. 2M" style="width:90px;">
-        <input id="mt-c-abitrate" type="text" placeholder="напр. 128k" style="width:90px;">
+        <input id="mt-c-vbitrate" type="text" placeholder="напр. 2M" style="width:90px;" value="${esc(c.videoBitrate)}">
+        <input id="mt-c-abitrate" type="text" placeholder="напр. 128k" style="width:90px;" value="${esc(c.audioBitrate)}">
       </div>
       <div class="mt-form-row"><span>CRF (качество, меньше — лучше)</span>
-        <input id="mt-c-crf" type="number" min="0" max="51" placeholder="напр. 23" style="width:90px;">
+        <input id="mt-c-crf" type="number" min="0" max="63" placeholder="напр. 23" style="width:90px;" value="${esc(c.crf)}">
       </div>
     </div>
     <div class="mt-form-row">
       <span>Контейнер результата</span>
       <select id="mt-convert-container">
-        ${["mp4", "mkv", "mov", "webm"].map(c => `<option value="${c}" ${c === CONVERT_PRESETS[convertState.preset].container ? "selected" : ""}>${c}</option>`).join("")}
+        ${CONTAINERS.map(x => `<option value="${x}" ${x === convertContainer() ? "selected" : ""}>${x}</option>`).join("")}
       </select>
     </div>
     <button class="btn primary" id="mt-convert-run">🔄 Конвертировать</button>
-    <div class="update-progress-track" id="mt-convert-progress-track" hidden><div class="update-progress-fill" id="mt-convert-progress-fill"></div></div>
   `;
 }
 
@@ -633,43 +999,53 @@ function wireConvertPanel(root) {
 
   root.querySelector("#mt-convert-preset").addEventListener("change", e => {
     convertState.preset = e.target.value;
+    // Пресет задаёт свой контейнер — но только пока пользователь не
+    // выбрал контейнер руками.
+    convertState.container = null;
     renderActivePanel(root);
+  });
+  root.querySelector("#mt-convert-container").addEventListener("change", e => {
+    convertState.container = e.target.value;
+  });
+
+  // Запоминаем ввод сразу, а не только в момент запуска: панель
+  // перерисовывается при любых изменениях пула.
+  const customFields = {
+    videoCodec: "#mt-c-vcodec", audioCodec: "#mt-c-acodec",
+    width: "#mt-c-width", height: "#mt-c-height",
+    videoBitrate: "#mt-c-vbitrate", audioBitrate: "#mt-c-abitrate", crf: "#mt-c-crf",
+  };
+  Object.entries(customFields).forEach(([key, sel]) => {
+    const el = root.querySelector(sel);
+    if (el) el.addEventListener("input", () => { convertState.custom[key] = el.value; });
   });
 
   root.querySelector("#mt-convert-run").addEventListener("click", async () => {
-    const preset = CONVERT_PRESETS[convertState.preset];
+    const c = convertState.custom;
     const opts = convertState.preset === "custom" ? {
-      videoCodec: root.querySelector("#mt-c-vcodec").value || null,
-      audioCodec: root.querySelector("#mt-c-acodec").value || null,
-      width: Number(root.querySelector("#mt-c-width").value) || null,
-      height: Number(root.querySelector("#mt-c-height").value) || null,
-      videoBitrate: root.querySelector("#mt-c-vbitrate").value || null,
-      audioBitrate: root.querySelector("#mt-c-abitrate").value || null,
-      crf: Number(root.querySelector("#mt-c-crf").value) || null,
-    } : preset.opts;
-    const container = root.querySelector("#mt-convert-container").value;
-    const outPath = await saveDialog({ defaultPath: `${stemOf(convertState.path)}.${container}` });
+      videoCodec: c.videoCodec || null,
+      audioCodec: c.audioCodec || null,
+      width: Number(c.width) || null,
+      height: Number(c.height) || null,
+      videoBitrate: c.videoBitrate.trim() || null,
+      audioBitrate: c.audioBitrate.trim() || null,
+      // Number(...)||null съедал бы CRF 0 (визуально «без потерь») —
+      // проверяем именно на пустую строку.
+      crf: c.crf === "" ? null : Number(c.crf),
+    } : CONVERT_PRESETS[convertState.preset].opts;
+    const container = convertContainer();
+    const outPath = await pickOutputFile(`${stemOf(convertState.path)}.${container}`, [
+      { name: container.toUpperCase(), extensions: [container] },
+    ]);
     if (!outPath) return;
 
     const btn = root.querySelector("#mt-convert-run");
-    const track = root.querySelector("#mt-convert-progress-track");
-    const fill = root.querySelector("#mt-convert-progress-fill");
-    btn.disabled = true;
-    track.hidden = false;
-    const unlisten = await listen("mediatool-progress", event => {
-      fill.style.width = `${Math.round((event.payload || 0) * 100)}%`;
+    const ok = await runJob(root, {
+      button: btn,
+      busyLabel: "Конвертирую…",
+      run: async () => { await invoke("mt_transcode_media", { path: convertState.path, outPath, opts }); return true; },
     });
-    try {
-      await invoke("mt_transcode_media", { path: convertState.path, outPath, opts });
-      toast("Конвертация завершена.", "success", { label: "📂 Показать в папке", onClick: () => revealInFolder(outPath) });
-    } catch (e) {
-      toast(`Не удалось конвертировать: ${e}`, "error");
-    } finally {
-      unlisten();
-      btn.disabled = false;
-      track.hidden = true;
-      fill.style.width = "0%";
-    }
+    if (ok) toastDone("Конвертация завершена.", outPath);
   });
 }
 
@@ -677,8 +1053,8 @@ function wireConvertPanel(root) {
 // Аудио — извлечь/конвертировать/нормализовать, см. extract_audio.
 // ============================================================
 
-const AUDIO_CODEC_EXT = { copy: null, aac: "m4a", mp3: "mp3", flac: "flac", libopus: "opus" };
-const audioState = { poolIndex: null, path: null, info: null };
+const AUDIO_CODEC_EXT = { copy: null, aac: "m4a", libmp3lame: "mp3", flac: "flac", libopus: "opus", pcm_s16le: "wav" };
+const audioState = { poolIndex: null, path: null, info: null, codec: "copy", bitrate: "", normalize: false };
 
 function audioPanelHtml() {
   // Фильтр по наличию звуковой дорожки — сразу в самом списке выбора,
@@ -690,27 +1066,31 @@ function audioPanelHtml() {
       <div class="mt-empty">
         <p>Выберите файл со звуковой дорожкой из пула выше — извлечь звук
         из видео, перевести в другой формат или нормализовать громкость
-        (EBU R128 loudnorm).</p>
+        (EBU R128 loudnorm, два прохода — динамика дубля не меняется).</p>
       </div>`;
   }
+  const codecs = [
+    ["copy", "Как есть (без перекодирования)"],
+    ["aac", "AAC (.m4a)"],
+    ["libmp3lame", "MP3"],
+    ["flac", "FLAC (без потерь)"],
+    ["libopus", "Opus"],
+    ["pcm_s16le", "WAV PCM 16 бит"],
+  ];
   return `
     ${picker}
     <div class="mt-form-row">
       <span>Кодек</span>
       <select id="mt-audio-codec">
-        <option value="copy">Как есть (без перекодирования)</option>
-        <option value="aac">AAC (.m4a)</option>
-        <option value="mp3">MP3</option>
-        <option value="flac">FLAC (без потерь)</option>
-        <option value="libopus">Opus</option>
+        ${codecs.map(([v, l]) => `<option value="${v}" ${v === audioState.codec ? "selected" : ""}>${l}</option>`).join("")}
       </select>
     </div>
     <div class="mt-form-row">
       <span>Битрейт</span>
-      <input id="mt-audio-bitrate" type="text" placeholder="напр. 192k (пусто — по умолчанию)" style="width:160px;">
+      <input id="mt-audio-bitrate" type="text" placeholder="напр. 192k (пусто — по умолчанию)" style="width:200px;" value="${esc(audioState.bitrate)}">
     </div>
     <div class="mt-form-row">
-      <label><input type="checkbox" id="mt-audio-normalize"> Нормализовать громкость (loudnorm)</label>
+      <label><input type="checkbox" id="mt-audio-normalize" ${audioState.normalize ? "checked" : ""}> Нормализовать громкость (loudnorm, −16 LUFS)</label>
     </div>
     <button class="btn primary" id="mt-audio-run">🎵 Извлечь / конвертировать</button>
   `;
@@ -728,33 +1108,44 @@ function wireAudioPanel(root) {
   });
   if (!audioState.path) return;
 
-  root.querySelector("#mt-audio-codec").addEventListener("change", e => {
-    const normalize = root.querySelector("#mt-audio-normalize");
-    if (e.target.value === "copy" && normalize.checked) {
-      toast("«Как есть» несовместимо с нормализацией — переключаю на AAC.", "info");
+  const codecSel = root.querySelector("#mt-audio-codec");
+  const normalizeBox = root.querySelector("#mt-audio-normalize");
+  const bitrateInput = root.querySelector("#mt-audio-bitrate");
+
+  bitrateInput.addEventListener("input", () => { audioState.bitrate = bitrateInput.value; });
+  // «Как есть» и нормализация несовместимы по определению (фильтр
+  // требует декодирования). Раньше интерфейс говорил «переключаю на
+  // AAC», но сам ничего не переключал — подмену делал молча бэкенд, и в
+  // диалоге сохранения предлагалось не то расширение.
+  const reconcile = () => {
+    audioState.codec = codecSel.value;
+    audioState.normalize = normalizeBox.checked;
+    if (audioState.normalize && audioState.codec === "copy") {
+      audioState.codec = "aac";
+      codecSel.value = "aac";
+      toast("«Как есть» несовместимо с нормализацией — переключил на AAC.");
     }
-  });
+  };
+  codecSel.addEventListener("change", reconcile);
+  normalizeBox.addEventListener("change", reconcile);
 
   root.querySelector("#mt-audio-run").addEventListener("click", async () => {
-    const codec = root.querySelector("#mt-audio-codec").value;
-    const bitrate = root.querySelector("#mt-audio-bitrate").value.trim() || null;
-    const normalize = root.querySelector("#mt-audio-normalize").checked;
-    const effectiveExt = AUDIO_CODEC_EXT[codec] || (normalize ? "m4a" : extOf(audioState.path)) || "m4a";
-    const outPath = await saveDialog({ defaultPath: `${stemOf(audioState.path)}.${effectiveExt}` });
+    const codec = audioState.codec;
+    const bitrate = audioState.bitrate.trim() || null;
+    const normalize = audioState.normalize;
+    const effectiveExt = AUDIO_CODEC_EXT[codec] || extOf(audioState.path) || "m4a";
+    const outPath = await pickOutputFile(`${stemOf(audioState.path)}.${effectiveExt}`, [
+      { name: effectiveExt.toUpperCase(), extensions: [effectiveExt] },
+    ]);
     if (!outPath) return;
 
     const btn = root.querySelector("#mt-audio-run");
-    btn.disabled = true;
-    btn.textContent = "Обрабатываю…";
-    try {
-      await invoke("mt_extract_audio", { path: audioState.path, outPath, opts: { codec, bitrate, normalize } });
-      toast("Готово.", "success", { label: "📂 Показать в папке", onClick: () => revealInFolder(outPath) });
-    } catch (e) {
-      toast(`Не удалось обработать звук: ${e}`, "error");
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "🎵 Извлечь / конвертировать";
-    }
+    const ok = await runJob(root, {
+      button: btn,
+      busyLabel: "Обрабатываю…",
+      run: async () => { await invoke("mt_extract_audio", { path: audioState.path, outPath, opts: { codec, bitrate, normalize } }); return true; },
+    });
+    if (ok) toastDone("Готово.", outPath);
   });
 }
 
@@ -814,23 +1205,20 @@ function wireConcatPanel(root) {
   const runBtn = root.querySelector("#mt-concat-run");
   if (runBtn) runBtn.addEventListener("click", async () => {
     const ext = extOf(concatState.paths[0]) || "mp4";
-    const outPath = await saveDialog({ defaultPath: `merged.${ext}` });
+    const outPath = await pickOutputFile(`merged.${ext}`, [{ name: ext.toUpperCase(), extensions: [ext] }]);
     if (!outPath) return;
-    runBtn.disabled = true;
-    runBtn.textContent = "Склеиваю…";
-    try {
-      const mode = await invoke("mt_concat_media", { paths: concatState.paths, outPath });
-      toast(
-        mode === "copy" ? "Склеено без перекодирования (файлы совпадали по кодекам)." : "Склеено с перекодированием (кодеки/разрешение входов отличались).",
-        "success",
-        { label: "📂 Показать в папке", onClick: () => revealInFolder(outPath) },
-      );
-    } catch (e) {
-      toast(`Не удалось склеить: ${e}`, "error");
-    } finally {
-      runBtn.disabled = false;
-      runBtn.textContent = "🧩 Склеить";
-    }
+    const mode = await runJob(root, {
+      button: runBtn,
+      busyLabel: "Склеиваю…",
+      run: () => invoke("mt_concat_media", { paths: concatState.paths, outPath }),
+    });
+    if (!mode) return;
+    toastDone(
+      mode === "copy"
+        ? "Склеено без перекодирования (файлы совпадали по кодекам)."
+        : "Склеено с перекодированием (кодеки/разрешение входов отличались).",
+      outPath,
+    );
   });
 }
 
@@ -957,19 +1345,14 @@ function wireMuxPanel(root) {
       path: t.path, kind: section.kind, language: t.language, title: t.title, isDefault: t.isDefault,
     })));
     if (!tracks.length) return;
-    const outPath = await saveDialog({ defaultPath: "muxed.mkv", filters: [{ name: "Matroska", extensions: ["mkv"] }] });
+    const outPath = await pickOutputFile("muxed.mkv", [{ name: "Matroska", extensions: ["mkv"] }]);
     if (!outPath) return;
-    runBtn.disabled = true;
-    runBtn.textContent = "Муксирую…";
-    try {
-      await invoke("mt_mux_media", { tracks, outPath });
-      toast("Готово.", "success", { label: "📂 Показать в папке", onClick: () => revealInFolder(outPath) });
-    } catch (e) {
-      toast(`Не удалось смуксить: ${e}`, "error");
-    } finally {
-      runBtn.disabled = false;
-      runBtn.textContent = "🧩 Смуксить";
-    }
+    const ok = await runJob(root, {
+      button: runBtn,
+      busyLabel: "Муксирую…",
+      run: async () => { await invoke("mt_mux_media", { tracks, outPath }); return true; },
+    });
+    if (ok) toastDone("Готово.", outPath);
   });
 }
 
@@ -1003,17 +1386,32 @@ export function openMediaTools() {
       ${Object.entries(OPERATIONS).map(([key, op]) => `<button class="mt-op-tab ${key === activeOp ? "active" : ""}" data-op="${key}">${op.label}</button>`).join("")}
     </div>
     <div id="mt-body"></div>
+    ${jobHtml()}
     <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
   `, "wide");
-  // closeCutMpv() — на закрытии модалки и на уходе со вкладки «Обрезка»
-  // (переключились на «Конвертацию» — плейсхолдер видео исчез из DOM,
-  // нативное окно/процесс mpv без него — осиротевшая утечка).
-  overlay.querySelector("[data-close]").addEventListener("click", async () => {
+
+  // Закрытие модалки ЛЮБЫМ способом должно убирать нативное окно mpv.
+  // Раньше это висело только на кнопке «Закрыть», а Escape и клик по
+  // фону (см. dismissSheet в api.js) оставляли живой процесс и его
+  // окно — чёрный прямоугольник с видео поверх всего интерфейса,
+  // который уже ничем не убрать, кроме перезапуска приложения.
+  const teardown = async () => {
+    window.removeEventListener("keydown", hotkeys, true);
     await closeCutMpv();
+  };
+  const hotkeys = e => handleCutHotkey(overlay, e);
+  window.addEventListener("keydown", hotkeys, true);
+  overlay.addEventListener("sheet-dismissed", teardown);
+  overlay.querySelector("[data-close]").addEventListener("click", async () => {
+    await teardown();
     overlay.remove();
   });
+
   overlay.querySelectorAll(".mt-op-tab").forEach(btn => {
     btn.addEventListener("click", async () => {
+      if (jobRunning) { toast("Дождитесь окончания текущей операции.", "error"); return; }
+      // Ушли с «Обрезки» — плейсхолдер видео исчез из DOM, нативное
+      // окно/процесс mpv без него осиротели.
       if (activeOp === "cut" && btn.dataset.op !== "cut") await closeCutMpv();
       activeOp = btn.dataset.op;
       overlay.querySelectorAll(".mt-op-tab").forEach(b => b.classList.toggle("active", b === btn));
@@ -1022,6 +1420,7 @@ export function openMediaTools() {
   });
   renderPoolBar(overlay);
   renderActivePanel(overlay);
+  return overlay;
 }
 
 $("#open-media-tools").addEventListener("click", openMediaTools);

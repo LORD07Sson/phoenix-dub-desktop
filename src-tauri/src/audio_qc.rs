@@ -25,9 +25,10 @@ use std::sync::OnceLock;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 // pub(crate), не только для этого модуля — media_tools.rs (ffprobe-команды)
-// нужен тот же приём подавления консольного окна, дублировать его смысла
-// нет: это чисто платформенная деталь запуска процесса, не специфика QC.
-pub(crate) fn ffmpeg_command(exe: impl AsRef<std::ffi::OsStr>) -> Command {
+// и mpv_embed.rs (запуск mpv.exe) нужен тот же приём подавления
+// консольного окна, дублировать его смысла нет: это чисто платформенная
+// деталь запуска ЛЮБОГО дочернего процесса, не специфика QC.
+pub(crate) fn hidden_command(exe: impl AsRef<std::ffi::OsStr>) -> Command {
     #[allow(unused_mut)]
     let mut cmd = Command::new(exe);
     #[cfg(windows)]
@@ -36,6 +37,12 @@ pub(crate) fn ffmpeg_command(exe: impl AsRef<std::ffi::OsStr>) -> Command {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     cmd
+}
+
+/// Имя по смыслу вызова — весь ffmpeg/ffprobe-код читается привычнее с
+/// ним, чем с обобщённым hidden_command.
+pub(crate) fn ffmpeg_command(exe: impl AsRef<std::ffi::OsStr>) -> Command {
+    hidden_command(exe)
 }
 
 #[derive(Serialize, Clone)]

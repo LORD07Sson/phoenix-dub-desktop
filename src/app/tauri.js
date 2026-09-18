@@ -24,10 +24,42 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 
-export { invoke, listen, emit, getCurrentWindow, WebviewWindow, openDialog, saveDialog, sendNotification, convertFileSrc };
+export { invoke, listen, emit, getCurrentWindow, WebviewWindow, sendNotification, convertFileSrc };
+
+// Диалоги выбора файлов — НЕ @tauri-apps/plugin-dialog, а свои команды в
+// Rust (см. src-tauri/src/file_scope.rs). Разница не в удобстве: когда
+// диалог открывает JS, бэкенду потом приходит просто строка с путём, и
+// отличить «пользователь выбрал этот файл» от «строку подставил кто
+// угодно» невозможно — любой XSS в окне получал право прочитать или
+// перезаписать произвольный файл на диске. Теперь диалог открывает Rust
+// и сам же запоминает выбранный путь как разрешённый; сюда приходит
+// только имя, чтобы было что показать в интерфейсе.
+//
+// filters — [{ name, extensions: ["mp4", ...] }], как у прежнего
+// плагина, чтобы не переписывать вызовы.
+
+/** Выбрать файлы для ЧТЕНИЯ. Возвращает массив путей (пустой, если отменили). */
+export async function pickInputFiles({ multiple = false, filters = [] } = {}) {
+  return invoke("pick_input_files", { filters, multiple });
+}
+
+/** Выбрать один файл для чтения — или null, если диалог закрыли. */
+export async function pickInputFile(filters = []) {
+  const picked = await pickInputFiles({ multiple: false, filters });
+  return picked[0] || null;
+}
+
+/** Диалог сохранения. defaultName — только имя файла, без пути. */
+export async function pickOutputFile(defaultName, filters = []) {
+  return invoke("pick_output_file", { defaultName: defaultName || null, filters });
+}
+
+/** Выбрать папку, куда класть результаты. */
+export async function pickOutputDir() {
+  return invoke("pick_output_dir");
+}
 
 export const appWindow = getCurrentWindow();
 

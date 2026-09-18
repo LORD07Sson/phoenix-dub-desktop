@@ -1,7 +1,7 @@
 // QC звука по локальному файлу — целиком в Rust (src-tauri/src/audio_qc.rs),
 // этот модуль только открывает диалог выбора файла и рисует результат.
 
-import { invoke, openDialog, saveDialog, revealInFolder, appWindow, sendNotification } from "./tauri.js";
+import { invoke, pickInputFiles, pickOutputFile, revealInFolder, appWindow, sendNotification } from "./tauri.js";
 import { openSheet, dialogSkeletonHtml, toast, apiPost } from "./api.js";
 import { $, esc, formatTime, formatRange, noteTimePrefix } from "./utils.js";
 
@@ -125,10 +125,7 @@ document.addEventListener("click", async e => {
   const end = parseFloat(btn.dataset.exportEnd) + 1;
   const kind = btn.dataset.exportKind;
   const stem = baseName(path).replace(/\.[^./\\]+$/, "");
-  const savePath = await saveDialog({
-    defaultPath: `${stem}_${kind}_${Math.round(start)}s.wav`,
-    filters: [{ name: "WAV", extensions: ["wav"] }],
-  });
+  const savePath = await pickOutputFile(`${stem}_${kind}_${Math.round(start)}s.wav`, [{ name: "WAV", extensions: ["wav"] }]);
   if (!savePath) return;
   btn.disabled = true;
   const original = btn.textContent;
@@ -381,12 +378,10 @@ export function runQc(paths) {
 }
 
 async function openQcDialog() {
-  const picked = await openDialog({
+  const list = await pickInputFiles({
     multiple: true,
     filters: [{ name: "Аудио/видео", extensions: QC_EXTENSIONS }],
   });
-  if (!picked) return;
-  const list = Array.isArray(picked) ? picked : [picked];
   if (!list.length) return;
   if (list.length > 40) {
     toast("Больше 40 файлов за раз — это надолго; возьмите частями.", "error");

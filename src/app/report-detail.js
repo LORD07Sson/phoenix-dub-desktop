@@ -4,7 +4,7 @@
 
 import { apiGet, apiPost, openSheet, toast, dialogSkeletonHtml } from "./api.js";
 import { state } from "./state.js";
-import { invoke, saveDialog, openDialog, revealInFolder, pinReportWindow } from "./tauri.js";
+import { invoke, pickOutputFile, pickInputFile, revealInFolder, pinReportWindow } from "./tauri.js";
 import { esc, initials, STATUS_DOT_CLASS, isOverdue, parseNoteTime, secondsFromTimeInput, noteTimePrefix, formatRange } from "./utils.js";
 import { runQcAnalysis, QC_EXTENSIONS } from "./qc.js";
 import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
@@ -362,14 +362,14 @@ export async function openReportDetail(publicId) {
       }
     });
     sheet.querySelector("#btn-qc-track").addEventListener("click", async () => {
-      const picked = await openDialog({ multiple: false, filters: [{ name: "Аудио/видео", extensions: QC_EXTENSIONS }] });
+      const picked = await pickInputFile([{ name: "Аудио/видео", extensions: QC_EXTENSIONS }]);
       if (!picked) return;
-      await runQcAnalysis(Array.isArray(picked) ? picked[0] : picked, { reportId: publicId });
+      await runQcAnalysis(picked, { reportId: publicId });
     });
     sheet.querySelectorAll("[data-download-file]").forEach(btn => {
       btn.addEventListener("click", async () => {
         const fileId = btn.dataset.downloadFile;
-        const savePath = await saveDialog({ defaultPath: btn.dataset.fileName || undefined });
+        const savePath = await pickOutputFile(btn.dataset.fileName);
         if (!savePath) return;
         btn.disabled = true;
         try {
