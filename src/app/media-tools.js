@@ -184,6 +184,16 @@ const cutState = {
 // пересоздаваться на каждый клик).
 let cutMpvLoadedPath = null;
 let cutMpvUnlisten = null;
+// ResizeObserver, следящий за плейсхолдером видео — не только "старый
+// узел удалили и он тихо умер", как гласил прежний комментарий здесь:
+// по спецификации ResizeObserver при отключении/удалении наблюдаемого
+// элемента шлёт ЕЩЁ ОДИН callback с нулевым размером, а сам инстанс
+// живёт, пока explicitly не .disconnect(). Без disconnect() каждый
+// re-render (клик I/O, добавление/удаление сегмента — все они зовут
+// renderActivePanel) плодил новый ResizeObserver поверх старых —
+// подтверждено логами: mpv_create вызывался 2-3 раза на один
+// openCutMpv и число росло за сессию.
+let cutMpvResizeObserver = null;
 
 function isVideoFile() {
   return !!(cutState.info && cutState.info.video);
@@ -234,6 +244,7 @@ async function syncMpvBounds(root) {
 // иначе процесс/окно mpv переживают закрытую панель осиротевшими.
 async function closeCutMpv() {
   if (cutMpvUnlisten) { cutMpvUnlisten(); cutMpvUnlisten = null; }
+  if (cutMpvResizeObserver) { cutMpvResizeObserver.disconnect(); cutMpvResizeObserver = null; }
   if (cutMpvLoadedPath == null) return;
   cutMpvLoadedPath = null;
   try { await invoke("mpv_close"); } catch { /* не критично при закрытии */ }
@@ -444,11 +455,14 @@ function wireCutPanel(root) {
     if (playBtn) playBtn.addEventListener("click", () => mpvTogglePlay(root));
     // Плейсхолдер пересобирается на каждый re-render (renderActivePanel
     // перерисовывает всё #mt-body) — ResizeObserver навешиваем на новый
-    // узел каждый раз; старый просто перестаёт получать события вместе
-    // с удалённым узлом, копиться ему не на чём.
+    // узел каждый раз, но СНАЧАЛА отключаем предыдущий инстанс: иначе
+    // он не исчезает сам (см. cutMpvResizeObserver выше) и копится с
+    // каждым кликом I/O/добавлением сегмента.
+    if (cutMpvResizeObserver) { cutMpvResizeObserver.disconnect(); cutMpvResizeObserver = null; }
     const surface = root.querySelector("#mt-cut-video-surface");
     if (surface && typeof ResizeObserver !== "undefined") {
-      new ResizeObserver(() => syncMpvBounds(root)).observe(surface);
+      cutMpvResizeObserver = new ResizeObserver(() => syncMpvBounds(root));
+      cutMpvResizeObserver.observe(surface);
     }
     // window resize/scroll — глобальные, а не на плейсхолдер, поэтому
     // вешаем один раз на весь модуль-сессию (root = overlay модалки,
