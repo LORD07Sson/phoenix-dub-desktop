@@ -9,6 +9,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio_qc;
+mod board;
 mod file_scope;
 mod media_tools;
 #[cfg(windows)]
@@ -289,6 +290,20 @@ fn progress_to_webview(app: &tauri::AppHandle) -> impl Fn(f64, &str) + Sync + '_
     }
 }
 
+/// Раскладка доски: сортировка по срочности, метрики колонок, поиск.
+/// Считается в Rust не ради скорости (на сотне карточек её и не
+/// заметить), а ради того, что это чистая функция без DOM — её целиком
+/// покрывают тесты в board.rs, чего про обработчики рендера сказать
+/// нельзя. Сегодняшнюю дату присылает фронтенд: часовой пояс студии
+/// знает он, а не процесс.
+#[tauri::command]
+fn board_layout(
+    columns: Vec<board::BoardColumnIn>,
+    view: board::BoardView,
+) -> board::BoardLayout {
+    board::layout(columns, &view)
+}
+
 // ---------- нативные диалоги выбора файлов (file_scope.rs) ----------
 // Раньше диалоги открывал JS (@tauri-apps/plugin-dialog) и присылал
 // бэкенду готовый путь — то есть путь приходил из вебвью и ничем не
@@ -358,6 +373,7 @@ fn mt_cut_media(
     out_dir: String,
     keep_separate: bool,
     merge: bool,
+    precise: bool,
 ) -> Result<media_tools::CutResult, String> {
     log_result("mt_cut_media", (|| {
         let scope = app.state::<file_scope::FileScope>();
@@ -371,6 +387,7 @@ fn mt_cut_media(
             &out_dir.to_string_lossy(),
             keep_separate,
             merge,
+            precise,
         )
     })())
 }
@@ -438,6 +455,157 @@ fn mt_mux_media(app: tauri::AppHandle, tracks: Vec<media_tools::MuxTrack>, out_p
             checked.push(media_tools::MuxTrack { path: p.to_string_lossy().into_owned(), ..t });
         }
         media_tools::mux_media(&checked, &out_path.to_string_lossy())
+    })())
+}
+
+// ---------- новые операции: дубляж, скорость, кадры, GIF, субтитры ----------
+// Все по одному образцу: скоуп проверяет входы и выход, отказ писать
+// поверх исходника, прогресс уезжает в вебвью тем же событием.
+
+#[tauri::command(async)]
+fn mt_dub_audio(
+    app: tauri::AppHandle,
+    video: String,
+    dub: String,
+    out_path: String,
+    opts: media_tools::DubOpts,
+) -> Result<(), String> {
+    log_result("mt_dub_audio", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let video = scope.check_read(&video)?;
+        let dub = scope.check_read(&dub)?;
+        let out_path = scope.check_write(&out_path)?;
+        file_scope::refuse_input_as_output(&video, &out_path)?;
+        file_scope::refuse_input_as_output(&dub, &out_path)?;
+        let sink = progress_to_webview(&app);
+        media_tools::dub_audio(
+            &media_tools::Progress(&sink),
+            &video.to_string_lossy(),
+            &dub.to_string_lossy(),
+            &out_path.to_string_lossy(),
+            &opts,
+        )
+    })())
+}
+
+#[tauri::command(async)]
+fn mt_change_speed(
+    app: tauri::AppHandle,
+    path: String,
+    out_path: String,
+    speed: f64,
+    keep_pitch: bool,
+) -> Result<(), String> {
+    log_result("mt_change_speed", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let path = scope.check_read(&path)?;
+        let out_path = scope.check_write(&out_path)?;
+        file_scope::refuse_input_as_output(&path, &out_path)?;
+        let sink = progress_to_webview(&app);
+        media_tools::change_speed(
+            &media_tools::Progress(&sink),
+            &path.to_string_lossy(),
+            &out_path.to_string_lossy(),
+            speed,
+            keep_pitch,
+        )
+    })())
+}
+
+#[tauri::command(async)]
+fn mt_extract_frames(
+    app: tauri::AppHandle,
+    path: String,
+    out_path: String,
+    opts: media_tools::FrameOpts,
+) -> Result<(), String> {
+    log_result("mt_extract_frames", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let path = scope.check_read(&path)?;
+        let out_path = scope.check_write(&out_path)?;
+        file_scope::refuse_input_as_output(&path, &out_path)?;
+        let sink = progress_to_webview(&app);
+        media_tools::extract_frames(
+            &media_tools::Progress(&sink),
+            &path.to_string_lossy(),
+            &out_path.to_string_lossy(),
+            &opts,
+        )
+    })())
+}
+
+#[tauri::command(async)]
+fn mt_make_gif(
+    app: tauri::AppHandle,
+    path: String,
+    out_path: String,
+    start: f64,
+    duration: f64,
+    fps: u32,
+    width: u32,
+) -> Result<(), String> {
+    log_result("mt_make_gif", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let path = scope.check_read(&path)?;
+        let out_path = scope.check_write(&out_path)?;
+        file_scope::refuse_input_as_output(&path, &out_path)?;
+        let sink = progress_to_webview(&app);
+        media_tools::make_gif(
+            &media_tools::Progress(&sink),
+            &path.to_string_lossy(),
+            &out_path.to_string_lossy(),
+            start,
+            duration,
+            fps,
+            width,
+        )
+    })())
+}
+
+#[tauri::command(async)]
+fn mt_burn_subtitles(
+    app: tauri::AppHandle,
+    video: String,
+    subs: String,
+    out_path: String,
+    font_size: u32,
+) -> Result<(), String> {
+    log_result("mt_burn_subtitles", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let video = scope.check_read(&video)?;
+        let subs = scope.check_read(&subs)?;
+        let out_path = scope.check_write(&out_path)?;
+        file_scope::refuse_input_as_output(&video, &out_path)?;
+        let sink = progress_to_webview(&app);
+        media_tools::burn_subtitles(
+            &media_tools::Progress(&sink),
+            &video.to_string_lossy(),
+            &subs.to_string_lossy(),
+            &out_path.to_string_lossy(),
+            font_size,
+        )
+    })())
+}
+
+#[tauri::command(async)]
+fn mt_extract_subtitles(
+    app: tauri::AppHandle,
+    path: String,
+    out_path: String,
+    track: u32,
+) -> Result<(), String> {
+    log_result("mt_extract_subtitles", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let path = scope.check_read(&path)?;
+        let out_path = scope.check_write(&out_path)?;
+        file_scope::refuse_input_as_output(&path, &out_path)?;
+        let sink = progress_to_webview(&app);
+        media_tools::extract_subtitles(
+            &media_tools::Progress(&sink),
+            &path.to_string_lossy(),
+            &out_path.to_string_lossy(),
+            track,
+        )
     })())
 }
 
@@ -578,6 +746,56 @@ async fn mpv_frame_step(forward: bool) -> Result<(), String> {
         Err(MPV_WINDOWS_ONLY.to_string())
     };
     log_result("mpv_frame_step", result)
+}
+
+// Петля A-B, выбор дорожки и стоп-кадр — то, без чего встроенный плеер
+// остаётся «картинкой с кнопкой play»: укладка реплики идёт по кругу
+// между метками, у многоязычного релиза несколько звуковых дорожек, а
+// кадр из плеера регулярно нужен как референс в переписке.
+#[tauri::command(async)]
+async fn mpv_set_ab_loop(start: Option<f64>, end: Option<f64>) -> Result<(), String> {
+    #[cfg(windows)]
+    let result = mpv_embed::mpv_set_ab_loop(start, end).await;
+    #[cfg(not(windows))]
+    let result = {
+        let _ = (start, end);
+        Err(MPV_WINDOWS_ONLY.to_string())
+    };
+    log_result("mpv_set_ab_loop", result)
+}
+
+#[tauri::command(async)]
+async fn mpv_set_track(kind: String, id: i64) -> Result<(), String> {
+    #[cfg(windows)]
+    let result = mpv_embed::mpv_set_track(&kind, id).await;
+    #[cfg(not(windows))]
+    let result = {
+        let _ = (kind, id);
+        Err(MPV_WINDOWS_ONLY.to_string())
+    };
+    log_result("mpv_set_track", result)
+}
+
+/// Путь сохранения проверяется скоупом ровно как у любой другой записи
+/// на диск: команду зовёт вебвью, значит путь — не доверенные данные.
+#[tauri::command(async)]
+async fn mpv_screenshot(app: tauri::AppHandle, save_path: String) -> Result<(), String> {
+    let checked = app.state::<file_scope::FileScope>().check_write(&save_path);
+    let result = match checked {
+        Ok(path) => {
+            #[cfg(windows)]
+            {
+                mpv_embed::mpv_screenshot(&path.to_string_lossy()).await
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = path;
+                Err(MPV_WINDOWS_ONLY.to_string())
+            }
+        }
+        Err(e) => Err(e),
+    };
+    log_result("mpv_screenshot", result)
 }
 
 #[tauri::command(async)]
@@ -867,6 +1085,45 @@ async fn error_detail(resp: reqwest::Response, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
+/// Скругление углов и цвет рамки окна — Windows 11 (build 22000+).
+/// Системный заголовок у окна выключен (tauri.conf.json:
+/// decorations:false, полосу рисует сам фронтенд, см. window-chrome.js),
+/// поэтому единственное, что осталось от системного оформления, — тонкая
+/// рамка, которую рисует DWM. По умолчанию она серая и к палитре
+/// приложения отношения не имеет.
+///
+/// На Windows 10 обоих атрибутов не существует, вызов вернёт E_INVALIDARG
+/// — намеренно игнорируем: окно просто останется с прямыми углами и
+/// рамкой по умолчанию, как было.
+#[cfg(windows)]
+fn apply_windows_11_chrome(win: &tauri::WebviewWindow) {
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
+    let Ok(hwnd) = win.hwnd() else {
+        log::warn!("apply_windows_11_chrome: у окна нет HWND");
+        return;
+    };
+    unsafe {
+        let corner = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            std::ptr::addr_of!(corner).cast(),
+            std::mem::size_of_val(&corner) as u32,
+        );
+        // COLORREF — 0x00BBGGRR, не привычный #RRGGBB: это --line из
+        // styles.css (#38262e) с переставленными байтами.
+        let border: u32 = 0x002e_2638;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            std::ptr::addr_of!(border).cast(),
+            std::mem::size_of_val(&border) as u32,
+        );
+    }
+}
+
 fn toggle_main_window(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let visible = win.is_visible().unwrap_or(false);
@@ -963,10 +1220,17 @@ fn main() {
             download_report_file,
             get_update_channel,
             set_update_channel,
+            board_layout,
             pick_input_files,
             pick_output_file,
             pick_output_dir,
             mt_cancel,
+            mt_dub_audio,
+            mt_change_speed,
+            mt_extract_frames,
+            mt_make_gif,
+            mt_burn_subtitles,
+            mt_extract_subtitles,
             mt_probe_media,
             mt_probe_keyframes,
             mt_register_media_file,
@@ -985,6 +1249,9 @@ fn main() {
             mpv_set_mute,
             mpv_set_speed,
             mpv_frame_step,
+            mpv_set_ab_loop,
+            mpv_set_track,
+            mpv_screenshot,
             mpv_close,
             open_log_folder,
         ])
@@ -1046,6 +1313,8 @@ fn main() {
             let win = app
                 .get_webview_window("main")
                 .ok_or("окно main не найдено — проверьте tauri.conf.json")?;
+            #[cfg(windows)]
+            apply_windows_11_chrome(&win);
             let win_clone = win.clone();
             let handle = app.handle().clone();
             win.on_window_event(move |event| match event {

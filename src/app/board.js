@@ -22,7 +22,8 @@
 // реализующий тот же «взял — перенёс — отпустил».
 
 import { apiGet, apiPost, toast, dialogSkeletonHtml } from "./api.js";
-import { $, esc, isOverdue, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS } from "./utils.js";
+import { invoke } from "./tauri.js";
+import { $, esc, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS } from "./utils.js";
 import { assigneesHtml } from "./reports.js";
 import { openReportDetail } from "./report-detail.js";
 import { state } from "./state.js";
@@ -52,21 +53,95 @@ const DRAG_THRESHOLD_PX = 6;
 // самодельного drag&drop на pointer events.
 const lastDragEndAt = new WeakMap();
 
-function boardCardHtml(r, status) {
-  const overdue = isOverdue(r);
+// Настройки вида доски — сортировка и поиск. Как и свёрнутые колонки,
+// это личное предпочтение раскладки, у API такого поля нет и не должно
+// быть.
+const SORTS = [
+  ["smart", "🔥 По срочности"],
+  ["deadline", "📅 По сроку"],
+  ["priority", "⚡ По приоритету"],
+  ["age", "🕸 По давности"],
+  ["none", "↕ Как на сервере"],
+];
+// Сколько карточек в статусе считаем перебором. Значения «на глаз» для
+// студии из нескольких человек: больше — верный признак, что работу
+// набрали в параллель и ничего не доводят.
+const WIP_LIMITS = { working: 8, review: 6, revision: 6 };
+const STALE_AFTER_DAYS = 7;
+
+function sortKey() { return `phoenix_board_sort_${state.telegramId || "anon"}`; }
+function readSort() {
+  try { return localStorage.getItem(sortKey()) || "smart"; } catch (_) { return "smart"; }
+}
+function writeSort(value) {
+  try { localStorage.setItem(sortKey(), value); } catch (_) { /* не критично */ }
+}
+
+const boardView = { sort: readSort(), query: "" };
+// Последний ответ сервера — чтобы пересортировать и отфильтровать доску
+// мгновенно, не ходя за теми же данными второй раз.
+let lastBoardData = null;
+
+// Сегодняшняя дата глазами клиента: «просрочено» должно считаться по
+// местному календарю студии, а не по часовому поясу процесса.
+function todayLocal() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function layoutRequest(columns) {
+  return invoke("board_layout", {
+    columns,
+    view: {
+      sort: boardView.sort,
+      query: boardView.query,
+      today: todayLocal(),
+      wipLimits: WIP_LIMITS,
+      staleAfterDays: STALE_AFTER_DAYS,
+    },
+  });
+}
+
+// Срок словами, а не голой датой: «через 2 дня» читается с одного
+// взгляда, «2026-09-20» требует посчитать в уме.
+function deadlineLabel(c) {
+  if (c.deadline == null) return "без срока";
+  if (c.daysLeft == null) return c.deadline;
+  if (c.daysLeft < -1) return `просрочено на ${-c.daysLeft} дн.`;
+  if (c.daysLeft === -1) return "просрочено вчера";
+  if (c.daysLeft === 0) return "сегодня";
+  if (c.daysLeft === 1) return "завтра";
+  if (c.daysLeft <= 14) return `через ${c.daysLeft} дн.`;
+  return c.deadline;
+}
+
+function boardCardHtml(c, status) {
   const accent = `var(${STATUS_COLOR_VAR[status] || "--s-draft"})`;
-  const prColor = `var(${PRIORITY_COLOR_VAR[r.priority] || "--ink-soft"})`;
+  const prColor = `var(${PRIORITY_COLOR_VAR[c.priority] || "--ink-soft"})`;
+  // Полоска слева — не просто цвет статуса: её насыщенность показывает
+  // срочность (heat считает board.rs). Раньше все карточки колонки
+  // выглядели одинаково, и «что горит» приходилось искать глазами по
+  // датам.
+  const heat = Math.max(0, Math.min(1, c.heat || 0));
   return `
-    <div class="board-card" data-open="${esc(r.public_id)}" data-id="${esc(r.public_id)}" data-status="${esc(status)}" style="border-left: 3px solid ${accent}; --accent-dot: ${accent};">
+    <div class="board-card${c.overdue ? " is-overdue" : ""}${c.stale ? " is-stale" : ""}"
+         data-open="${esc(c.publicId)}" data-id="${esc(c.publicId)}" data-status="${esc(status)}"
+         style="--accent-dot: ${accent}; --heat: ${heat.toFixed(3)};">
+      <span class="board-card-heat" style="background:${accent};"></span>
       <div class="board-card-top">
-        <span class="id">${esc(r.public_id)}</span>
-        ${r.priority ? `<span class="pr-badge" style="color:${prColor}; border-color:${prColor};">${r.priority === "urgent" ? "⚡ " : ""}${esc(PRIORITY_LABELS[r.priority] || r.priority)}</span>` : ""}
+        <span class="id">${esc(c.publicId)}</span>
+        ${c.priority ? `<span class="pr-badge" style="color:${prColor}; border-color:${prColor};">${c.priority === "urgent" ? "⚡ " : ""}${esc(PRIORITY_LABELS[c.priority] || c.priority)}</span>` : ""}
       </div>
-      <div class="ttl">${esc(r.title)}</div>
+      <div class="ttl">${esc(c.title)}</div>
       <div class="foot">
-        ${assigneesHtml(r.assignees)}
-        <span class="deadline-pill ${overdue ? "overdue" : ""}">${overdue ? "⏰ " : "📅 "}${esc(r.deadline || "—")}</span>
+        ${assigneesHtml(c.assignees)}
+        <span class="deadline-pill ${c.overdue ? "overdue" : ""}" title="${esc(c.deadline || "срок не назначен")}">${c.overdue ? "⏰ " : "📅 "}${esc(deadlineLabel(c))}</span>
       </div>
+      ${c.stale || c.unassigned ? `<div class="board-card-flags">
+        ${c.stale ? `<span class="board-flag stale" title="Ничего не менялось ${c.ageDays} дн.">🕸 ${c.ageDays} дн. без движения</span>` : ""}
+        ${c.unassigned ? `<span class="board-flag free" title="Исполнитель не назначен">👤 без исполнителя</span>` : ""}
+      </div>` : ""}
     </div>`;
 }
 
@@ -308,37 +383,109 @@ function wireBoardCards(root) {
   });
 }
 
-export async function loadBoard() {
-  const root = $("#board-body");
-  root.innerHTML = dialogSkeletonHtml(4);
-  let d;
+function columnBadgesHtml(col) {
+  const badges = [];
+  if (col.overdue) badges.push(`<span class="board-col-badge late" title="Просрочено">⏰ ${col.overdue}</span>`);
+  if (col.stale) badges.push(`<span class="board-col-badge stale" title="Без движения больше ${STALE_AFTER_DAYS} дн.">🕸 ${col.stale}</span>`);
+  if (col.unassigned) badges.push(`<span class="board-col-badge free" title="Без исполнителя">👤 ${col.unassigned}</span>`);
+  return badges.join("");
+}
+
+function boardToolbarHtml(layout) {
+  const summary = [];
+  if (layout.totalOverdue) summary.push(`<span class="board-sum late">⏰ ${layout.totalOverdue} просрочено</span>`);
+  if (layout.totalStale) summary.push(`<span class="board-sum stale">🕸 ${layout.totalStale} без движения</span>`);
+  if (!summary.length) summary.push(`<span class="board-sum ok">✓ всё в сроках</span>`);
+  return `
+    <div class="board-toolbar">
+      <label class="board-search">
+        <span aria-hidden="true">🔎</span>
+        <input type="search" id="board-search" placeholder="Номер или название" value="${esc(boardView.query)}" autocomplete="off">
+      </label>
+      <select id="board-sort" class="board-sort" title="Порядок карточек в колонках">
+        ${SORTS.map(([v, l]) => `<option value="${v}" ${v === boardView.sort ? "selected" : ""}>${esc(l)}</option>`).join("")}
+      </select>
+      <div class="board-summary">${summary.join("")}</div>
+    </div>`;
+}
+
+function columnHtml(col, collapsed) {
+  const colorVar = STATUS_COLOR_VAR[col.status] || "--s-draft";
+  // Полоска заполнения показывает, какая часть колонки уже загружена
+  // (колонки подгружаются порциями), а не долю выполнения.
+  const loaded = col.total ? Math.round((col.cards.length / col.total) * 100) : 100;
+  return `
+    <div class="board-col ${collapsed.has(col.status) ? "collapsed" : ""}${col.overWip ? " over-wip" : ""}"
+         data-status="${esc(col.status)}" style="--col-accent: var(${colorVar});">
+      <div class="board-col-head">
+        <span class="lb"><span class="dot ${STATUS_DOT_CLASS[col.status] || "draft"}"></span>${esc(col.label)}</span>
+        <span class="cnt${col.overWip ? " over" : ""}" title="${col.overWip ? `Больше ${col.wipLimit} в работе одновременно — многовато` : "Всего в статусе"}">${col.total}${col.overWip ? ` / ${col.wipLimit}` : ""}</span>
+        <button class="board-col-collapse" data-collapse="${esc(col.status)}" title="Свернуть/развернуть колонку">‹</button>
+      </div>
+      ${columnBadgesHtml(col) ? `<div class="board-col-badges">${columnBadgesHtml(col)}</div>` : ""}
+      <div class="board-col-progress"><i style="width:${loaded}%; background:var(${colorVar});"></i></div>
+      <div class="board-cards" data-count="${col.cards.length}">
+        ${col.cards.length ? col.cards.map(c => boardCardHtml(c, col.status)).join("") : `<div class="board-col-empty">${boardView.query ? "ничего не нашлось" : "пусто"}</div>`}
+      </div>
+      ${col.hasMore ? `<button class="btn ghost board-col-more" data-loadmore="${esc(col.status)}">Показать ещё (${col.total - col.cards.length})</button>` : ""}
+    </div>`;
+}
+
+// Перерисовка доски из уже полученных данных — без похода на сервер.
+// Нужна поиску и переключателю сортировки: оба меняют только раскладку.
+async function renderBoard(root) {
+  if (!lastBoardData) return;
+  let layout;
   try {
-    d = await apiGet("/board");
+    layout = await layoutRequest(lastBoardData.statuses);
   } catch (e) {
-    root.innerHTML = `<div class="bento-empty">Не удалось загрузить доску: ${esc(e.message)}</div>`;
-    return false;
+    // Раскладку считает бэкенд (board_layout), и если он почему-то не
+    // ответил, честнее сказать об этом, чем оставить пустую доску,
+    // неотличимую от «у вас нет отчётов».
+    root.innerHTML = `<div class="bento-empty">Не удалось разложить доску: ${esc(e.message || e)}</div>`;
+    return;
+  }
+  if (!layout || !Array.isArray(layout.columns)) {
+    root.innerHTML = `<div class="bento-empty">Доска вернулась в непонятном виде — попробуйте обновить.</div>`;
+    return;
   }
   const collapsed = readCollapsed();
   root.innerHTML = `
-    <div class="board">
-      ${d.statuses.map(col => `
-        <div class="board-col ${collapsed.has(col.status) ? "collapsed" : ""}" data-status="${esc(col.status)}" style="border-top: 3px solid var(${STATUS_COLOR_VAR[col.status] || "--s-draft"});">
-          <div class="board-col-head">
-            <span class="lb"><span class="dot ${STATUS_DOT_CLASS[col.status] || "draft"}"></span>${esc(col.label)}</span>
-            <span class="cnt">${col.total}</span>
-            <button class="board-col-collapse" data-collapse="${esc(col.status)}" title="Свернуть/развернуть колонку">‹</button>
-          </div>
-          <div class="board-col-progress"><i style="width:${col.total ? Math.round(col.reports.length / col.total * 100) : 100}%; background:var(${STATUS_COLOR_VAR[col.status] || "--s-draft"});"></i></div>
-          <div class="board-cards" data-count="${col.reports.length}">
-            ${col.reports.length ? col.reports.map(r => boardCardHtml(r, col.status)).join("") : `<div class="board-col-empty">пусто</div>`}
-          </div>
-          ${col.has_more ? `<button class="btn ghost board-col-more" data-loadmore="${esc(col.status)}">Показать ещё (${col.total - col.reports.length})</button>` : ""}
-        </div>
-      `).join("")}
-    </div>
+    ${boardToolbarHtml(layout)}
+    <div class="board">${layout.columns.map(col => columnHtml(col, collapsed)).join("")}</div>
   `;
   wireBoardCards(root);
   wireBoardScroll(root.querySelector(".board"));
+  wireBoardToolbar(root);
+  wireColumnButtons(root);
+}
+
+function wireBoardToolbar(root) {
+  const search = root.querySelector("#board-search");
+  const sort = root.querySelector("#board-sort");
+  if (sort) sort.addEventListener("change", () => {
+    boardView.sort = sort.value;
+    writeSort(boardView.sort);
+    renderBoard(root);
+  });
+  if (search) {
+    // Дебаунс: перерисовка доски на каждое нажатие клавиши крала бы
+    // фокус и дёргала раскладку под пальцами.
+    let timer = null;
+    search.addEventListener("input", () => {
+      clearTimeout(timer); // DevSkim: ignore DS172411 — функция, не строка
+      timer = setTimeout(async () => { // DevSkim: ignore DS172411 — функция, не строка
+        boardView.query = search.value;
+        await renderBoard(root);
+        // После перерисовки поле — новый узел, возвращаем в него курсор.
+        const again = root.querySelector("#board-search");
+        if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+      }, 180);
+    });
+  }
+}
+
+function wireColumnButtons(root) {
   root.querySelectorAll("[data-collapse]").forEach(btn => {
     btn.addEventListener("click", e => {
       e.stopPropagation();
@@ -353,30 +500,38 @@ export async function loadBoard() {
   root.querySelectorAll("[data-loadmore]").forEach(btn => {
     btn.addEventListener("click", async () => {
       const status = btn.dataset.loadmore;
-      const colEl = root.querySelector(`.board-col[data-status="${status}"]`);
-      const cardsEl = colEl.querySelector(".board-cards");
-      const offset = parseInt(cardsEl.dataset.count, 10) || 0;
+      const column = lastBoardData.statuses.find(c => c.status === status);
+      const offset = column ? column.reports.length : 0;
       btn.disabled = true;
       btn.textContent = "Загрузка…";
       try {
         const res = await apiGet(`/board/column/${status}`, { offset, limit: 60 });
-        cardsEl.querySelector(".board-col-empty")?.remove();
-        cardsEl.insertAdjacentHTML("beforeend", res.reports.map(r => boardCardHtml(r, status)).join(""));
-        cardsEl.dataset.count = offset + res.reports.length;
-        const shown = offset + res.reports.length;
-        const progressFill = colEl.querySelector(".board-col-progress i");
-        if (progressFill && res.total) progressFill.style.width = `${Math.round(shown / res.total * 100)}%`;
-        wireBoardCards(cardsEl);
-        if (res.has_more) {
-          btn.disabled = false;
-          btn.textContent = `Показать ещё (${res.total - offset - res.reports.length})`;
-        } else {
-          btn.remove();
+        // Догруженное уходит в тот же кэш и проходит ту же раскладку —
+        // иначе новые карточки встали бы в конец колонки без сортировки
+        // и без отметок «просрочено», в отличие от уже показанных.
+        if (column) {
+          column.reports = column.reports.concat(res.reports);
+          column.has_more = res.has_more;
+          column.total = res.total ?? column.total;
         }
+        await renderBoard(root);
       } catch (e) {
         toast(`Не удалось догрузить колонку: ${e.message}`, "error");
         btn.disabled = false;
+        btn.textContent = "Показать ещё";
       }
     });
   });
+}
+
+export async function loadBoard() {
+  const root = $("#board-body");
+  root.innerHTML = dialogSkeletonHtml(5, "cards");
+  try {
+    lastBoardData = await apiGet("/board");
+  } catch (e) {
+    root.innerHTML = `<div class="bento-empty">Не удалось загрузить доску: ${esc(e.message)}</div>`;
+    return false;
+  }
+  await renderBoard(root);
 }

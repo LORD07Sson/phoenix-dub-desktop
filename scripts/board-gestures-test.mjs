@@ -47,8 +47,33 @@ set("fetch", async (url, opts) => {
     : {};
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 });
+// Раскладку доски (сортировка, метрики колонок) считает Rust —
+// board_layout в board.rs, там же её и тесты. Здесь проверяются жесты,
+// поэтому заглушка отдаёт пересказ входа один в один: порядок карточек
+// остаётся тем же, что прислал «сервер», а колонка получает ровно те
+// поля, которые читает рендер.
+const layoutStub = ({ columns }) => ({
+  filteredOut: 0,
+  totalOverdue: 0,
+  totalStale: 0,
+  columns: columns.map(c => ({
+    status: c.status, label: c.label, total: c.total, hasMore: c.has_more,
+    shown: c.reports.length, overdue: 0, unassigned: 0, stale: 0,
+    avgAgeDays: null, wipLimit: null, overWip: false,
+    cards: c.reports.map(r => ({
+      publicId: r.public_id, title: r.title, priority: r.priority, deadline: r.deadline,
+      assignees: r.assignees, daysLeft: null, overdue: false, ageDays: null,
+      stale: false, unassigned: !r.assignees.length, heat: 0,
+    })),
+  })),
+});
+
 w.__TAURI_INTERNALS__ = {
-  invoke: async (cmd) => (cmd === "plugin:event|listen" ? 0 : cmd === "token_load" ? "dsk_test" : null),
+  invoke: async (cmd, args) => (
+    cmd === "plugin:event|listen" ? 0
+      : cmd === "token_load" ? "dsk_test"
+        : cmd === "board_layout" ? layoutStub(args)
+          : null),
   transformCallback: () => 0, unregisterCallback: () => {}, convertFileSrc: p => p,
   metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
 };

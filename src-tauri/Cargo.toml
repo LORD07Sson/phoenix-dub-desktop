@@ -89,6 +89,11 @@ tauri-plugin-opener = "2.5.5"
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
+    # DwmSetWindowAttribute — скругление углов и цвет рамки окна под
+    # Windows 11 (main.rs: apply_windows_11_chrome). Системный заголовок
+    # выключен, так что рамку рисует только DWM, и её цвет по умолчанию
+    # не имеет ничего общего с палитрой приложения.
+    "Win32_Graphics_Dwm",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi",
     "Win32_System_LibraryLoader",
