@@ -75,6 +75,10 @@ export async function tryRestoreSession() {
 export function showAuth(err) {
   $("#auth-screen").hidden = false;
   $("#app-screen").hidden = true;
+  // Полоса заголовка теперь общая для всех экранов (окно без системных
+  // decorations, см. window-chrome.js), поэтому кнопки приложения в ней
+  // прячем отдельно — до входа «Обновить» и «Выйти» бессмысленны.
+  $("#titlebar-apps").hidden = true;
   // Всегда перезаписываем, а не только при наличии err: иначе после
   // «Сессия истекла: …» и обычного выхода старое сообщение продолжало
   // висеть над формой входа.
@@ -85,6 +89,7 @@ export function showAuth(err) {
 export function showApp() {
   $("#auth-screen").hidden = true;
   $("#app-screen").hidden = false;
+  $("#titlebar-apps").hidden = false;
   setDisplayName(state.name);
   // Первый пинг присутствия — сразу, а не через минуту: модуль
   // presence.js стартует при загрузке страницы, когда токена ещё нет,

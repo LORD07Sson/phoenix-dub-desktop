@@ -33,6 +33,20 @@ function notifySessionExpired(detail) {
 }
 export function armSessionExpiry() { sessionExpiredFired = false; }
 
+// Счётчик запросов «в полёте» для полосы загрузки под шапкой (см.
+// #net-bar в index.html). Именно счётчик, а не флаг: запросы идут
+// параллельно (доска + лента + присутствие), и первый же завершившийся
+// гасил бы полосу, пока остальные ещё идут.
+let inFlight = 0;
+function netStart() {
+  inFlight += 1;
+  document.documentElement.classList.add("net-busy");
+}
+function netEnd() {
+  inFlight = Math.max(0, inFlight - 1);
+  if (inFlight === 0) document.documentElement.classList.remove("net-busy");
+}
+
 export async function api(method, path, body) {
   const headers = { "Content-Type": "application/json" };
   if (state.token) headers["X-Init-Data"] = state.token;
@@ -40,6 +54,7 @@ export async function api(method, path, body) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS); // DevSkim: ignore DS172411 — функция, не строка
   let resp;
+  netStart();
   try {
     resp = await fetch(url, {
       method,
@@ -52,6 +67,7 @@ export async function api(method, path, body) {
     throw new Error(`Нет связи с сервером: ${e.message}`);
   } finally {
     clearTimeout(timeout);
+    netEnd();
   }
   if (!resp.ok) {
     let detail = resp.status;
@@ -211,8 +227,21 @@ export function toast(text, kind = "info", action = null) {
 
 // Скелетон-заглушка для модалок, пока грузятся реальные данные
 // (карточка отчёта, QC-анализ) — вместо одного спиннера с текстом.
-export function dialogSkeletonHtml(lines = 4) {
+// Скелетон-заглушка для модалок, пока грузятся реальные данные
+// (карточка отчёта, QC-анализ) — вместо одного спиннера с текстом.
+//
+// Форма повторяет будущее содержимое: сверху заголовок, под ним
+// подпись, дальше блоки. Одинаковые прямоугольники одной высоты,
+// как было раньше, ничего не говорят о том, что грузится, и на
+// медленной сети читаются как «сломалось».
+export function dialogSkeletonHtml(lines = 4, variant = "rows") {
+  const shape = i => {
+    if (variant === "cards") return i === 0 ? "line" : "card";
+    return i === 0 ? "line" : i === 1 ? "line-sm" : "";
+  };
   const rows = Array.from({ length: lines }, (_, i) =>
-    `<div class="skeleton-row" style="animation-delay:${i * 60}ms;"></div>`).join("");
+    // Нарастающая задержка: строки проявляются сверху вниз, как
+    // читается настоящий список, а не вспыхивают все разом.
+    `<div class="skeleton-row ${shape(i)}" style="animation-delay:${i * 70}ms;"></div>`).join("");
   return `<div class="skeleton-wrap">${rows}</div>`;
 }

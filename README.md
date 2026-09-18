@@ -94,6 +94,18 @@ rustup target add x86_64-pc-windows-gnu
 cargo clippy --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets
 ```
 
+## Окно
+
+Системный заголовок у окна выключен (`decorations: false` в
+`tauri.conf.json`) — он был второй полосой над шапкой приложения.
+Полосу рисует фронтенд: перетаскивание через `data-tauri-drag-region`,
+кнопки свернуть/развернуть/закрыть — в
+[`src/app/window-chrome.js`](src/app/window-chrome.js). Изменение
+размера, Aero Snap и скругление углов остаются системными (окно
+сохраняет `WS_THICKFRAME`); чего своей полосой не получить — меню Snap
+Layouts по наведению на «развернуть», для него нужен перехват
+`WM_NCHITTEST` на нативной стороне.
+
 ## Права на файлы
 
 Любую `#[tauri::command]` можно вызвать из JS одной строкой, поэтому путь,
@@ -130,6 +142,8 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu
 |---|---|
 | `src-tauri/` | Rust-бэкенд (команды, трей, автообновление, QC звука, инструменты ffmpeg, встроенный mpv) |
 | `src-tauri/src/file_scope.rs` | Какие пути на диске вебвью вправе попросить прочитать/перезаписать |
+| `src-tauri/src/media_tools.rs` | Операции ffmpeg: резка (в т.ч. точная), конвертация, звук, склейка, муксинг, дубляж, скорость, кадры, GIF, субтитры |
+| `src-tauri/src/board.rs` | Раскладка доски: срочность карточек, метрики колонок, поиск (чистая функция, покрыта тестами) |
 | `src/` | Фронтенд-исходники — HTML/CSS/JS, раздроблен по темам в `src/app/*.js`; `Overview.jsx` — на SolidJS, остальные вкладки на vanilla JS (частичная миграция, см. CHANGELOG) |
 | `dist/` | Собранный фронтенд (`npm run build`, Vite) — не в git, пересобирается всегда |
 | `docs/API.md` | Список эндпоинтов сервера, которые дёргает клиент |

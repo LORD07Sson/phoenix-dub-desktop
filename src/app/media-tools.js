@@ -281,11 +281,19 @@ const cutState = {
   // Длительность от самого mpv точнее, чем от ffprobe, на файлах с
   // кривым контейнером; ffprobe-значение остаётся запасным.
   mpvDuration: null,
+  // Точная резка (smart cut в media_tools.rs): помнится между файлами —
+  // кто работает по кадрам, работает так всегда.
+  precise: false,
   // Громкость/скорость живут между файлами: выставил один раз — работает
   // дальше, а не сбрасывается на каждый новый дубль.
   volume: 100,
   muted: false,
   speed: 1,
+  // Дорожки файла (приходят из mpv свойством track-list) и выбранная
+  // петля A-B. Петля — главный режим укладки: реплику слушают по кругу
+  // между метками, пока не ляжет в губы.
+  tracks: [],
+  abLoop: false,
 };
 
 function cutDuration() {
@@ -422,6 +430,12 @@ function onMpvState(root, { name, data }) {
     case "speed":
       if (typeof data === "number") cutState.speed = data;
       break;
+    case "track-list":
+      if (Array.isArray(data)) {
+        cutState.tracks = data;
+        renderTrackPickers(root);
+      }
+      break;
     case "file-error":
       toast(`Плеер не смог открыть файл: ${data}`, "error");
       break;
@@ -473,6 +487,80 @@ async function seekTo(root, seconds) {
   }
 }
 
+// Петля по меткам I/O: включается только когда обе метки стоят —
+// зацикливать «отсюда и до конца файла» смысла нет.
+async function toggleAbLoop(root) {
+  const canLoop = cutState.markIn != null && cutState.markOut != null;
+  if (!canLoop && !cutState.abLoop) {
+    toast("Сначала отметьте начало (I) и конец (O) — петля идёт между ними.", "error");
+    return;
+  }
+  cutState.abLoop = !cutState.abLoop;
+  const a = Math.min(cutState.markIn, cutState.markOut);
+  const b = Math.max(cutState.markIn, cutState.markOut);
+  try {
+    if (cutState.abLoop) {
+      await invoke("mpv_set_ab_loop", { start: a, end: b });
+      await seekTo(root, a);
+      if (cutState.mpvPaused) await mpvTogglePlay(root);
+    } else {
+      await invoke("mpv_set_ab_loop", { start: null, end: null });
+    }
+  } catch (e) {
+    cutState.abLoop = false;
+    toast(`Плеер: ${e}`, "error");
+  }
+  updateAbButton(root);
+}
+
+function updateAbButton(root) {
+  const btn = root.querySelector("#mt-cut-ab");
+  if (!btn) return;
+  btn.classList.toggle("active", cutState.abLoop);
+  btn.title = cutState.abLoop ? "Выключить петлю A-B" : "Повторять между метками I и O";
+}
+
+// Списки дорожек рисуются отдельно от всей панели: они приезжают из mpv
+// асинхронно, уже после того как панель отрисована, и перерисовывать
+// из-за них плейсхолдер видео (то есть пересоздавать окно плеера) нельзя.
+function renderTrackPickers(root) {
+  const mount = root.querySelector("#mt-cut-tracks");
+  if (!mount) return;
+  const of = kind => cutState.tracks.filter(t => t.type === kind);
+  const audio = of("audio");
+  const subs = of("sub");
+  if (audio.length < 2 && subs.length === 0) { mount.innerHTML = ""; return; }
+  const optionsFor = (list, allowOff) => [
+    ...(allowOff ? [`<option value="-1">выкл.</option>`] : []),
+    ...list.map(t => {
+      const name = [t.lang, t.title].filter(Boolean).join(" · ") || `дорожка ${t.id}`;
+      return `<option value="${t.id}" ${t.selected ? "selected" : ""}>${esc(name)}</option>`;
+    }),
+  ].join("");
+  mount.innerHTML = `
+    ${audio.length > 1 ? `<label class="mt-track-pick">🔊 <select data-track-kind="audio">${optionsFor(audio, false)}</select></label>` : ""}
+    ${subs.length ? `<label class="mt-track-pick">💬 <select data-track-kind="subtitle">${optionsFor(subs, true)}</select></label>` : ""}`;
+  mount.querySelectorAll("[data-track-kind]").forEach(sel => {
+    sel.addEventListener("change", async () => {
+      try { await invoke("mpv_set_track", { kind: sel.dataset.trackKind, id: Number(sel.value) }); }
+      catch (e) { toast(`Плеер: ${e}`, "error"); }
+    });
+  });
+}
+
+async function playerScreenshot(root) {
+  const outPath = await pickOutputFile(`${stemOf(cutState.path)}_${Math.round(currentPlayTime(root))}s.png`, [
+    { name: "PNG", extensions: ["png"] },
+  ]);
+  if (!outPath) return;
+  try {
+    await invoke("mpv_screenshot", { savePath: outPath });
+    toastDone("Кадр сохранён.", outPath);
+  } catch (e) {
+    toast(`Не удалось снять кадр: ${e}`, "error");
+  }
+}
+
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 
 function playerBarHtml() {
@@ -482,7 +570,10 @@ function playerBarHtml() {
       <button class="icon-btn mt-play" id="mt-cut-playpause" title="Play/pause (пробел)">${cutState.mpvPaused ? "▶" : "⏸"}</button>
       <button class="icon-btn" id="mt-cut-frame-fwd" title="Кадр вперёд (.)">|⯈</button>
       <span class="mt-time" id="mt-cut-time">0:00.0 / 0:00.0</span>
+      <button class="icon-btn" id="mt-cut-ab" title="Повторять между метками I и O">🔁 A-B</button>
+      <button class="icon-btn" id="mt-cut-shot" title="Сохранить текущий кадр">📸</button>
       <span class="mt-player-spacer"></span>
+      <span class="mt-track-picks" id="mt-cut-tracks"></span>
       <button class="icon-btn" id="mt-cut-mute" title="Без звука (m)">${cutState.muted ? "🔇" : "🔊"}</button>
       <input type="range" id="mt-cut-volume" class="mt-volume" min="0" max="130" step="1" value="${cutState.volume}" title="Громкость">
       <select id="mt-cut-speed" class="mt-speed" title="Скорость воспроизведения">
@@ -537,7 +628,11 @@ function cutPanelHtml() {
       <label><input type="checkbox" id="mt-merge"> Склеить всё в один файл</label>
       <button class="btn primary" id="mt-cut-export">✂ Экспортировать</button>
     </div>
-    <div class="mt-hotkeys">Пробел — play/pause · I / O — метки · , / . — кадр назад/вперёд · ← → — ±1 с (с Shift ±10 с) · Enter — добавить сегмент</div>
+    <label class="mt-precise" title="Голова сегмента перекодируется, остальное копируется — начало получается ровно на отмеченной секунде">
+      <input type="checkbox" id="mt-precise" ${cutState.precise ? "checked" : ""}>
+      <span>Точная резка по кадру <i>без неё начало сегмента подъезжает к ближайшему опорному кадру — это до нескольких секунд</i></span>
+    </label>
+    <div class="mt-hotkeys">Пробел — play/pause · I / O — метки · L — петля A-B · , / . — кадр назад/вперёд · ← → — ±1 с (с Shift ±10 с) · Enter — добавить сегмент</div>
   `;
 }
 
@@ -722,6 +817,8 @@ function wireCutPanel(root) {
     cutState.lastKnownTime = 0;
     cutState.mpvDuration = null;
     cutState.mpvPaused = true;
+    cutState.tracks = [];
+    cutState.abLoop = false;
     // Сменили видео на аудио (или наоборот) — старое mpv-окно неоткуда
     // взять новый смысл, закрываем; переоткроется в openCutMpv ниже, если
     // новый файл снова видео.
@@ -741,6 +838,10 @@ function wireCutPanel(root) {
   if (isVideoFile()) {
     openCutMpv(root);
     root.querySelector("#mt-cut-playpause").addEventListener("click", () => mpvTogglePlay(root));
+    root.querySelector("#mt-cut-ab").addEventListener("click", () => toggleAbLoop(root));
+    root.querySelector("#mt-cut-shot").addEventListener("click", () => playerScreenshot(root));
+    renderTrackPickers(root);
+    updateAbButton(root);
     root.querySelector("#mt-cut-frame-back").addEventListener("click", () => frameStep(root, false));
     root.querySelector("#mt-cut-frame-fwd").addEventListener("click", () => frameStep(root, true));
     const volume = root.querySelector("#mt-cut-volume");
@@ -821,6 +922,7 @@ function wireCutPanel(root) {
   root.querySelector("#mt-cut-export").addEventListener("click", async () => {
     const keepSeparate = root.querySelector("#mt-keep-separate").checked;
     const merge = root.querySelector("#mt-merge").checked;
+    cutState.precise = root.querySelector("#mt-precise").checked;
     if (!keepSeparate && !merge) {
       toast("Выберите хотя бы один вариант экспорта.", "error");
       return;
@@ -837,6 +939,7 @@ function wireCutPanel(root) {
         outDir,
         keepSeparate,
         merge,
+        precise: cutState.precise,
       }),
     });
     if (!result) return;
@@ -872,6 +975,11 @@ function handleCutHotkey(root, e) {
       e.preventDefault();
       cutState.markOut = currentPlayTime(root);
       refreshCutMarks(root);
+      break;
+    case "KeyL":
+      if (!isVideoFile()) break;
+      e.preventDefault();
+      toggleAbLoop(root);
       break;
     case "KeyM":
       if (!isVideoFile()) break;
@@ -1357,6 +1465,425 @@ function wireMuxPanel(root) {
 }
 
 // ============================================================
+// Дубляж — свести записанный дубль с видео. Самая частая операция
+// студии, под которую до сих пор не было ни одной кнопки: приходилось
+// собирать муксингом, а сдвинуть дорожку относительно картинки (дубль
+// почти никогда не ложится кадр-в-кадр) было нечем вовсе.
+// См. dub_audio в media_tools.rs.
+// ============================================================
+
+const DUB_MODES = [
+  ["replace", "Заменить оригинальный звук"],
+  ["add", "Отдельной дорожкой (обе в файле)"],
+  ["mix", "Поверх приглушённого оригинала"],
+];
+
+const dubState = {
+  videoIndex: null, dubIndex: null,
+  offset: "0", mode: "replace", originalVolume: "0.15", codec: "aac", bitrate: "192k",
+};
+
+function dubPanelHtml() {
+  const video = filePool[dubState.videoIndex];
+  const dub = filePool[dubState.dubIndex];
+  return `
+    <div class="mt-form-row">
+      <span>Видео</span>
+      ${poolSelectHtml("mt-dub-video", dubState.videoIndex, f => f.info && f.info.video)}
+      ${video && video.info ? infoLineHtml(video.info) : ""}
+    </div>
+    <div class="mt-form-row">
+      <span>Дорожка дубляжа</span>
+      ${poolSelectHtml("mt-dub-audio", dubState.dubIndex, f => f.info && f.info.audio)}
+      ${dub && dub.info ? infoLineHtml(dub.info) : ""}
+    </div>
+    <div class="mt-form-row">
+      <span>Что сделать</span>
+      <select id="mt-dub-mode">
+        ${DUB_MODES.map(([v, l]) => `<option value="${v}" ${v === dubState.mode ? "selected" : ""}>${esc(l)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="mt-form-row">
+      <span>Сдвиг дубляжа, с</span>
+      <input id="mt-dub-offset" type="number" step="0.01" style="width:100px;" value="${esc(dubState.offset)}">
+      <span class="mt-info-line">плюс — дубль звучит позже картинки, минус — раньше</span>
+    </div>
+    <div class="mt-form-row" ${dubState.mode === "mix" ? "" : "hidden"}>
+      <span>Громкость оригинала</span>
+      <input id="mt-dub-origvol" type="range" min="0" max="1" step="0.05" style="width:160px;" value="${esc(dubState.originalVolume)}">
+      <span class="mt-info-line" id="mt-dub-origvol-val">${Math.round(Number(dubState.originalVolume) * 100)}%</span>
+    </div>
+    <div class="mt-form-row">
+      <span>Кодек / битрейт звука</span>
+      <select id="mt-dub-codec">
+        ${[["aac", "AAC"], ["libopus", "Opus"], ["flac", "FLAC"], ["pcm_s16le", "PCM 16 бит"]]
+          .map(([v, l]) => `<option value="${v}" ${v === dubState.codec ? "selected" : ""}>${l}</option>`).join("")}
+      </select>
+      <input id="mt-dub-bitrate" type="text" style="width:90px;" placeholder="192k" value="${esc(dubState.bitrate)}">
+    </div>
+    <div class="mt-info-line">Картинка копируется без перекодирования — качество видео не меняется.</div>
+    <button class="btn primary" id="mt-dub-run" ${video && dub ? "" : "disabled"}>🎙 Свести</button>
+  `;
+}
+
+function wireDubPanel(root) {
+  const bind = (sel, key) => {
+    const el = root.querySelector(sel);
+    if (el) el.addEventListener("change", () => { dubState[key] = el.value === "" ? null : Number(el.value); renderActivePanel(root); });
+  };
+  bind("#mt-dub-video", "videoIndex");
+  bind("#mt-dub-audio", "dubIndex");
+  root.querySelector("#mt-dub-mode").addEventListener("change", e => {
+    dubState.mode = e.target.value;
+    renderActivePanel(root);
+  });
+  const remember = (sel, key) => {
+    const el = root.querySelector(sel);
+    if (el) el.addEventListener("input", () => { dubState[key] = el.value; });
+  };
+  remember("#mt-dub-offset", "offset");
+  remember("#mt-dub-codec", "codec");
+  remember("#mt-dub-bitrate", "bitrate");
+  const vol = root.querySelector("#mt-dub-origvol");
+  if (vol) vol.addEventListener("input", () => {
+    dubState.originalVolume = vol.value;
+    root.querySelector("#mt-dub-origvol-val").textContent = `${Math.round(Number(vol.value) * 100)}%`;
+  });
+
+  const runBtn = root.querySelector("#mt-dub-run");
+  runBtn.addEventListener("click", async () => {
+    const video = filePool[dubState.videoIndex];
+    const dub = filePool[dubState.dubIndex];
+    if (!video || !dub) return;
+    const outPath = await pickOutputFile(`${stemOf(video.path)}_dub.${extOf(video.path) || "mkv"}`);
+    if (!outPath) return;
+    const ok = await runJob(root, {
+      button: runBtn,
+      busyLabel: "Свожу…",
+      run: async () => {
+        await invoke("mt_dub_audio", {
+          video: video.path,
+          dub: dub.path,
+          outPath,
+          opts: {
+            offset: Number(dubState.offset) || 0,
+            mode: dubState.mode,
+            originalVolume: Number(dubState.originalVolume) || 0,
+            audioCodec: dubState.codec,
+            audioBitrate: dubState.bitrate.trim() || null,
+          },
+        });
+        return true;
+      },
+    });
+    if (ok) toastDone("Дубляж сведён с видео.", outPath);
+  });
+}
+
+// ============================================================
+// Кадры — стоп-кадр и контактный лист, плюс GIF. Референс для
+// переписки («вот этот кадр») и превью серии одним изображением.
+// См. extract_frames/make_gif в media_tools.rs.
+// ============================================================
+
+const framesState = {
+  poolIndex: null, path: null, info: null,
+  kind: "single", at: "0", count: "12", columns: "4", width: "640",
+  gifStart: "0", gifDuration: "3", gifFps: "15", gifWidth: "480",
+};
+
+function framesPanelHtml() {
+  const picker = `<div class="mt-file-row">${poolSelectHtml("mt-frames-pick", framesState.poolIndex, f => f.info && f.info.video)}${framesState.path ? infoLineHtml(framesState.info) : ""}</div>`;
+  if (!framesState.path) {
+    return `${picker}<div class="mt-empty"><p>Выберите видео из пула выше — снять кадр, собрать контактный лист или сделать GIF.</p></div>`;
+  }
+  const kinds = [["single", "Один кадр"], ["sheet", "Контактный лист"], ["gif", "GIF"]];
+  return `
+    ${picker}
+    <div class="mt-form-row">
+      <span>Что сделать</span>
+      <select id="mt-frames-kind">
+        ${kinds.map(([v, l]) => `<option value="${v}" ${v === framesState.kind ? "selected" : ""}>${l}</option>`).join("")}
+      </select>
+    </div>
+    ${framesState.kind === "single" ? `
+      <div class="mt-form-row"><span>Секунда</span>
+        <input id="mt-frames-at" type="number" step="0.1" min="0" style="width:110px;" value="${esc(framesState.at)}">
+        <input id="mt-frames-width" type="number" min="1" style="width:110px;" value="${esc(framesState.width)}" title="Ширина, px">
+      </div>` : ""}
+    ${framesState.kind === "sheet" ? `
+      <div class="mt-form-row"><span>Кадров / колонок</span>
+        <input id="mt-frames-count" type="number" min="2" max="400" style="width:90px;" value="${esc(framesState.count)}">
+        <input id="mt-frames-columns" type="number" min="1" max="20" style="width:90px;" value="${esc(framesState.columns)}">
+        <input id="mt-frames-width" type="number" min="1" style="width:110px;" value="${esc(framesState.width)}" title="Ширина кадра, px">
+      </div>
+      <div class="mt-info-line">Кадры берутся равномерно по всей длине файла.</div>` : ""}
+    ${framesState.kind === "gif" ? `
+      <div class="mt-form-row"><span>С какой секунды / сколько</span>
+        <input id="mt-gif-start" type="number" step="0.1" min="0" style="width:100px;" value="${esc(framesState.gifStart)}">
+        <input id="mt-gif-duration" type="number" step="0.1" min="0.1" max="60" style="width:100px;" value="${esc(framesState.gifDuration)}">
+      </div>
+      <div class="mt-form-row"><span>Кадров в секунду / ширина</span>
+        <input id="mt-gif-fps" type="number" min="5" max="50" style="width:100px;" value="${esc(framesState.gifFps)}">
+        <input id="mt-gif-width" type="number" min="1" style="width:100px;" value="${esc(framesState.gifWidth)}">
+      </div>
+      <div class="mt-info-line">Палитра подбирается под этот фрагмент отдельным проходом — без этого GIF выходит грязным на любом градиенте.</div>` : ""}
+    <button class="btn primary" id="mt-frames-run">${framesState.kind === "gif" ? "🎞 Собрать GIF" : "🖼 Снять"}</button>
+  `;
+}
+
+function wireFramesPanel(root) {
+  const pickSel = root.querySelector("#mt-frames-pick");
+  if (pickSel) pickSel.addEventListener("change", () => {
+    if (pickSel.value === "") return;
+    const entry = filePool[Number(pickSel.value)];
+    framesState.poolIndex = Number(pickSel.value);
+    framesState.path = entry.path;
+    framesState.info = entry.info;
+    renderActivePanel(root);
+  });
+  if (!framesState.path) return;
+  root.querySelector("#mt-frames-kind").addEventListener("change", e => {
+    framesState.kind = e.target.value;
+    renderActivePanel(root);
+  });
+  [["#mt-frames-at", "at"], ["#mt-frames-count", "count"], ["#mt-frames-columns", "columns"],
+   ["#mt-frames-width", "width"], ["#mt-gif-start", "gifStart"], ["#mt-gif-duration", "gifDuration"],
+   ["#mt-gif-fps", "gifFps"], ["#mt-gif-width", "gifWidth"]].forEach(([sel, key]) => {
+    const el = root.querySelector(sel);
+    if (el) el.addEventListener("input", () => { framesState[key] = el.value; });
+  });
+
+  const runBtn = root.querySelector("#mt-frames-run");
+  runBtn.addEventListener("click", async () => {
+    const stem = stemOf(framesState.path);
+    if (framesState.kind === "gif") {
+      const outPath = await pickOutputFile(`${stem}.gif`, [{ name: "GIF", extensions: ["gif"] }]);
+      if (!outPath) return;
+      const ok = await runJob(root, {
+        button: runBtn, busyLabel: "Собираю GIF…",
+        run: async () => {
+          await invoke("mt_make_gif", {
+            path: framesState.path, outPath,
+            start: Number(framesState.gifStart) || 0,
+            duration: Number(framesState.gifDuration) || 3,
+            fps: Number(framesState.gifFps) || 15,
+            width: Number(framesState.gifWidth) || 480,
+          });
+          return true;
+        },
+      });
+      if (ok) toastDone("GIF готов.", outPath);
+      return;
+    }
+    const single = framesState.kind === "single";
+    const name = single ? `${stem}_${Math.round(Number(framesState.at) || 0)}s.png` : `${stem}_sheet.jpg`;
+    const outPath = await pickOutputFile(name, [{ name: single ? "PNG" : "JPEG", extensions: [single ? "png" : "jpg"] }]);
+    if (!outPath) return;
+    const ok = await runJob(root, {
+      button: runBtn, busyLabel: single ? "Снимаю кадр…" : "Собираю лист…",
+      run: async () => {
+        await invoke("mt_extract_frames", {
+          path: framesState.path, outPath,
+          opts: {
+            at: Number(framesState.at) || 0,
+            count: single ? 1 : (Number(framesState.count) || 12),
+            columns: Number(framesState.columns) || 4,
+            width: Number(framesState.width) || 640,
+          },
+        });
+        return true;
+      },
+    });
+    if (ok) toastDone(single ? "Кадр сохранён." : "Контактный лист готов.", outPath);
+  });
+}
+
+// ============================================================
+// Скорость — растянуть или ускорить и картинку, и звук разом.
+// В дубляже это рабочий инструмент, а не эффект: японский оригинал и
+// русская укладка редко совпадают по длине, и дубль подгоняют под
+// картинку на несколько процентов. Тон при этом сохраняется (atempo),
+// иначе голос «поедет». См. change_speed в media_tools.rs.
+// ============================================================
+
+const SPEED_PRESETS = [0.5, 0.9, 0.95, 1.05, 1.1, 1.25, 1.5, 2];
+const speedState = { poolIndex: null, path: null, info: null, speed: "1.05", keepPitch: true };
+
+function speedPanelHtml() {
+  const picker = `<div class="mt-file-row">${poolSelectHtml("mt-speed-pick", speedState.poolIndex, f => f.info && (f.info.video || f.info.audio))}${speedState.path ? infoLineHtml(speedState.info) : ""}</div>`;
+  if (!speedState.path) {
+    return `${picker}<div class="mt-empty"><p>Выберите файл из пула выше — изменить скорость и картинки, и звука разом.</p></div>`;
+  }
+  const speed = Number(speedState.speed) || 1;
+  const before = speedState.info ? speedState.info.duration : 0;
+  return `
+    ${picker}
+    <div class="mt-form-row">
+      <span>Скорость</span>
+      <input id="mt-speed-value" type="number" step="0.01" min="0.1" max="10" style="width:100px;" value="${esc(speedState.speed)}">
+      <div class="mt-speed-presets">
+        ${SPEED_PRESETS.map(v => `<button class="btn ghost mt-speed-preset${Math.abs(v - speed) < 1e-6 ? " active" : ""}" data-speed="${v}">${v}×</button>`).join("")}
+      </div>
+    </div>
+    <div class="mt-form-row">
+      <label><input type="checkbox" id="mt-speed-pitch" ${speedState.keepPitch ? "checked" : ""}> Сохранять высоту голоса</label>
+      <span class="mt-info-line">без этого голос поедет вверх или вниз, как плёнка не той скорости</span>
+    </div>
+    <div class="mt-info-line">Длительность: ${formatTime(before)} → <b>${formatTime(speed > 0 ? before / speed : before)}</b></div>
+    <button class="btn primary" id="mt-speed-run">⏩ Применить</button>
+  `;
+}
+
+function wireSpeedPanel(root) {
+  const pickSel = root.querySelector("#mt-speed-pick");
+  if (pickSel) pickSel.addEventListener("change", () => {
+    if (pickSel.value === "") return;
+    const entry = filePool[Number(pickSel.value)];
+    speedState.poolIndex = Number(pickSel.value);
+    speedState.path = entry.path;
+    speedState.info = entry.info;
+    renderActivePanel(root);
+  });
+  if (!speedState.path) return;
+
+  const value = root.querySelector("#mt-speed-value");
+  value.addEventListener("input", () => {
+    speedState.speed = value.value;
+    // Пересчитать «во что превратится длительность» надо сразу — это и
+    // есть главный ответ на вопрос «а сколько ставить».
+    renderActivePanel(root);
+  });
+  root.querySelectorAll("[data-speed]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      speedState.speed = btn.dataset.speed;
+      renderActivePanel(root);
+    });
+  });
+  root.querySelector("#mt-speed-pitch").addEventListener("change", e => {
+    speedState.keepPitch = e.target.checked;
+  });
+
+  const runBtn = root.querySelector("#mt-speed-run");
+  runBtn.addEventListener("click", async () => {
+    const speed = Number(speedState.speed);
+    if (!(speed > 0)) { toast("Скорость должна быть больше нуля.", "error"); return; }
+    const outPath = await pickOutputFile(`${stemOf(speedState.path)}_x${speed}.${extOf(speedState.path) || "mp4"}`);
+    if (!outPath) return;
+    const ok = await runJob(root, {
+      button: runBtn,
+      busyLabel: "Меняю скорость…",
+      run: async () => {
+        await invoke("mt_change_speed", {
+          path: speedState.path, outPath, speed, keepPitch: speedState.keepPitch,
+        });
+        return true;
+      },
+    });
+    if (ok) toastDone("Готово.", outPath);
+  });
+}
+
+// ============================================================
+// Субтитры — вшить в картинку или вытащить из контейнера.
+// См. burn_subtitles/extract_subtitles в media_tools.rs.
+// ============================================================
+
+const subsState = { videoIndex: null, subsIndex: null, mode: "burn", fontSize: "28", track: "0" };
+
+function subsPanelHtml() {
+  const video = filePool[subsState.videoIndex];
+  const burning = subsState.mode === "burn";
+  return `
+    <div class="mt-form-row">
+      <span>Что сделать</span>
+      <select id="mt-subs-mode">
+        <option value="burn" ${burning ? "selected" : ""}>Вшить субтитры в картинку</option>
+        <option value="extract" ${burning ? "" : "selected"}>Вытащить субтитры из файла</option>
+      </select>
+    </div>
+    <div class="mt-form-row">
+      <span>Видео</span>
+      ${poolSelectHtml("mt-subs-video", subsState.videoIndex, f => f.info && f.info.video)}
+      ${video && video.info ? infoLineHtml(video.info) : ""}
+    </div>
+    ${burning ? `
+      <div class="mt-form-row">
+        <span>Файл субтитров</span>
+        ${poolSelectHtml("mt-subs-file", subsState.subsIndex, f => SUBTITLE_EXTENSIONS.includes(extOf(f.path)))}
+      </div>
+      <div class="mt-form-row">
+        <span>Размер шрифта</span>
+        <input id="mt-subs-font" type="number" min="8" max="96" style="width:90px;" value="${esc(subsState.fontSize)}">
+        <span class="mt-info-line">действует для .srt; у .ass стиль задан внутри самого файла</span>
+      </div>
+      <div class="mt-info-line">Вшивание перекодирует картинку — это самая долгая операция здесь.</div>
+    ` : `
+      <div class="mt-form-row">
+        <span>Номер дорожки</span>
+        <input id="mt-subs-track" type="number" min="0" max="20" style="width:90px;" value="${esc(subsState.track)}">
+        <span class="mt-info-line">0 — первая дорожка субтитров в файле</span>
+      </div>
+    `}
+    <button class="btn primary" id="mt-subs-run" ${video ? "" : "disabled"}>${burning ? "💬 Вшить" : "💬 Вытащить"}</button>
+  `;
+}
+
+function wireSubsPanel(root) {
+  root.querySelector("#mt-subs-mode").addEventListener("change", e => {
+    subsState.mode = e.target.value;
+    renderActivePanel(root);
+  });
+  const bind = (sel, key) => {
+    const el = root.querySelector(sel);
+    if (el) el.addEventListener("change", () => { subsState[key] = el.value === "" ? null : Number(el.value); renderActivePanel(root); });
+  };
+  bind("#mt-subs-video", "videoIndex");
+  bind("#mt-subs-file", "subsIndex");
+  [["#mt-subs-font", "fontSize"], ["#mt-subs-track", "track"]].forEach(([sel, key]) => {
+    const el = root.querySelector(sel);
+    if (el) el.addEventListener("input", () => { subsState[key] = el.value; });
+  });
+
+  const runBtn = root.querySelector("#mt-subs-run");
+  runBtn.addEventListener("click", async () => {
+    const video = filePool[subsState.videoIndex];
+    if (!video) return;
+    const stem = stemOf(video.path);
+    if (subsState.mode === "burn") {
+      const subs = filePool[subsState.subsIndex];
+      if (!subs) { toast("Выберите файл субтитров из пула.", "error"); return; }
+      const outPath = await pickOutputFile(`${stem}_sub.mp4`, [{ name: "MP4", extensions: ["mp4"] }]);
+      if (!outPath) return;
+      const ok = await runJob(root, {
+        button: runBtn, busyLabel: "Вшиваю…",
+        run: async () => {
+          await invoke("mt_burn_subtitles", {
+            video: video.path, subs: subs.path, outPath,
+            fontSize: Number(subsState.fontSize) || 28,
+          });
+          return true;
+        },
+      });
+      if (ok) toastDone("Субтитры вшиты.", outPath);
+      return;
+    }
+    const outPath = await pickOutputFile(`${stem}.srt`, [{ name: "SubRip", extensions: ["srt"] }]);
+    if (!outPath) return;
+    const ok = await runJob(root, {
+      button: runBtn, busyLabel: "Извлекаю…",
+      run: async () => {
+        await invoke("mt_extract_subtitles", {
+          path: video.path, outPath, track: Number(subsState.track) || 0,
+        });
+        return true;
+      },
+    });
+    if (ok) toastDone("Субтитры извлечены.", outPath);
+  });
+}
+
+// ============================================================
 // Общий каркас модалки — реестр операций (переключатель вкладок).
 // Добавить новую операцию позже = ещё одна запись здесь + свой
 // html()/wire(), остальное не трогается.
@@ -1366,6 +1893,10 @@ const OPERATIONS = {
   cut: { label: "✂️ Обрезка", html: cutPanelHtml, wire: wireCutPanel },
   convert: { label: "🔄 Конвертация", html: convertPanelHtml, wire: wireConvertPanel },
   audio: { label: "🎵 Аудио", html: audioPanelHtml, wire: wireAudioPanel },
+  dub: { label: "🎙 Дубляж", html: dubPanelHtml, wire: wireDubPanel },
+  speed: { label: "⏩ Скорость", html: speedPanelHtml, wire: wireSpeedPanel },
+  frames: { label: "🖼 Кадры", html: framesPanelHtml, wire: wireFramesPanel },
+  subs: { label: "💬 Субтитры", html: subsPanelHtml, wire: wireSubsPanel },
   concat: { label: "🧩 Склейка", html: concatPanelHtml, wire: wireConcatPanel },
   mux: { label: "🎛 Муксинг", html: muxPanelHtml, wire: wireMuxPanel },
 };
