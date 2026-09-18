@@ -89,7 +89,9 @@ let qcCalls = 0;
 w.__TAURI_INTERNALS__ = {
   invoke: async (cmd, args) => {
     if (cmd === "token_load") return "dsk_test";
-    if (cmd === "plugin:dialog|open") return ["/tmp/ep12_kaguya.wav", "/tmp/ep12_fujiwara.wav"];
+    // Диалог выбора файла теперь открывает Rust (file_scope.rs), а не
+    // JS-плагин — стабим свою команду, а не plugin:dialog|open.
+    if (cmd === "pick_input_files") return ["/tmp/ep12_kaguya.wav", "/tmp/ep12_fujiwara.wav"];
     if (cmd === "qc_analyze") {
       qcCalls++;
       return String(args.path).includes("kaguya") ? CLIPPED : CLEAN;

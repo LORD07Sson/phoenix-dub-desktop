@@ -18,6 +18,14 @@ rust-version = "1.88"
 # никакого Vite dev-сервера, это не окно разработчика.
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+# Правая кнопка -> «Осмотреть» в собранном бинарнике. Раньше эта фича
+# стояла в списке tauri безусловно, то есть devtools уезжали и в релиз к
+# студии: на общей рабочей машине любой желающий открывает консоль в
+# контексте приложения и оттуда вызывает ЛЮБУЮ tauri-команду с правами
+# вошедшего пользователя, а заодно читает его desktop-токен из памяти
+# страницы. Теперь это отдельный флаг, который CI не передаёт:
+#   cargo run --features devtools
+devtools = ["tauri/devtools"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -27,11 +35,12 @@ tauri-build = { version = "2", features = [] }
 # URL (convertFileSrc() на JS-стороне), нужен для видео-превью в
 # инструментах ffmpeg (media_tools.rs: register_media_file). Без неё
 # app.asset_protocol_scope() недоступен вовсе.
-# devtools — временно, чтобы можно было открыть консоль правой кнопкой
-# ("Осмотреть") в собранном --release, а не только в `tauri dev`: mpv-
-# плеер молча не создаётся на реальной машине (ни toast, ни процесса),
-# и без консоли в проде нечем это диагностировать. Снять после отладки.
-tauri = { version = "2", features = ["tray-icon", "protocol-asset", "devtools"] }
+# devtools здесь НЕТ намеренно — см. [features] выше: в релизной сборке
+# консоль в контексте приложения это готовый обход всех проверок на
+# JS-стороне. Диагностика «у пользователя не работает» закрыта файловыми
+# логами (tauri-plugin-log ниже + кнопка «Открыть логи» в настройках),
+# а не консолью на рабочей машине студии.
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"

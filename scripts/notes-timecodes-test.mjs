@@ -65,7 +65,9 @@ const QC_REPORT = {
 w.__TAURI_INTERNALS__ = {
   invoke: async (cmd) => {
     if (cmd === "token_load") return "dsk_test";
-    if (cmd === "plugin:dialog|open") return "/tmp/ep12.wav";
+    // Диалог выбора файла теперь открывает Rust (file_scope.rs), а не
+    // JS-плагин — стабим свою команду, а не plugin:dialog|open.
+    if (cmd === "pick_input_files") return ["/tmp/ep12.wav"];
     if (cmd === "qc_analyze") return QC_REPORT;
     return null;
   },

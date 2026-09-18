@@ -9,6 +9,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio_qc;
+mod file_scope;
 mod media_tools;
 #[cfg(windows)]
 mod mpv_embed;
@@ -234,57 +235,144 @@ fn log_result<T>(command: &str, result: Result<T, String>) -> Result<T, String> 
 
 // ffmpeg на большом файле работает секундами — в главном потоке это
 // замороженное окно на всё время анализа.
+//
+// Путь больше не берётся на веру: file_scope.rs проверяет, что этот
+// файл пользователь действительно выбрал сам (нативный диалог или
+// перетаскивание в окно). Без проверки любой XSS в webview мог бы
+// прочитать/перезаписать произвольный файл на диске — см. шапку
+// file_scope.rs.
 #[tauri::command(async)]
-fn qc_analyze(path: String) -> Result<audio_qc::QcReport, String> {
-    log_result("qc_analyze", audio_qc::analyze(&path))
+fn qc_analyze(app: tauri::AppHandle, path: String) -> Result<audio_qc::QcReport, String> {
+    log_result("qc_analyze", (|| {
+        let path = app.state::<file_scope::FileScope>().check_read(&path)?;
+        audio_qc::analyze(&path.to_string_lossy())
+    })())
 }
 
 // Тоже через ffmpeg (полное декодирование в PCM) — на большом файле
 // секунды, поэтому (async) по той же причине, что и у qc_analyze выше.
 #[tauri::command(async)]
-fn generate_waveform(path: String, buckets: u32) -> Result<audio_qc::WaveformData, String> {
-    log_result("generate_waveform", audio_qc::generate_waveform(&path, buckets))
+fn generate_waveform(app: tauri::AppHandle, path: String, buckets: u32) -> Result<audio_qc::WaveformData, String> {
+    log_result("generate_waveform", (|| {
+        let path = app.state::<file_scope::FileScope>().check_read(&path)?;
+        audio_qc::generate_waveform(&path.to_string_lossy(), buckets)
+    })())
 }
 
 // Запускает ffmpeg-субпроцесс и пишет файл на диск — блокирующее.
 #[tauri::command(async)]
-fn export_audio_clip(path: String, start: f64, end: f64, save_path: String) -> Result<(), String> {
-    log_result("export_audio_clip", audio_qc::export_clip(&path, start, end, &save_path))
+fn export_audio_clip(
+    app: tauri::AppHandle,
+    path: String,
+    start: f64,
+    end: f64,
+    save_path: String,
+) -> Result<(), String> {
+    log_result("export_audio_clip", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let path = scope.check_read(&path)?;
+        let save_path = scope.check_write(&save_path)?;
+        file_scope::refuse_input_as_output(&path, &save_path)?;
+        audio_qc::export_clip(&path.to_string_lossy(), start, end, &save_path.to_string_lossy())
+    })())
+}
+
+/// Прогресс длинных операций ffmpeg уезжает в вебвью событием
+/// `mediatool-progress` — сам media_tools.rs про окно приложения ничего
+/// не знает (см. media_tools::Progress), поэтому мост живёт здесь.
+fn progress_to_webview(app: &tauri::AppHandle) -> impl Fn(f64, &str) + Sync + '_ {
+    move |fraction, label| {
+        let _ = app.emit(
+            "mediatool-progress",
+            serde_json::json!({ "fraction": fraction, "label": label }),
+        );
+    }
+}
+
+// ---------- нативные диалоги выбора файлов (file_scope.rs) ----------
+// Раньше диалоги открывал JS (@tauri-apps/plugin-dialog) и присылал
+// бэкенду готовый путь — то есть путь приходил из вебвью и ничем не
+// отличался от произвольной строки. Теперь диалог открывает Rust: путь
+// становится известен ему раньше, чем JS, и сразу попадает в скоуп.
+
+#[tauri::command(async)]
+fn pick_input_files(
+    app: tauri::AppHandle,
+    filters: Vec<file_scope::PickFilter>,
+    multiple: bool,
+) -> Vec<String> {
+    file_scope::pick_input_files(&app, filters, multiple)
+}
+
+#[tauri::command(async)]
+fn pick_output_file(
+    app: tauri::AppHandle,
+    default_name: Option<String>,
+    filters: Vec<file_scope::PickFilter>,
+) -> Option<String> {
+    file_scope::pick_output_file(&app, default_name, filters)
+}
+
+#[tauri::command(async)]
+fn pick_output_dir(app: tauri::AppHandle) -> Option<String> {
+    file_scope::pick_output_dir(&app)
 }
 
 // ---------- «Инструменты ffmpeg» (media_tools.rs) ----------
-// Путь приходит из JS-диалога выбора файла (openDialog), не из
-// DroppedFiles — тот же уровень доверия, что уже принят для qc_analyze/
-// generate_waveform/export_audio_clip выше: пользователь сам явно выбрал
-// файл через нативный диалог ОС, это не произвольный путь по запросу
-// вебвью.
 
 #[tauri::command(async)]
-fn mt_probe_media(path: String) -> Result<media_tools::MediaInfo, String> {
-    log_result("mt_probe_media", media_tools::probe_media(&path))
+fn mt_probe_media(app: tauri::AppHandle, path: String) -> Result<media_tools::MediaInfo, String> {
+    log_result("mt_probe_media", (|| {
+        let path = app.state::<file_scope::FileScope>().check_read(&path)?;
+        media_tools::probe_media(&path.to_string_lossy())
+    })())
 }
 
 #[tauri::command(async)]
-fn mt_probe_keyframes(path: String) -> Result<Vec<f64>, String> {
-    log_result("mt_probe_keyframes", media_tools::probe_keyframes(&path))
+fn mt_probe_keyframes(app: tauri::AppHandle, path: String) -> Result<Vec<f64>, String> {
+    log_result("mt_probe_keyframes", (|| {
+        let path = app.state::<file_scope::FileScope>().check_read(&path)?;
+        media_tools::probe_keyframes(&path.to_string_lossy())
+    })())
 }
 
 // Не (async): сам вызов — просто регистрация пути в скоупе asset-протокола
 // (запись в память), никакого ffmpeg-субпроцесса здесь нет.
+//
+// Проверка скоупа тут самая важная во всём файле: allow_file() открывает
+// вебвью чтение файла ПО HTTP-подобному asset://-адресу, то есть без
+// неё одна строка из XSS давала бы чтение любого файла на диске.
 #[tauri::command]
 fn mt_register_media_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    log_result("mt_register_media_file", media_tools::register_media_file(&app, &path))
+    log_result("mt_register_media_file", (|| {
+        let path = app.state::<file_scope::FileScope>().check_read(&path)?;
+        media_tools::register_media_file(&app, &path.to_string_lossy())
+    })())
 }
 
 #[tauri::command(async)]
 fn mt_cut_media(
+    app: tauri::AppHandle,
     path: String,
     segments: Vec<media_tools::CutSegment>,
     out_dir: String,
     keep_separate: bool,
     merge: bool,
 ) -> Result<media_tools::CutResult, String> {
-    log_result("mt_cut_media", media_tools::cut_media(&path, &segments, &out_dir, keep_separate, merge))
+    log_result("mt_cut_media", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let path = scope.check_read(&path)?;
+        let out_dir = scope.check_write_dir(&out_dir)?;
+        let sink = progress_to_webview(&app);
+        media_tools::cut_media(
+            &media_tools::Progress(&sink),
+            &path.to_string_lossy(),
+            &segments,
+            &out_dir.to_string_lossy(),
+            keep_separate,
+            merge,
+        )
+    })())
 }
 
 #[tauri::command(async)]
@@ -294,29 +382,80 @@ fn mt_transcode_media(
     out_path: String,
     opts: media_tools::TranscodeOpts,
 ) -> Result<(), String> {
-    log_result("mt_transcode_media", media_tools::transcode_media(&app, &path, &out_path, &opts))
+    log_result("mt_transcode_media", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let path = scope.check_read(&path)?;
+        let out_path = scope.check_write(&out_path)?;
+        file_scope::refuse_input_as_output(&path, &out_path)?;
+        let sink = progress_to_webview(&app);
+        media_tools::transcode_media(&media_tools::Progress(&sink), &path.to_string_lossy(), &out_path.to_string_lossy(), &opts)
+    })())
 }
 
 #[tauri::command(async)]
 fn mt_extract_audio(
+    app: tauri::AppHandle,
     path: String,
     out_path: String,
     opts: media_tools::ExtractAudioOpts,
 ) -> Result<(), String> {
-    log_result("mt_extract_audio", media_tools::extract_audio(&path, &out_path, &opts))
+    log_result("mt_extract_audio", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let path = scope.check_read(&path)?;
+        let out_path = scope.check_write(&out_path)?;
+        file_scope::refuse_input_as_output(&path, &out_path)?;
+        let sink = progress_to_webview(&app);
+        media_tools::extract_audio(&media_tools::Progress(&sink), &path.to_string_lossy(), &out_path.to_string_lossy(), &opts)
+    })())
 }
 
 #[tauri::command(async)]
-fn mt_concat_media(paths: Vec<String>, out_path: String) -> Result<String, String> {
-    log_result("mt_concat_media", media_tools::concat_media(&paths, &out_path))
+fn mt_concat_media(app: tauri::AppHandle, paths: Vec<String>, out_path: String) -> Result<String, String> {
+    log_result("mt_concat_media", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let checked: Vec<String> = paths
+            .iter()
+            .map(|p| scope.check_read(p).map(|p| p.to_string_lossy().into_owned()))
+            .collect::<Result<_, _>>()?;
+        let out_path = scope.check_write(&out_path)?;
+        for p in &checked {
+            file_scope::refuse_input_as_output(Path::new(p), &out_path)?;
+        }
+        let sink = progress_to_webview(&app);
+        media_tools::concat_media(&media_tools::Progress(&sink), &checked, &out_path.to_string_lossy())
+    })())
 }
 
 #[tauri::command(async)]
-fn mt_mux_media(tracks: Vec<media_tools::MuxTrack>, out_path: String) -> Result<(), String> {
-    log_result("mt_mux_media", media_tools::mux_media(&tracks, &out_path))
+fn mt_mux_media(app: tauri::AppHandle, tracks: Vec<media_tools::MuxTrack>, out_path: String) -> Result<(), String> {
+    log_result("mt_mux_media", (|| {
+        let scope = app.state::<file_scope::FileScope>();
+        let mut checked = Vec::with_capacity(tracks.len());
+        let out_path = scope.check_write(&out_path)?;
+        for t in tracks {
+            let p = scope.check_read(&t.path)?;
+            file_scope::refuse_input_as_output(&p, &out_path)?;
+            checked.push(media_tools::MuxTrack { path: p.to_string_lossy().into_owned(), ..t });
+        }
+        media_tools::mux_media(&checked, &out_path.to_string_lossy())
+    })())
+}
+
+/// Прервать текущую операцию ffmpeg («Отмена» в панели инструментов).
+/// До неё единственным способом остановить сорокаминутный транскод было
+/// закрыть приложение — и даже это оставляло процесс ffmpeg дожёвывать
+/// файл в фоне.
+#[tauri::command(async)]
+fn mt_cancel() -> Result<(), String> {
+    media_tools::cancel_current_job()
 }
 
 // ---------- встроенный mpv-плеер (mpv_embed.rs, только Windows) ----------
+// Один текст на все ветки cfg(not(windows)) — раньше та же строка была
+// продублирована в каждой команде по отдельности.
+#[cfg(not(windows))]
+const MPV_WINDOWS_ONLY: &str = "Встроенный плеер поддерживается только на Windows.";
+
 // Тела команд ветвятся по платформе, а не сами команды — иначе
 // `generate_handler!` ниже пришлось бы собирать двумя разными списками
 // под cfg(windows)/cfg(not(windows)), а этот проект и так никогда не
@@ -331,19 +470,19 @@ async fn mpv_create(app: tauri::AppHandle, x: i32, y: i32, width: i32, height: i
     #[cfg(not(windows))]
     let result = {
         let _ = (app, x, y, width, height);
-        Err("Встроенный плеер поддерживается только на Windows.".into())
+        Err(MPV_WINDOWS_ONLY.to_string())
     };
     log_result("mpv_create", result)
 }
 
 #[tauri::command(async)]
-async fn mpv_set_bounds(x: i32, y: i32, width: i32, height: i32) -> Result<(), String> {
+async fn mpv_set_bounds(app: tauri::AppHandle, x: i32, y: i32, width: i32, height: i32) -> Result<(), String> {
     #[cfg(windows)]
-    let result = mpv_embed::mpv_set_bounds(mpv_embed::MpvBounds { x, y, width, height }).await;
+    let result = mpv_embed::mpv_set_bounds(&app, mpv_embed::MpvBounds { x, y, width, height }).await;
     #[cfg(not(windows))]
     let result = {
-        let _ = (x, y, width, height);
-        Err("Встроенный плеер поддерживается только на Windows.".into())
+        let _ = (app, x, y, width, height);
+        Err(MPV_WINDOWS_ONLY.to_string())
     };
     log_result("mpv_set_bounds", result)
 }
@@ -355,7 +494,7 @@ async fn mpv_load(path: String) -> Result<(), String> {
     #[cfg(not(windows))]
     let result = {
         let _ = path;
-        Err("Встроенный плеер поддерживается только на Windows.".into())
+        Err(MPV_WINDOWS_ONLY.to_string())
     };
     log_result("mpv_load", result)
 }
@@ -365,7 +504,7 @@ async fn mpv_play() -> Result<(), String> {
     #[cfg(windows)]
     let result = mpv_embed::mpv_play().await;
     #[cfg(not(windows))]
-    let result = Err("Встроенный плеер поддерживается только на Windows.".into());
+    let result = Err(MPV_WINDOWS_ONLY.to_string());
     log_result("mpv_play", result)
 }
 
@@ -374,7 +513,7 @@ async fn mpv_pause() -> Result<(), String> {
     #[cfg(windows)]
     let result = mpv_embed::mpv_pause().await;
     #[cfg(not(windows))]
-    let result = Err("Встроенный плеер поддерживается только на Windows.".into());
+    let result = Err(MPV_WINDOWS_ONLY.to_string());
     log_result("mpv_pause", result)
 }
 
@@ -385,17 +524,71 @@ async fn mpv_seek(seconds: f64) -> Result<(), String> {
     #[cfg(not(windows))]
     let result = {
         let _ = seconds;
-        Err("Встроенный плеер поддерживается только на Windows.".into())
+        Err(MPV_WINDOWS_ONLY.to_string())
     };
     log_result("mpv_seek", result)
 }
 
+// Громкость/скорость/покадровый шаг — то, без чего «плеер» остаётся
+// картинкой с кнопкой play: на укладке дубляжа границу реплики ставят
+// покадрово, а тихую дорожку проверяют на слух с поднятой громкостью.
 #[tauri::command(async)]
-async fn mpv_close() -> Result<(), String> {
+async fn mpv_set_volume(volume: f64) -> Result<(), String> {
     #[cfg(windows)]
-    let result = mpv_embed::mpv_close().await;
+    let result = mpv_embed::mpv_set_volume(volume).await;
     #[cfg(not(windows))]
-    let result = Ok(());
+    let result = {
+        let _ = volume;
+        Err(MPV_WINDOWS_ONLY.to_string())
+    };
+    log_result("mpv_set_volume", result)
+}
+
+#[tauri::command(async)]
+async fn mpv_set_mute(mute: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    let result = mpv_embed::mpv_set_mute(mute).await;
+    #[cfg(not(windows))]
+    let result = {
+        let _ = mute;
+        Err(MPV_WINDOWS_ONLY.to_string())
+    };
+    log_result("mpv_set_mute", result)
+}
+
+#[tauri::command(async)]
+async fn mpv_set_speed(speed: f64) -> Result<(), String> {
+    #[cfg(windows)]
+    let result = mpv_embed::mpv_set_speed(speed).await;
+    #[cfg(not(windows))]
+    let result = {
+        let _ = speed;
+        Err(MPV_WINDOWS_ONLY.to_string())
+    };
+    log_result("mpv_set_speed", result)
+}
+
+#[tauri::command(async)]
+async fn mpv_frame_step(forward: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    let result = mpv_embed::mpv_frame_step(forward).await;
+    #[cfg(not(windows))]
+    let result = {
+        let _ = forward;
+        Err(MPV_WINDOWS_ONLY.to_string())
+    };
+    log_result("mpv_frame_step", result)
+}
+
+#[tauri::command(async)]
+async fn mpv_close(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    let result = mpv_embed::mpv_close(&app).await;
+    #[cfg(not(windows))]
+    let result = {
+        let _ = app;
+        Ok(())
+    };
     log_result("mpv_close", result)
 }
 
@@ -617,12 +810,17 @@ async fn upload_report_file(
 /// пользователь выбирает нативным диалогом (plugin-dialog на JS-стороне).
 #[tauri::command]
 async fn download_report_file(
+    app: tauri::AppHandle,
     report_id: String,
     file_id: String,
     init_data: String,
     save_path: String,
 ) -> Result<(), String> {
     let result = async {
+        // Путь сохранения приходит из вебвью. Без этой проверки XSS мог
+        // бы положить файл с содержимым от сервера куда угодно — в папку
+        // автозагрузки, поверх чужого документа и т.п.
+        let save_path = app.state::<file_scope::FileScope>().check_write(&save_path)?;
         let resp = http()
             .get(format!(
                 "{API_BASE}/report/{report_id}/files/{file_id}/download"
@@ -636,10 +834,23 @@ async fn download_report_file(
             return Err(error_detail(resp, "сервер отказал в скачивании").await);
         }
 
+        // Тот же предел, что и на загрузку (MAX_UPLOAD_BYTES): ответ
+        // целиком уезжает в память, и без крышки один большой файл
+        // (или сервер, отдающий бесконечный поток) роняет приложение по
+        // памяти. Content-Length может врать или отсутствовать, поэтому
+        // проверяем и заявленный размер, и фактически прочитанный.
+        if let Some(len) = resp.content_length() {
+            if len > MAX_UPLOAD_BYTES {
+                return Err(format!("Файл слишком большой ({} МБ).", len / 1024 / 1024));
+            }
+        }
         let bytes = resp
             .bytes()
             .await
             .map_err(|e| format!("Обрыв при скачивании: {e}"))?;
+        if bytes.len() as u64 > MAX_UPLOAD_BYTES {
+            return Err("Файл слишком большой.".into());
+        }
         std::fs::write(&save_path, &bytes).map_err(|e| format!("Не удалось сохранить файл: {e}"))
     }
     .await;
@@ -735,6 +946,7 @@ fn main() {
             }
         }).build())
         .manage(DroppedFiles::default())
+        .manage(file_scope::FileScope::default())
         .invoke_handler(tauri::generate_handler![
             qc_analyze,
             generate_waveform,
@@ -751,6 +963,10 @@ fn main() {
             download_report_file,
             get_update_channel,
             set_update_channel,
+            pick_input_files,
+            pick_output_file,
+            pick_output_dir,
+            mt_cancel,
             mt_probe_media,
             mt_probe_keyframes,
             mt_register_media_file,
@@ -765,6 +981,10 @@ fn main() {
             mpv_play,
             mpv_pause,
             mpv_seek,
+            mpv_set_volume,
+            mpv_set_mute,
+            mpv_set_speed,
+            mpv_frame_step,
             mpv_close,
             open_log_folder,
         ])
@@ -840,6 +1060,14 @@ fn main() {
                 // файлы пользователь реально разрешил трогать.
                 tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                     handle.state::<DroppedFiles>().remember(paths);
+                    // Перетащенный файл — такой же явный выбор пользователя,
+                    // как выбранный в диалоге: QC звука умеет запускаться
+                    // прямо по дропу (file-drop.js), а qc_analyze теперь
+                    // сверяется со скоупом (file_scope.rs).
+                    let scope = handle.state::<file_scope::FileScope>();
+                    for p in paths {
+                        scope.allow_read(p);
+                    }
                 }
                 _ => {}
             });
