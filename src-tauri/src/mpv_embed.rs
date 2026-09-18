@@ -40,9 +40,9 @@ use windows::core::w;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, SetWindowPos,
-    CS_HREDRAW, CS_VREDRAW, SWP_NOACTIVATE, SWP_NOZORDER, WNDCLASSW, WS_CHILD, WS_EX_NOACTIVATE,
-    WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, IsWindowVisible, RegisterClassW,
+    SetWindowPos, CS_HREDRAW, CS_VREDRAW, HWND_TOP, SWP_NOACTIVATE, WNDCLASSW, WS_CHILD,
+    WS_EX_NOACTIVATE, WS_VISIBLE,
 };
 
 use crate::audio_qc::{hidden_command, resolve_binary_uncached};
@@ -138,6 +138,20 @@ fn create_child_window_raw(parent_raw: isize, b: MpvBounds) -> Result<isize, Str
         )
     }
     .map_err(|e| format!("CreateWindowExW: {e}"))?;
+    // Что реально получилось: если окно невидимо или нулевого размера,
+    // mpv будет исправно декодировать «в никуда», и по одному только
+    // «пайп подключён» этого не отличить от нормальной работы.
+    let mut rect = windows::Win32::Foundation::RECT::default();
+    let visible = unsafe { IsWindowVisible(hwnd) }.as_bool();
+    let got_rect = unsafe { GetClientRect(hwnd, &mut rect) }.is_ok();
+    log::info!(
+        "child-окно создано: hwnd={:?} видимо={visible} клиент={}x{} (запрошено {}x{})",
+        hwnd.0,
+        if got_rect { rect.right - rect.left } else { -1 },
+        if got_rect { rect.bottom - rect.top } else { -1 },
+        b.width,
+        b.height
+    );
     Ok(hwnd.0 as isize)
 }
 
@@ -149,17 +163,26 @@ async fn create_child_window_on_main(
     on_main_thread(app, move || create_child_window_raw(parent_raw, b)).await?
 }
 
+/// Двигает окно плеера и КАЖДЫЙ РАЗ поднимает его поверх соседей.
+///
+/// Поднимать обязательно: вебвью WebView2 — такое же дочернее окно
+/// главного окна, то есть сосед нашего по z-порядку. Стоит ему оказаться
+/// выше (а он оказывается — например, после того как страница получила
+/// фокус), и видео полностью перекрыто веб-слоем: на экране остаётся
+/// чёрный прямоугольник HTML-плейсхолдера, при том что mpv исправно
+/// декодирует и позиция воспроизведения идёт. Раньше здесь стоял
+/// SWP_NOZORDER, то есть z-порядок сохранялся каким был.
 async fn set_bounds_on_main(app: &tauri::AppHandle, hwnd_raw: isize, b: MpvBounds) -> Result<(), String> {
     on_main_thread(app, move || {
         unsafe {
             SetWindowPos(
                 HWND(hwnd_raw as _),
-                None,
+                Some(HWND_TOP),
                 b.x,
                 b.y,
                 b.width,
                 b.height,
-                SWP_NOZORDER | SWP_NOACTIVATE,
+                SWP_NOACTIVATE,
             )
         }
         .map_err(|e| e.to_string())
@@ -249,10 +272,14 @@ fn mpv_args(hwnd_raw: isize, pipe_name: &str) -> Vec<String> {
         "--input-vo-keyboard=no".into(),
         "--no-input-cursor".into(),
         "--cursor-autohide=no".into(),
-        // Аппаратное декодирование заметно разгружает CPU на 4K/HEVC —
-        // auto-safe берёт только заведомо надёжные бэкенды, с откатом на
-        // программное декодирование, если драйвер не тянет.
-        "--hwdec=auto-safe".into(),
+        // Программное декодирование намеренно. Аппаратное разгружает CPU,
+        // но на HEVC это и самый частый источник «звук есть, картинки
+        // нет»: часть драйверов отдаёт кадры в формате, который vo не
+        // может показать в чужом окне (--wid), и mpv молча рисует
+        // чёрное. 1080p24 HEVC любой современный процессор тянет
+        // программно; включать hwdec обратно стоит только вместе со
+        // способом проверить результат на реальной машине.
+        "--hwdec=no".into(),
         format!("--input-ipc-server={pipe_name}"),
     ]
 }
@@ -272,6 +299,26 @@ const OBSERVED: &[(u32, &str)] = &[
     // всегда ровно одна звуковая дорожка. У многоязычного релиза их
     // столько же, сколько языков дубляжа.
     (8, "track-list"),
+];
+
+/// Свойства, которые интересны только логу, а не интерфейсу. Нужны, чтобы
+/// на жалобу «чёрный экран и нет звука» отвечал файл логов, а не догадки:
+/// если `current-vo` пуст — не поднялся видеовыход, если пуст
+/// `current-ao` — не открылось звуковое устройство (mpv по умолчанию
+/// продолжает воспроизведение без звука и молчит об этом), а
+/// `hwdec-current` показывает, программно ли идёт декодирование.
+const DIAGNOSTIC: &[(u32, &str)] = &[
+    (100, "current-vo"),
+    (101, "current-ao"),
+    (102, "hwdec-current"),
+    (103, "video-codec"),
+    (104, "audio-codec-name"),
+    (105, "width"),
+    (106, "height"),
+    (107, "aid"),
+    (108, "vid"),
+    (109, "file-format"),
+    (110, "idle-active"),
 ];
 
 /// Создаёт child-окно + процесс mpv, если их ещё нет; если уже есть —
@@ -342,13 +389,22 @@ pub async fn mpv_create(app: &tauri::AppHandle, bounds: MpvBounds) -> Result<(),
     // Подписка на позицию/паузу/громкость/скорость — раньше это давали
     // события <video> (timeupdate/play/pause), теперь их эмулирует
     // property-change из mpv.
-    for (id, name) in OBSERVED {
+    for (id, name) in OBSERVED.iter().chain(DIAGNOSTIC.iter()) {
         let line = format!("{{\"command\":[\"observe_property\",{id},\"{name}\"]}}\n");
         write_half
             .write_all(line.as_bytes())
             .await
             .map_err(|e| format!("mpv IPC (observe_property {name}): {e}"))?;
     }
+    // Свой лог mpv — в наш файл логов. Без этого mpv запущен с
+    // --no-terminal и все его сообщения («не удалось открыть звуковое
+    // устройство», «vo не инициализировался», «формат не поддержан»)
+    // уходят в никуда, а пользователь видит чёрный экран без единого
+    // объяснения — ровно тот случай, ради которого это и добавлено.
+    write_half
+        .write_all(b"{\"command\":[\"request_log_messages\",\"info\"]}\n")
+        .await
+        .map_err(|e| format!("mpv IPC (request_log_messages): {e}"))?;
 
     let app_events = app.clone();
     tokio::spawn(async move {
@@ -360,7 +416,32 @@ pub async fn mpv_create(app: &tauri::AppHandle, bounds: MpvBounds) -> Result<(),
                 Some("property-change") => {
                     let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("");
                     let data = v.get("data").cloned().unwrap_or(serde_json::Value::Null);
+                    if DIAGNOSTIC.iter().any(|(_, n)| *n == name) {
+                        // В лог — разбор жалобы начинается именно с них.
+                        log::info!("[mpv] {name} = {data}");
+                    }
+                    // Наверх уходит всё: панель смотрит на current-vo и
+                    // current-ao, чтобы сказать вслух «видеовыход не
+                    // поднялся» / «звуковое устройство не открылось»
+                    // вместо молчаливого чёрного прямоугольника.
                     let _ = app_events.emit("mpv-state", json!({ "name": name, "data": data }));
+                }
+                // Сообщения самого mpv. Уровень ниже warn валит в файл
+                // слишком много (он подробно расписывает каждый кадр на
+                // старте), поэтому info и выше пишем как есть, а
+                // подробности отбрасываем.
+                Some("log-message") => {
+                    let level = v.get("level").and_then(|l| l.as_str()).unwrap_or("info");
+                    let prefix = v.get("prefix").and_then(|p| p.as_str()).unwrap_or("mpv");
+                    let text = v.get("text").and_then(|t| t.as_str()).unwrap_or("").trim_end();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    match level {
+                        "fatal" | "error" => log::error!("[mpv/{prefix}] {text}"),
+                        "warn" => log::warn!("[mpv/{prefix}] {text}"),
+                        _ => log::info!("[mpv/{prefix}] {text}"),
+                    }
                 }
                 // Ошибка открытия файла раньше выглядела как «плеер молча
                 // не играет»: mpv жив, пайп цел, а видео нет.
@@ -556,6 +637,35 @@ mod tests {
         assert!(args.contains(&"--no-terminal".to_string()));
         assert!(args.contains(&"--wid=1234".to_string()));
         assert!(args.iter().any(|a| a.starts_with("--input-ipc-server=")));
+    }
+
+    #[test]
+    fn hardware_decoding_stays_off() {
+        // На HEVC аппаратное декодирование — самый частый источник
+        // «звук есть, картинки нет»: часть драйверов отдаёт кадры в
+        // формате, который видеовыход не показывает в чужом окне
+        // (--wid), и mpv молча рисует чёрное. Включать обратно — только
+        // вместе со способом проверить результат на реальной машине.
+        let args = mpv_args(1, "p");
+        assert!(args.contains(&"--hwdec=no".to_string()), "{args:?}");
+        assert!(!args.iter().any(|a| a.starts_with("--hwdec=auto")), "{args:?}");
+    }
+
+    #[test]
+    fn diagnostic_properties_do_not_clash_with_ui_ones() {
+        // Оба списка уходят в observe_property одним проходом, и
+        // совпадение id означало бы, что одно свойство молча
+        // перезаписывает другое.
+        for (id, name) in DIAGNOSTIC {
+            assert!(
+                !OBSERVED.iter().any(|(oid, _)| oid == id),
+                "id {id} ({name}) уже занят в OBSERVED"
+            );
+        }
+        // current-vo и current-ao — то, по чему панель отличает «играет»
+        // от «декодирует в никуда»; без них диагностика теряет смысл.
+        assert!(DIAGNOSTIC.iter().any(|(_, n)| *n == "current-vo"));
+        assert!(DIAGNOSTIC.iter().any(|(_, n)| *n == "current-ao"));
     }
 
     #[test]

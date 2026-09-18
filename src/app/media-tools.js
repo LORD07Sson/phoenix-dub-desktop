@@ -294,6 +294,13 @@ const cutState = {
   // между метками, пока не ляжет в губы.
   tracks: [],
   abLoop: false,
+  // Что mpv реально поднял: имя видеовыхода и звукового устройства.
+  // Оба приходят свойствами current-vo / current-ao. Пустые при
+  // идущем воспроизведении значат «декодируем в никуда» — именно так
+  // выглядел чёрный экран без звука, о котором приложение молчало.
+  vo: null,
+  ao: null,
+  outputsChecked: false,
 };
 
 function cutDuration() {
@@ -409,7 +416,14 @@ function onMpvState(root, { name, data }) {
       if (typeof data === "number") {
         cutState.lastKnownTime = data;
         refreshCutPlayhead(root);
+        warnAboutDeadOutputs();
       }
+      break;
+    case "current-vo":
+      cutState.vo = data || null;
+      break;
+    case "current-ao":
+      cutState.ao = data || null;
       break;
     case "duration":
       if (typeof data === "number" && data > 0) {
@@ -449,6 +463,22 @@ function onMpvState(root, { name, data }) {
       break;
     default:
       break;
+  }
+}
+
+// Воспроизведение пошло (позиция сдвинулась с нуля) — значит файл
+// открыт и декодируется. Если при этом mpv не поднял видеовыход или
+// звуковое устройство, он об этом молчит и продолжает работать «в
+// никуда»: на экране чёрный прямоугольник, из колонок тишина, а
+// позиция бежит. Говорим вслух ровно один раз за файл.
+function warnAboutDeadOutputs() {
+  if (cutState.outputsChecked || cutState.lastKnownTime < 0.6) return;
+  cutState.outputsChecked = true;
+  if (!cutState.vo) {
+    toast("Плеер декодирует, но видеовыход не поднялся — картинки не будет. Подробности в логах (Настройки → Открыть логи).", "error");
+  }
+  if (!cutState.ao) {
+    toast("Плеер не смог открыть звуковое устройство — воспроизведение идёт без звука. Подробности в логах.", "error");
   }
 }
 
@@ -819,6 +849,9 @@ function wireCutPanel(root) {
     cutState.mpvPaused = true;
     cutState.tracks = [];
     cutState.abLoop = false;
+    cutState.vo = null;
+    cutState.ao = null;
+    cutState.outputsChecked = false;
     // Сменили видео на аудио (или наоборот) — старое mpv-окно неоткуда
     // взять новый смысл, закрываем; переоткроется в openCutMpv ниже, если
     // новый файл снова видео.
