@@ -8,6 +8,61 @@
 </head>
 <body>
 
+<!-- ===================== Полоса заголовка окна =====================
+     Своя, а не системная: у окна выключены decorations (см.
+     tauri.conf.json), потому что системный заголовок был ВТОРОЙ
+     полосой над этой же шапкой приложения — 32 потерянных пикселя и
+     чужой серый прямоугольник поверх фирменного стекла. Теперь одна
+     полоса: слева опознание приложения, справа — сначала кнопки
+     приложения, затем кнопки окна в раскладке Windows 11 (свернуть /
+     развернуть / закрыть).
+
+     Лежит ВНЕ #app-screen и видна всегда, включая экран загрузки и
+     экран входа: иначе до входа окно было бы нечем ни подвинуть, ни
+     закрыть. data-tauri-drag-region — перетаскивание окна за пустое
+     место полосы (обрабатывает сам Tauri). -->
+<div class="titlebar" id="titlebar" data-tauri-drag-region>
+  <div class="titlebar-left" data-tauri-drag-region>
+    <div class="logo"></div>
+    <b data-tauri-drag-region>PHOENIX DUB Desktop</b>
+    <span id="whoami"></span>
+  </div>
+  <div class="titlebar-right">
+    <div class="titlebar-apps" id="titlebar-apps" hidden>
+      <button id="open-shortcuts" class="icon-btn" title="Горячие клавиши (?)">⌨️</button>
+      <button id="theme-toggle" class="icon-btn" title="Светлая/тёмная тема">🌓</button>
+      <button id="open-settings" class="icon-btn" title="Настройки">⚙️</button>
+      <button id="open-qc" class="btn">🎧 QC звука</button>
+      <button id="open-media-tools" class="btn">🎬 Инструменты ffmpeg</button>
+      <button id="refresh-btn" class="btn">↻ Обновить</button>
+      <button id="logout-btn" class="btn ghost">Выйти</button>
+    </div>
+    <!-- Размеры и порядок — как у системных кнопок Windows 11
+         (46×32, закрытие последним и краснеет при наведении), чтобы
+         мышечная память пользователя не промахивалась. -->
+    <div class="window-controls">
+      <button class="win-btn" id="win-minimize" title="Свернуть" aria-label="Свернуть">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" /></svg>
+      </button>
+      <button class="win-btn" id="win-maximize" title="Развернуть" aria-label="Развернуть">
+        <svg class="ic-max" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" rx="1.2" /></svg>
+        <svg class="ic-restore" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="2.5" width="7" height="7" rx="1.2" /><path d="M2.5 2.5V1.6A1.1 1.1 0 0 1 3.6.5h4.8A1.1 1.1 0 0 1 9.5 1.6v4.8a1.1 1.1 0 0 1-1.1 1.1h-.9" /></svg>
+      </button>
+      <button class="win-btn win-close" id="win-close" title="Закрыть в трей" aria-label="Закрыть">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0L0 10" /></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Тонкая полоса под шапкой, пока к серверу идёт хоть один запрос.
+     До неё единственным признаком «данные грузятся» был скелетон
+     внутри конкретной вкладки — а фоновые обновления (лента, новые
+     назначения, присутствие) шли вообще беззвучно, и приложение
+     выглядело подвисшим ровно так же, как работающим. Состоянием
+     управляет api.js, см. класс .net-busy на <html>. -->
+<div class="net-bar" id="net-bar" aria-hidden="true"><i></i></div>
+
 <!-- ===================== Экран загрузки при старте (та же
      анимация-маскот, что и в мини-аппе) ===================== -->
 <div class="app-splash" id="app-splash">
@@ -36,23 +91,6 @@
 
 <!-- ===================== Основной экран ===================== -->
 <div id="app-screen" hidden>
-  <div class="titlebar">
-    <div class="titlebar-left">
-      <div class="logo"></div>
-      <b>PHOENIX DUB Desktop</b>
-      <span id="whoami"></span>
-    </div>
-    <div class="titlebar-right">
-      <button id="open-shortcuts" class="icon-btn" title="Горячие клавиши (?)">⌨️</button>
-      <button id="theme-toggle" class="icon-btn" title="Светлая/тёмная тема">🌓</button>
-      <button id="open-settings" class="icon-btn" title="Настройки">⚙️</button>
-      <button id="open-qc" class="btn">🎧 QC звука</button>
-      <button id="open-media-tools" class="btn">🎬 Инструменты ffmpeg</button>
-      <button id="refresh-btn" class="btn">↻ Обновить</button>
-      <button id="logout-btn" class="btn ghost">Выйти</button>
-    </div>
-  </div>
-
   <div class="app-body">
   <div class="sidebar" id="tabstrip">
     <button class="tab-btn active" data-tab="overview" title="Обзор"><span class="tab-ic">📊</span></button>

@@ -15,11 +15,16 @@
 
 import { installFileLogging } from "./applog.js";
 import { appWindow } from "./tauri.js";
+import { installWindowChrome } from "./window-chrome.js";
 import { tryRestoreSession } from "./auth.js";
 
 // Максимально рано — до любого другого кода, который уже мог бы
 // что-то залогировать (см. applog.js).
 installFileLogging();
+// Кнопки окна — до любого экрана: полоса заголовка своя (системная
+// выключена), и на экране входа/загрузки окно тоже нужно чем-то
+// двигать и закрывать.
+installWindowChrome();
 import "./density.js";
 import "./tabs.js";
 import "./qc.js";

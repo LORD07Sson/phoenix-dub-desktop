@@ -267,6 +267,11 @@ const OBSERVED: &[(u32, &str)] = &[
     (5, "volume"),
     (6, "mute"),
     (7, "speed"),
+    // Список дорожек — чтобы панель могла показать «Аудио: RU / JP» и
+    // «Субтитры: выкл / rus» вместо того, чтобы делать вид, что у файла
+    // всегда ровно одна звуковая дорожка. У многоязычного релиза их
+    // столько же, сколько языков дубляжа.
+    (8, "track-list"),
 ];
 
 /// Создаёт child-окно + процесс mpv, если их ещё нет; если уже есть —
@@ -475,6 +480,45 @@ pub async fn mpv_set_speed(speed: f64) -> Result<(), String> {
 pub async fn mpv_frame_step(forward: bool) -> Result<(), String> {
     let cmd = if forward { "frame-step" } else { "frame-back-step" };
     send_command(json!({ "command": [cmd] })).await
+}
+
+/// Петля A-B — повтор куска между двумя метками. Для укладки дубляжа
+/// это основной режим работы: реплику слушают по кругу, пока не лягут
+/// в губы, а не перематывают каждый раз руками. `None` в обоих
+/// аргументах снимает петлю.
+pub async fn mpv_set_ab_loop(start: Option<f64>, end: Option<f64>) -> Result<(), String> {
+    // "no" — как mpv обозначает «метка не задана»; передать null нельзя,
+    // свойство строковое по своей природе.
+    let a = match start {
+        Some(v) => serde_json::json!(check_seek(v)?),
+        None => serde_json::json!("no"),
+    };
+    let b = match end {
+        Some(v) => serde_json::json!(check_seek(v)?),
+        None => serde_json::json!("no"),
+    };
+    send_command(json!({ "command": ["set_property", "ab-loop-a", a] })).await?;
+    send_command(json!({ "command": ["set_property", "ab-loop-b", b] })).await
+}
+
+/// Переключение дорожки: `kind` — "aid" (звук), "sid" (субтитры),
+/// "vid" (картинка). `id` = -1 выключает дорожку совсем (например,
+/// снять субтитры), иначе это номер дорожки из track-list.
+pub async fn mpv_set_track(kind: &str, id: i64) -> Result<(), String> {
+    let property = match kind {
+        "audio" => "aid",
+        "subtitle" => "sid",
+        "video" => "vid",
+        other => return Err(format!("Неизвестный тип дорожки: {other}")),
+    };
+    let value = if id < 0 { serde_json::json!("no") } else { serde_json::json!(id) };
+    send_command(json!({ "command": ["set_property", property, value] })).await
+}
+
+/// Сохранить текущий кадр в файл. "video" — без наложенных субтитров и
+/// экранного меню: студии нужен исходный кадр, а не скриншот плеера.
+pub async fn mpv_screenshot(path: &str) -> Result<(), String> {
+    send_command(json!({ "command": ["screenshot-to-file", path, "video"] })).await
 }
 
 /// Разрушает child-окно и завершает процесс mpv — вызывается и явно

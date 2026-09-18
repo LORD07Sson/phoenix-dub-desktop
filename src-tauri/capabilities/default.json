@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Права основного окна — доступ к диалогам, уведомлениям, глобальным горячим клавишам и автозапуску. Апдейтер (Velopack) и сеть к своему API — только через Rust-команды, JS-плагины для них не нужны. shell:allow-open — открыть ссылку (Telegram-профиль коллеги из карточки «Команда») во внешнем браузере, не внутри окна приложения. core:webview:allow-create-webview-window — «📌 Открепить в окне» у карточки отчёта (report-detail.js -> tauri.js::pinReportWindow, @tauri-apps/api/webviewWindow): именно этот, а не core:window:allow-create — сверено по node_modules/@tauri-apps/api/webviewWindow.js, конструктор WebviewWindow бьёт в plugin:webview|create_webview_window, не в plugin:window|create. Права самого открепленного окна — отдельным файлом (pin-window.json), у'же этих: оно не открывает диалоги/уведомления/автозапуск. dialog:default больше НЕ выдаётся: диалоги выбора файла открывает Rust (file_scope.rs), JS их не зовёт — а лишнее право здесь означало бы, что XSS может открыть диалог и подсунуть свой путь мимо скоупа. log:default — команда log у @tauri-apps/plugin-log (console.* из JS зеркалятся в файловые логи, см. main.rs::run()). opener:default — reveal_item_in_dir для «Открыть логи» в настройках (open_log_folder в main.rs).",
+  "description": "Права основного окна — доступ к диалогам, уведомлениям, глобальным горячим клавишам и автозапуску. Апдейтер (Velopack) и сеть к своему API — только через Rust-команды, JS-плагины для них не нужны. core:window:allow-minimize/-toggle-maximize/-is-maximized/-start-dragging — своя полоса заголовка вместо системной (decorations:false в tauri.conf.json, см. window-chrome.js): свернуть/развернуть окно и тянуть его за полосу теперь делает фронтенд. shell:allow-open — открыть ссылку (Telegram-профиль коллеги из карточки «Команда») во внешнем браузере, не внутри окна приложения. core:webview:allow-create-webview-window — «📌 Открепить в окне» у карточки отчёта (report-detail.js -> tauri.js::pinReportWindow, @tauri-apps/api/webviewWindow): именно этот, а не core:window:allow-create — сверено по node_modules/@tauri-apps/api/webviewWindow.js, конструктор WebviewWindow бьёт в plugin:webview|create_webview_window, не в plugin:window|create. Права самого открепленного окна — отдельным файлом (pin-window.json), у'же этих: оно не открывает диалоги/уведомления/автозапуск. dialog:default больше НЕ выдаётся: диалоги выбора файла открывает Rust (file_scope.rs), JS их не зовёт — а лишнее право здесь означало бы, что XSS может открыть диалог и подсунуть свой путь мимо скоупа. log:default — команда log у @tauri-apps/plugin-log (console.* из JS зеркалятся в файловые логи, см. main.rs::run()). opener:default — reveal_item_in_dir для «Открыть логи» в настройках (open_log_folder в main.rs).",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -10,6 +10,10 @@
     "core:window:allow-close",
     "core:window:allow-set-focus",
     "core:window:allow-is-visible",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
     "core:webview:allow-create-webview-window",
     "notification:default",
     "store:default",

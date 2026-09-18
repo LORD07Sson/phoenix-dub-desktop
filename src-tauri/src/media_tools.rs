@@ -222,6 +222,11 @@ fn ext_of(path: &str) -> String {
 /// это осознанный компромисс ("smart cut" с перекодированием граничных
 /// GOP — отдельная, намного более сложная фича, не в этой версии).
 ///
+/// `precise` включает точную резку (smart cut, см. cut_segment_precise):
+/// голова сегмента перекодируется, остальное копируется, начало
+/// получается ровно на запрошенной секунде, а не на ближайшем опорном
+/// кадре. Стоит секунду-две работы на сегмент вместо мгновенной копии.
+///
 /// `keep_separate` и `merge` не взаимоисключающие — можно попросить и то,
 /// и другое сразу: сначала режем каждый сегмент в out_dir, затем (если
 /// merge) склеиваем эти же файлы вторым проходом через concat-demuxer,
@@ -233,6 +238,7 @@ pub fn cut_media(
     out_dir: &str,
     keep_separate: bool,
     merge: bool,
+    precise: bool,
 ) -> Result<CutResult, String> {
     if segments.is_empty() {
         return Err("Не выбрано ни одного сегмента.".into());
@@ -257,36 +263,30 @@ pub fn cut_media(
     let cut_span = if merge { 0.85 } else { 1.0 };
     let per_segment = cut_span / segments.len() as f64;
 
+    // Для точной резки нужны кодеки исходника (голову сегмента
+    // придётся перекодировать ровно тем же) — один probe на всю
+    // операцию, а не на каждый сегмент.
+    let info = if precise { probe_media(path).ok() } else { None };
+    // Точная резка при склейке через mkv-промежутки всё равно упирается
+    // в исходное расширение, поэтому контейнер оставляем прежним.
     let mut segment_paths = Vec::with_capacity(segments.len());
-    for (i, s) in segments.iter().enumerate() {
-        let snapped_start = snap_to_keyframe(s.start, &keyframes);
-        let duration = s.end - snapped_start;
+    for (i, seg) in segments.iter().enumerate() {
         let out_path = out_dir.join(format!("{stem}_cut{}.{ext}", i + 1));
-        let args = vec![
-            "-v".to_string(), "error".into(),
-            "-y".into(),
-            "-ss".into(), format!("{snapped_start:.3}"),
-            "-i".into(), path.to_string(),
-            "-t".into(), format!("{duration:.3}"),
-            "-c".into(), "copy".into(),
-        ];
-        run_ffmpeg(
-            progress,
-            &args,
-            &out_path,
-            Stage {
-                label: format!("Сегмент {} из {}", i + 1, segments.len()),
-                base: per_segment * i as f64,
-                span: per_segment,
-                duration,
-            },
-        )
-        .map_err(|e| format!("Сегмент {}: {e}", i + 1))?;
+        let slot = StageSlot {
+            label: format!("Сегмент {} из {}", i + 1, segments.len()),
+            base: per_segment * i as f64,
+            span: per_segment,
+        };
+        let result = match info.as_ref() {
+            Some(info) => cut_segment_precise(progress, path, seg, &out_path, &keyframes, info, &slot),
+            None => cut_segment_by_keyframe(progress, path, seg, &out_path, &keyframes, &slot),
+        };
+        result.map_err(|e| format!("Сегмент {}: {e}", i + 1))?;
         segment_paths.push(out_path.to_string_lossy().into_owned());
     }
 
     let merged_path = if merge {
-        let list = ConcatList::write(&segment_paths)?;
+        let list = TempWork::concat_list(&segment_paths)?;
         let merged_path = out_dir.join(format!("{stem}_merged.{ext}"));
         let args = vec![
             "-v".to_string(), "error".into(),
@@ -319,19 +319,255 @@ pub fn cut_media(
     Ok(CutResult { segment_paths, merged_path })
 }
 
-/// Список файлов для concat-демуксера. Раньше он писался в общий temp с
-/// предсказуемым именем (`phoenix_concat_<pid>.txt`) — на машине с
-/// несколькими пользователями это классический symlink-подставой путь, а
-/// два параллельных запуска затирали список друг другу. Теперь — свой
+// ---------- точная резка (smart cut) ----------
+//
+// Обычная резка без перекодирования умеет начинать сегмент ТОЛЬКО с
+// опорного кадра: до него данных для декодирования просто нет. При
+// типичном GOP в 250 кадров это промах до десяти секунд — для нарезки
+// реплик под укладку бесполезно.
+//
+// Точная резка делает то, что в монтажках называется smart cut:
+// голову сегмента (от запрошенной секунды до ближайшего следующего
+// опорного кадра) ПЕРЕКОДИРУЕТ, остальное копирует как есть, и
+// склеивает обе части. Перекодируется секунда-две вместо всего файла,
+// а начало получается ровно там, где попросили.
+//
+// Условие склейки — голова должна быть закодирована тем же кодеком,
+// что и хвост. Если кодек исходника нам неизвестен (экзотика вроде
+// ProRes или AV1 без известного энкодера), честно откатываемся на
+// резку по опорным кадрам, а не выдаём битый файл.
+
+/// Место операции на общей шкале прогресса, без длительности: её
+/// каждый проход считает сам. Тройка label/base/span бродила по
+/// сигнатурам отдельными аргументами и упиралась в лимит clippy на их
+/// число — здесь она и по смыслу одно целое.
+struct StageSlot {
+    label: String,
+    base: f64,
+    span: f64,
+}
+
+impl StageSlot {
+    /// Кусок отведённой доли — для проходов внутри одного сегмента
+    /// (перекодировать голову, скопировать хвост, склеить).
+    fn part(&self, offset: f64, fraction: f64, label: &str) -> Stage {
+        Stage {
+            label: format!("{}: {label}", self.label),
+            base: self.base + self.span * offset,
+            span: self.span * fraction,
+            duration: 0.0,
+        }
+    }
+}
+
+fn matching_video_encoder(codec: &str) -> Option<&'static str> {
+    match codec {
+        "h264" => Some("libx264"),
+        "hevc" | "h265" => Some("libx265"),
+        "vp9" => Some("libvpx-vp9"),
+        _ => None,
+    }
+}
+
+fn matching_audio_encoder(codec: &str) -> Option<&'static str> {
+    match codec {
+        "aac" => Some("aac"),
+        "mp3" => Some("libmp3lame"),
+        "opus" => Some("libopus"),
+        "ac3" => Some("ac3"),
+        "flac" => Some("flac"),
+        _ => None,
+    }
+}
+
+/// Ближайший опорный кадр СТРОГО ПОЗЖЕ запрошенного времени — граница,
+/// с которой можно продолжать копированием. Допуск в 40 мс (кадр при
+/// 25 fps) отсекает случай «запрошенное время и так практически на
+/// опорном кадре», где перекодировать нечего.
+fn next_keyframe_after(requested: f64, keyframes: &[f64]) -> Option<f64> {
+    keyframes.iter().copied().find(|&k| k > requested + 0.04)
+}
+
+/// Можно ли для этого файла вообще делать точную резку.
+fn precise_cut_encoders(info: &MediaInfo) -> Option<(&'static str, Option<&'static str>)> {
+    let video = info.video.as_ref()?;
+    let venc = matching_video_encoder(&video.codec)?;
+    // Звука может не быть вовсе — это не препятствие.
+    let aenc = match info.audio.as_ref() {
+        Some(a) => Some(matching_audio_encoder(&a.codec)?),
+        None => None,
+    };
+    Some((venc, aenc))
+}
+
+/// Режет один сегмент точно по запрошенному времени. `span` — доля
+/// общей шкалы прогресса, отведённая этому сегменту.
+fn cut_segment_precise(
+    progress: &Progress,
+    path: &str,
+    seg: &CutSegment,
+    out_path: &Path,
+    keyframes: &[f64],
+    info: &MediaInfo,
+    slot: &StageSlot,
+) -> Result<(), String> {
+    let (venc, aenc) = match precise_cut_encoders(info) {
+        Some(e) => e,
+        None => {
+            log::warn!(
+                "точная резка недоступна для кодека {:?} — режем по опорным кадрам",
+                info.video.as_ref().map(|v| v.codec.as_str())
+            );
+            return cut_segment_by_keyframe(progress, path, seg, out_path, keyframes, slot);
+        }
+    };
+    let snapped = snap_to_keyframe(seg.start, keyframes);
+    // Уже на опорном кадре — перекодировать нечего, обычная быстрая резка.
+    if (seg.start - snapped).abs() < 0.04 {
+        return cut_segment_by_keyframe(progress, path, seg, out_path, keyframes, slot);
+    }
+    let boundary = match next_keyframe_after(seg.start, keyframes) {
+        // Следующий опорный кадр уже за концом сегмента — весь кусок
+        // внутри одного GOP, копировать нечего, перекодируем целиком.
+        Some(k) if k < seg.end - 0.04 => k,
+        _ => {
+            let args = encode_args(path, seg.start, seg.end - seg.start, venc, aenc);
+            return run_ffmpeg(
+                progress,
+                &args,
+                out_path,
+                Stage {
+                    label: slot.label.clone(),
+                    base: slot.base,
+                    span: slot.span,
+                    duration: seg.end - seg.start,
+                },
+            );
+        }
+    };
+
+    let work = TempWork::file("head.mkv")?;
+    let head = work.path.clone();
+    // Хвост — во временный каталог рядом с головой, чтобы оба куска
+    // исчезли вместе с ним, даже если склейка сорвётся.
+    let tail = work.dir.join("tail.mkv");
+
+    // Матрёшка: голова перекодируется (0..40% отрезка), хвост
+    // копируется мгновенно, склейка — оставшееся.
+    let head_args = encode_args(path, seg.start, boundary - seg.start, venc, aenc);
+    run_ffmpeg(
+        progress,
+        &head_args,
+        &head,
+        Stage { duration: boundary - seg.start, ..slot.part(0.0, 0.6, "начало") },
+    )?;
+
+    let tail_args = vec![
+        "-v".to_string(), "error".into(), "-y".into(),
+        "-ss".into(), format!("{boundary:.3}"),
+        "-i".into(), path.to_string(),
+        "-t".into(), format!("{:.3}", seg.end - boundary),
+        "-c".into(), "copy".into(),
+    ];
+    run_ffmpeg(
+        progress,
+        &tail_args,
+        &tail,
+        Stage { duration: seg.end - boundary, ..slot.part(0.6, 0.2, "остаток") },
+    )?;
+
+    let list = TempWork::concat_list(&[
+        head.to_string_lossy().into_owned(),
+        tail.to_string_lossy().into_owned(),
+    ])?;
+    let join_args = vec![
+        "-v".to_string(), "error".into(), "-y".into(),
+        "-f".into(), "concat".into(),
+        "-safe".into(), "0".into(),
+        "-i".into(), list.path.to_string_lossy().into_owned(),
+        "-c".into(), "copy".into(),
+    ];
+    run_ffmpeg(
+        progress,
+        &join_args,
+        out_path,
+        Stage { duration: seg.end - seg.start, ..slot.part(0.8, 0.2, "сборка") },
+    )
+}
+
+/// Аргументы перекодирования куска тем же кодеком, что у исходника.
+fn encode_args(path: &str, start: f64, duration: f64, venc: &str, aenc: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "-v".to_string(), "error".into(), "-y".into(),
+        // -ss ПОСЛЕ -i: медленнее, зато точно по кадру, а не по
+        // ближайшей позиции в контейнере. Кусок тут короткий (до одного
+        // GOP), так что цена невелика, а точность — весь смысл.
+        "-i".into(), path.to_string(),
+        "-ss".into(), format!("{start:.3}"),
+        "-t".into(), format!("{duration:.3}"),
+        "-c:v".into(), venc.to_string(),
+    ];
+    if venc == "libx264" || venc == "libx265" {
+        // Тот же пиксельный формат, что почти наверняка у исходника —
+        // concat-демуксер не склеит куски с разным pix_fmt.
+        args.extend(["-pix_fmt".into(), "yuv420p".into()]);
+    }
+    match aenc {
+        Some(a) => args.extend(["-c:a".into(), a.to_string()]),
+        None => args.push("-an".into()),
+    }
+    args
+}
+
+fn cut_segment_by_keyframe(
+    progress: &Progress,
+    path: &str,
+    seg: &CutSegment,
+    out_path: &Path,
+    keyframes: &[f64],
+    slot: &StageSlot,
+) -> Result<(), String> {
+    let snapped_start = snap_to_keyframe(seg.start, keyframes);
+    let duration = seg.end - snapped_start;
+    let args = vec![
+        "-v".to_string(), "error".into(),
+        "-y".into(),
+        "-ss".into(), format!("{snapped_start:.3}"),
+        "-i".into(), path.to_string(),
+        "-t".into(), format!("{duration:.3}"),
+        "-c".into(), "copy".into(),
+    ];
+    run_ffmpeg(
+        progress,
+        &args,
+        out_path,
+        Stage { label: slot.label.clone(), base: slot.base, span: slot.span, duration },
+    )
+}
+
+/// Рабочий файл во временном каталоге: список для concat-демуксера,
+/// палитра для GIF, промежуточный кусок для точной резки. Раньше такой
+/// файл писался в общий temp с предсказуемым именем
+/// (`phoenix_concat_<pid>.txt`) — на машине с несколькими
+/// пользователями это классический путь для symlink-подставы, а два
+/// параллельных запуска затирали список друг другу. Теперь — свой
 /// каталог со случайным именем, и он же убирается за собой в Drop, даже
 /// если операция упала или её отменили на середине.
-struct ConcatList {
+struct TempWork {
     path: PathBuf,
     dir: PathBuf,
 }
 
-impl ConcatList {
-    fn write(paths: &[String]) -> Result<Self, String> {
+impl TempWork {
+    /// Пустой файл с заданным именем — путь есть, содержимое запишет
+    /// сам ffmpeg (палитра GIF, промежуточный фрагмент).
+    fn file(name: &str) -> Result<Self, String> {
+        let dir = Self::make_dir()?;
+        let path = dir.join(name);
+        Ok(Self { path, dir })
+    }
+
+    fn make_dir() -> Result<PathBuf, String> {
         // Источник «случайности» без лишней зависимости: наносекунды от
         // старта эпохи + pid. Криптостойкость тут не нужна — нужна
         // невозможность угадать имя заранее и уникальность между
@@ -344,9 +580,15 @@ impl ConcatList {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0)
         );
-        let dir = std::env::temp_dir().join(format!("phoenix_concat_{unique}"));
+        let dir = std::env::temp_dir().join(format!("phoenix_mt_{unique}"));
         std::fs::create_dir(&dir)
-            .map_err(|e| format!("Не удалось подготовить список склейки: {e}"))?;
+            .map_err(|e| format!("Не удалось подготовить временный каталог: {e}"))?;
+        Ok(dir)
+    }
+
+    /// Список файлов для concat-демуксера.
+    fn concat_list(paths: &[String]) -> Result<Self, String> {
+        let dir = Self::make_dir()?;
         let path = dir.join("list.txt");
         let body = paths
             .iter()
@@ -361,7 +603,7 @@ impl ConcatList {
     }
 }
 
-impl Drop for ConcatList {
+impl Drop for TempWork {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
@@ -693,7 +935,7 @@ pub fn concat_media(progress: &Progress, paths: &[String], out_path: &str) -> Re
     let can_copy = same_codecs(&infos);
 
     if can_copy {
-        let list = ConcatList::write(paths)?;
+        let list = TempWork::concat_list(paths)?;
         let args = vec![
             "-v".to_string(), "error".into(),
             "-y".into(),
@@ -744,6 +986,392 @@ pub fn concat_media(progress: &Progress, paths: &[String], out_path: &str) -> Re
         )?;
         Ok("reencode".to_string())
     }
+}
+
+// ---------- dub_audio: подмена/подмешивание дорожки дубляжа ----------
+// Самая частая операция студии, которой до сих пор не было ни одной
+// кнопки: «вот видео, вот записанный дубль — собери». Отдельно от
+// mux_media, потому что здесь важен СДВИГ дорожки относительно картинки
+// (дубль почти никогда не ложится кадр-в-кадр) и выбор между «заменить
+// оригинальный звук» и «подмешать поверх приглушённого оригинала».
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DubOpts {
+    /// Сдвиг дорожки дубляжа в секундах: положительный — дубль звучит
+    /// позже картинки, отрицательный — раньше.
+    pub offset: f64,
+    /// "replace" — оригинальный звук выбрасывается;
+    /// "mix" — дубль поверх приглушённого оригинала (референс/эффекты);
+    /// "add" — обе дорожки остаются отдельными, дубль по умолчанию.
+    pub mode: String,
+    /// Громкость оригинала в режиме "mix", 0..1.
+    pub original_volume: f64,
+    pub audio_codec: String,
+    pub audio_bitrate: Option<String>,
+}
+
+fn dub_args(video: &str, dub: &str, opts: &DubOpts) -> Result<Vec<String>, String> {
+    if !opts.offset.is_finite() || opts.offset.abs() > 3600.0 {
+        return Err("Сдвиг дорожки должен быть в пределах часа.".into());
+    }
+    if !(0.0..=1.0).contains(&opts.original_volume) {
+        return Err("Громкость оригинала должна быть от 0 до 1.".into());
+    }
+    let codec = check_codec(&opts.audio_codec, AUDIO_CODECS, "аудио")?;
+    let mut args: Vec<String> = vec!["-v".into(), "error".into(), "-y".into()];
+    args.extend(["-i".into(), video.to_string()]);
+    // -itsoffset ДО -i двигает временные метки именно этого входа —
+    // это и есть сдвиг дубля относительно картинки. Отрицательные
+    // значения ffmpeg принимает наравне с положительными.
+    args.extend(["-itsoffset".into(), format!("{:.3}", opts.offset)]);
+    args.extend(["-i".into(), dub.to_string()]);
+
+    match opts.mode.as_str() {
+        "replace" => {
+            args.extend([
+                "-map".into(), "0:v:0".into(),
+                "-map".into(), "1:a:0".into(),
+                "-c:v".into(), "copy".into(),
+                "-c:a".into(), codec,
+            ]);
+        }
+        "add" => {
+            // Обе дорожки в файле: дубль первой (плеер возьмёт её по
+            // умолчанию), оригинал второй — так делают релизы с
+            // возможностью переключить озвучку.
+            args.extend([
+                "-map".into(), "0:v:0".into(),
+                "-map".into(), "1:a:0".into(),
+                "-map".into(), "0:a:0?".into(),
+                "-c:v".into(), "copy".into(),
+                "-c:a".into(), codec,
+                "-disposition:a:0".into(), "default".into(),
+                "-disposition:a:1".into(), "0".into(),
+                "-metadata:s:a:0".into(), "title=Дубляж".into(),
+                "-metadata:s:a:1".into(), "title=Оригинал".into(),
+            ]);
+        }
+        "mix" => {
+            // amix сам по себе делит громкость между входами, поэтому
+            // дубль после него звучал бы вдвое тише. volume=2 на выходе
+            // возвращает его к исходному уровню, а оригинал приглушаем
+            // отдельно ДО смешивания.
+            let filter = format!(
+                "[0:a]volume={:.3}[orig];[orig][1:a]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]volume=2.0[a]",
+                opts.original_volume
+            );
+            args.extend([
+                "-filter_complex".into(), filter,
+                "-map".into(), "0:v:0".into(),
+                "-map".into(), "[a]".into(),
+                "-c:v".into(), "copy".into(),
+                "-c:a".into(), codec,
+            ]);
+        }
+        other => return Err(format!("Неизвестный режим сведения: {other}")),
+    }
+    if let Some(b) = opts.audio_bitrate.as_deref().filter(|b| !b.is_empty()) {
+        args.extend(["-b:a".into(), check_bitrate(b)?]);
+    }
+    // Видео копируется как есть, так что длину задаёт оно; без -shortest
+    // дубль длиннее исходника растянул бы файл чёрным кадром в конце.
+    args.push("-shortest".into());
+    Ok(args)
+}
+
+pub fn dub_audio(
+    progress: &Progress,
+    video: &str,
+    dub: &str,
+    out_path: &str,
+    opts: &DubOpts,
+) -> Result<(), String> {
+    let args = dub_args(video, dub, opts)?;
+    let duration = probe_media(video).map(|m| m.duration).unwrap_or(0.0);
+    run_ffmpeg(
+        progress,
+        &args,
+        Path::new(out_path),
+        Stage { label: "Свожу дубляж с видео".into(), base: 0.0, span: 1.0, duration },
+    )
+}
+
+// ---------- change_speed ----------
+
+/// atempo умеет менять темп только в пределах 0.5..2.0 за один проход —
+/// всё, что выходит за них, собирается цепочкой из нескольких atempo
+/// (2.5× = atempo=2.0,atempo=1.25). Тон при этом не плывёт: atempo
+/// растягивает время, а не частоту, в отличие от простого изменения
+/// частоты дискретизации.
+fn atempo_chain(speed: f64) -> String {
+    let mut parts = Vec::new();
+    let mut left = speed;
+    while left > 2.0 {
+        parts.push("atempo=2.0".to_string());
+        left /= 2.0;
+    }
+    while left < 0.5 {
+        parts.push("atempo=0.5".to_string());
+        left /= 0.5;
+    }
+    parts.push(format!("atempo={left:.6}"));
+    parts.join(",")
+}
+
+fn speed_args(path: &str, speed: f64, keep_pitch: bool) -> Result<Vec<String>, String> {
+    if !speed.is_finite() || !(0.1..=10.0).contains(&speed) {
+        return Err("Скорость должна быть от 0.1 до 10.".into());
+    }
+    let audio_filter = if keep_pitch {
+        atempo_chain(speed)
+    } else {
+        // Без сохранения тона — просто переразметка сэмплов: голос
+        // «поедет» вверх/вниз, как на плёнке не той скорости. Иногда
+        // именно это и нужно (эффект), поэтому оставляем выбор.
+        format!("asetrate=44100*{speed:.6},aresample=44100")
+    };
+    Ok(vec![
+        "-v".into(), "error".into(), "-y".into(),
+        "-i".into(), path.into(),
+        "-filter_complex".into(),
+        format!("[0:v]setpts={:.6}*PTS[v];[0:a]{audio_filter}[a]", 1.0 / speed),
+        "-map".into(), "[v]".into(),
+        "-map".into(), "[a]".into(),
+    ])
+}
+
+pub fn change_speed(
+    progress: &Progress,
+    path: &str,
+    out_path: &str,
+    speed: f64,
+    keep_pitch: bool,
+) -> Result<(), String> {
+    let args = speed_args(path, speed, keep_pitch)?;
+    let duration = probe_media(path).map(|m| m.duration / speed).unwrap_or(0.0);
+    run_ffmpeg(
+        progress,
+        &args,
+        Path::new(out_path),
+        Stage { label: format!("Меняю скорость на {speed}×"), base: 0.0, span: 1.0, duration },
+    )
+}
+
+// ---------- кадры: стоп-кадр и контактный лист ----------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameOpts {
+    /// Секунда, с которой брать кадр (для одиночного кадра).
+    pub at: f64,
+    /// Сколько кадров в контактном листе; 1 — обычный стоп-кадр.
+    pub count: u32,
+    pub columns: u32,
+    /// Ширина одного кадра в сетке, пикселей.
+    pub width: u32,
+}
+
+fn frame_args(path: &str, duration: f64, opts: &FrameOpts) -> Result<Vec<String>, String> {
+    if !opts.at.is_finite() || opts.at < 0.0 {
+        return Err("Некорректная позиция кадра.".into());
+    }
+    let width = check_dimension(opts.width, "Ширина кадра")?;
+    if opts.count == 0 || opts.count > 400 {
+        return Err("Кадров в листе должно быть от 1 до 400.".into());
+    }
+    if opts.count == 1 {
+        return Ok(vec![
+            "-v".into(), "error".into(), "-y".into(),
+            // -ss ДО -i — быстрый seek по контейнеру: на двухчасовом
+            // фильме разница между «мгновенно» и «полторы минуты».
+            "-ss".into(), format!("{:.3}", opts.at),
+            "-i".into(), path.into(),
+            "-frames:v".into(), "1".into(),
+            "-vf".into(), format!("scale={width}:-2"),
+            "-q:v".into(), "2".into(),
+        ]);
+    }
+    let columns = opts.columns.clamp(1, 20);
+    let rows = opts.count.div_ceil(columns);
+    if duration <= 0.0 {
+        return Err("Не удалось определить длительность — контактный лист не собрать.".into());
+    }
+    // Кадры равномерно по всему фильму: fps=N/длительность даёт ровно
+    // count кадров, а tile укладывает их в сетку одним изображением.
+    let fps = opts.count as f64 / duration;
+    Ok(vec![
+        "-v".into(), "error".into(), "-y".into(),
+        "-i".into(), path.into(),
+        "-vf".into(),
+        format!("fps={fps:.6},scale={width}:-2,tile={columns}x{rows}"),
+        "-frames:v".into(), "1".into(),
+        "-q:v".into(), "3".into(),
+    ])
+}
+
+pub fn extract_frames(progress: &Progress, path: &str, out_path: &str, opts: &FrameOpts) -> Result<(), String> {
+    let duration = probe_media(path).map(|m| m.duration).unwrap_or(0.0);
+    let args = frame_args(path, duration, opts)?;
+    let label = if opts.count == 1 { "Снимаю кадр" } else { "Собираю контактный лист" };
+    run_ffmpeg(
+        progress,
+        &args,
+        Path::new(out_path),
+        // Одиночный кадр мгновенный, контактный лист читает весь файл —
+        // длительность нужна только второму.
+        Stage { label: label.into(), base: 0.0, span: 1.0, duration: if opts.count == 1 { 0.0 } else { duration } },
+    )
+}
+
+// ---------- GIF ----------
+
+/// GIF в лоб (`-i in.mp4 out.gif`) выходит грязным: формат держит 256
+/// цветов, и ffmpeg без подсказки берёт стандартную палитру вместо
+/// подобранной под конкретный ролик. Правильный путь — два прохода:
+/// palettegen собирает палитру именно этого фрагмента, paletteuse
+/// применяет её с дизерингом. Разница видна невооружённым глазом на
+/// любом градиенте.
+pub fn make_gif(
+    progress: &Progress,
+    path: &str,
+    out_path: &str,
+    start: f64,
+    duration: f64,
+    fps: u32,
+    width: u32,
+) -> Result<(), String> {
+    if !(start.is_finite() && duration.is_finite() && start >= 0.0 && duration > 0.0) {
+        return Err("Некорректный диапазон фрагмента.".into());
+    }
+    if duration > 60.0 {
+        return Err("Фрагмент длиннее минуты — GIF выйдет на сотни мегабайт. Возьмите кусок покороче.".into());
+    }
+    let fps = fps.clamp(5, 50);
+    let width = check_dimension(width, "Ширина")?;
+
+    let palette = TempWork::file("palette.png")?;
+    let palette_path = palette.path.to_string_lossy().into_owned();
+    let common = |extra: &str| -> Vec<String> {
+        vec![
+            "-v".into(), "error".into(), "-y".into(),
+            "-ss".into(), format!("{start:.3}"),
+            "-t".into(), format!("{duration:.3}"),
+            "-i".into(), path.into(),
+            "-vf".into(), format!("fps={fps},scale={width}:-1:flags=lanczos{extra}"),
+        ]
+    };
+    run_ffmpeg(
+        progress,
+        &common(",palettegen=stats_mode=diff"),
+        Path::new(&palette_path),
+        Stage { label: "Подбираю палитру".into(), base: 0.0, span: 0.4, duration },
+    )?;
+
+    let mut args = vec![
+        "-v".to_string(), "error".into(), "-y".into(),
+        "-ss".into(), format!("{start:.3}"),
+        "-t".into(), format!("{duration:.3}"),
+        "-i".into(), path.into(),
+        "-i".into(), palette_path,
+        "-lavfi".into(),
+        format!("fps={fps},scale={width}:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3"),
+    ];
+    // Бесконечное повторение — то, чего от GIF и ждут.
+    args.extend(["-loop".into(), "0".into()]);
+    run_ffmpeg(
+        progress,
+        &args,
+        Path::new(out_path),
+        Stage { label: "Собираю GIF".into(), base: 0.4, span: 0.6, duration },
+    )
+}
+
+// ---------- субтитры ----------
+
+/// Путь внутри ЗНАЧЕНИЯ фильтра ffmpeg — не то же самое, что путь в
+/// обычном аргументе. Он проходит через два разбора подряд: сначала
+/// парсер фильтрографа (для него значимы `\`, пробел, `,`, `;`, `[`,
+/// `]`, кавычка), потом парсер опций самого фильтра (для него значимо
+/// ещё и `:` — разделитель параметров, и `=`). Поэтому одни символы
+/// экранируются одним слэшем, а другие — двумя уровнями сразу.
+///
+/// Правило ниже подобрано не по памяти, а прогоном живого ffmpeg на
+/// файле с именем `a\b,c=d[e].srt` в каталоге `C:dir` — см. тест
+/// `escape_filter_path_survives_both_parsers`. Практическое следствие:
+/// виндовый `C:\Видео\ep 1.srt` доезжает до фильтра целым, а раньше
+/// разваливался на двоеточии диска.
+fn escape_filter_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len() + 16);
+    for ch in path.chars() {
+        match ch {
+            // Оба парсера снимают по одному слэшу — значит, писать надо
+            // четыре, чтобы до файловой системы дошёл один.
+            '\\' => out.push_str(r"\\\\"),
+            // Разделитель параметров фильтра: должен пережить первый
+            // разбор экранированным.
+            ':' => out.push_str(r"\\:"),
+            '\'' => out.push_str(r"\\\'"),
+            // Значимы только для первого разбора — хватает одного слэша.
+            ' ' | ',' | ';' | '[' | ']' | '=' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn burn_subtitles_args(video: &str, subs: &str, font_size: u32) -> Result<Vec<String>, String> {
+    if !(8..=96).contains(&font_size) {
+        return Err("Размер шрифта должен быть от 8 до 96.".into());
+    }
+    let escaped = escape_filter_path(subs);
+    // force_style работает только для SRT (у ASS свой стиль внутри
+    // файла) — для ASS ffmpeg его просто проигнорирует, это не ошибка.
+    let filter = format!("subtitles='{escaped}':force_style='FontSize={font_size}'");
+    Ok(vec![
+        "-v".into(), "error".into(), "-y".into(),
+        "-i".into(), video.into(),
+        "-vf".into(), filter,
+        "-c:a".into(), "copy".into(),
+    ])
+}
+
+pub fn burn_subtitles(
+    progress: &Progress,
+    video: &str,
+    subs: &str,
+    out_path: &str,
+    font_size: u32,
+) -> Result<(), String> {
+    let args = burn_subtitles_args(video, subs, font_size)?;
+    let duration = probe_media(video).map(|m| m.duration).unwrap_or(0.0);
+    run_ffmpeg(
+        progress,
+        &args,
+        Path::new(out_path),
+        Stage { label: "Вшиваю субтитры".into(), base: 0.0, span: 1.0, duration },
+    )
+}
+
+/// Вытащить дорожку субтитров из контейнера в отдельный файл.
+/// `-c:s` не указываем: ffmpeg сам выберет кодировщик по расширению
+/// (srt -> subrip, ass -> ass), а `copy` сломался бы на несовпадении
+/// форматов, ровно как в mux_media с mp4.
+pub fn extract_subtitles(progress: &Progress, path: &str, out_path: &str, track: u32) -> Result<(), String> {
+    let args = vec![
+        "-v".to_string(), "error".into(), "-y".into(),
+        "-i".into(), path.into(),
+        "-map".into(), format!("0:s:{track}"),
+    ];
+    run_ffmpeg(
+        progress,
+        &args,
+        Path::new(out_path),
+        Stage { label: "Извлекаю субтитры".into(), base: 0.0, span: 1.0, duration: 0.0 },
+    )
 }
 
 // ---------- mux_media ----------
@@ -1166,6 +1794,163 @@ mod tests {
         assert!(parse_loudnorm_json("совсем не json").is_none());
     }
 
+    // ---------- новые операции ----------
+
+    #[test]
+    fn escape_filter_path_survives_both_parsers() {
+        // Эталон подобран прогоном живого ffmpeg (см. докстроку функции):
+        // обратный слэш — четырьмя, двоеточие — двумя, остальное одним.
+        assert_eq!(
+            escape_filter_path(r"C:\Видео\ep 1.srt"),
+            r"C\\:\\\\Видео\\\\ep\ 1.srt"
+        );
+        assert_eq!(escape_filter_path("a'b.srt"), r"a\\\'b.srt");
+        assert_eq!(escape_filter_path("a,b=c[d].srt"), r"a\,b\=c\[d\].srt");
+        // Обычный путь без спецсимволов не должен обрастать мусором.
+        assert_eq!(escape_filter_path("/home/dub/ep1.srt"), "/home/dub/ep1.srt");
+    }
+
+    #[test]
+    fn dub_args_shift_only_the_dub_track() {
+        let opts = DubOpts {
+            offset: -0.32,
+            mode: "replace".into(),
+            original_volume: 0.2,
+            audio_codec: "aac".into(),
+            audio_bitrate: Some("192k".into()),
+        };
+        let args = dub_args("video.mp4", "dub.wav", &opts).expect("валидные параметры");
+        // -itsoffset должен стоять ПЕРЕД вторым -i, иначе он сдвинет не
+        // ту дорожку (или вообще ничего).
+        let off = args.iter().position(|a| a == "-itsoffset").expect("нет -itsoffset");
+        let dub_input = args.iter().position(|a| a == "dub.wav").expect("нет дубля");
+        let video_input = args.iter().position(|a| a == "video.mp4").expect("нет видео");
+        assert!(video_input < off && off < dub_input, "{args:?}");
+        assert_eq!(args[off + 1], "-0.320");
+        assert!(args.windows(2).any(|w| w == ["-c:v", "copy"]), "картинку перекодировать незачем: {args:?}");
+        assert!(args.contains(&"-shortest".to_string()));
+    }
+
+    #[test]
+    fn dub_args_mix_compensates_amix_volume_drop() {
+        let opts = DubOpts {
+            offset: 0.0, mode: "mix".into(), original_volume: 0.15,
+            audio_codec: "aac".into(), audio_bitrate: None,
+        };
+        let args = dub_args("v.mp4", "d.wav", &opts).unwrap();
+        let filter = args.iter().find(|a| a.contains("amix")).expect("нет amix");
+        assert!(filter.contains("volume=0.150"), "{filter}");
+        // amix делит громкость между входами — без обратного умножения
+        // дубляж звучал бы вдвое тише оригинальной записи.
+        assert!(filter.contains("volume=2.0"), "{filter}");
+    }
+
+    #[test]
+    fn dub_args_reject_nonsense() {
+        let base = |mode: &str, offset: f64, vol: f64| DubOpts {
+            offset, mode: mode.into(), original_volume: vol,
+            audio_codec: "aac".into(), audio_bitrate: None,
+        };
+        assert!(dub_args("v", "d", &base("replace", f64::NAN, 0.2)).is_err());
+        assert!(dub_args("v", "d", &base("replace", 99999.0, 0.2)).is_err());
+        assert!(dub_args("v", "d", &base("mix", 0.0, 5.0)).is_err());
+        assert!(dub_args("v", "d", &base("телепортировать", 0.0, 0.2)).is_err());
+    }
+
+    #[test]
+    fn atempo_chain_stays_within_the_filters_limits() {
+        // atempo принимает только 0.5..2.0 — всё остальное собирается
+        // цепочкой, иначе ffmpeg отказывается строить фильтр.
+        for speed in [0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 8.0] {
+            let chain = atempo_chain(speed);
+            let mut product = 1.0_f64;
+            for part in chain.split(',') {
+                let v: f64 = part.trim_start_matches("atempo=").parse().expect(&chain);
+                assert!((0.5..=2.0).contains(&v), "{v} вне допустимого диапазона в {chain}");
+                product *= v;
+            }
+            assert!((product - speed).abs() < 1e-4, "цепочка {chain} даёт {product}, а нужно {speed}");
+        }
+    }
+
+    #[test]
+    fn speed_args_invert_pts_and_reject_extremes() {
+        let args = speed_args("in.mp4", 2.0, true).unwrap();
+        let filter = args.iter().find(|a| a.contains("setpts")).unwrap();
+        // Вдвое быстрее — значит метки времени вдвое ближе.
+        assert!(filter.contains("setpts=0.500000*PTS"), "{filter}");
+        assert!(filter.contains("atempo"), "{filter}");
+        let no_pitch = speed_args("in.mp4", 2.0, false).unwrap();
+        assert!(no_pitch.iter().any(|a| a.contains("asetrate")));
+        assert!(speed_args("in.mp4", 0.0, true).is_err());
+        assert!(speed_args("in.mp4", 50.0, true).is_err());
+    }
+
+    #[test]
+    fn frame_args_single_frame_seeks_before_input() {
+        let opts = FrameOpts { at: 61.5, count: 1, columns: 4, width: 1280 };
+        let args = frame_args("in.mp4", 600.0, &opts).unwrap();
+        let ss = args.iter().position(|a| a == "-ss").unwrap();
+        let i = args.iter().position(|a| a == "-i").unwrap();
+        // -ss до -i: на двухчасовом файле это разница между мгновением и
+        // полной перемоткой.
+        assert!(ss < i, "{args:?}");
+        assert_eq!(args[ss + 1], "61.500");
+        assert!(args.windows(2).any(|w| w == ["-frames:v", "1"]));
+    }
+
+    #[test]
+    fn frame_args_contact_sheet_spreads_frames_over_the_whole_file() {
+        let opts = FrameOpts { at: 0.0, count: 12, columns: 4, width: 320 };
+        let args = frame_args("in.mp4", 600.0, &opts).unwrap();
+        let vf = args.iter().find(|a| a.contains("tile")).unwrap();
+        // 12 кадров на 600 секунд = один кадр в 50 секунд.
+        assert!(vf.contains("fps=0.020000"), "{vf}");
+        assert!(vf.contains("tile=4x3"), "{vf}");
+        // Без известной длительности равномерно разложить нечего.
+        assert!(frame_args("in.mp4", 0.0, &opts).is_err());
+        let too_many = FrameOpts { at: 0.0, count: 9999, columns: 4, width: 320 };
+        assert!(frame_args("in.mp4", 600.0, &too_many).is_err());
+    }
+
+    #[test]
+    fn burn_subtitles_args_quote_the_path_and_check_font_size() {
+        let args = burn_subtitles_args("v.mp4", r"C:\subs\ep 1.srt", 28).unwrap();
+        let vf = args.iter().find(|a| a.starts_with("subtitles=")).unwrap();
+        assert!(vf.contains(r"C\\:"), "двоеточие диска должно быть экранировано: {vf}");
+        assert!(vf.contains("FontSize=28"), "{vf}");
+        assert!(args.windows(2).any(|w| w == ["-c:a", "copy"]), "звук трогать незачем: {args:?}");
+        assert!(burn_subtitles_args("v.mp4", "s.srt", 2).is_err());
+        assert!(burn_subtitles_args("v.mp4", "s.srt", 500).is_err());
+    }
+
+    #[test]
+    fn precise_cut_only_where_we_can_match_the_codec() {
+        let mk = |v: &str, a: Option<&str>| MediaInfo {
+            duration: 10.0,
+            container: "mov,mp4".into(),
+            video: Some(StreamInfo { codec: v.into(), ..Default::default() }),
+            audio: a.map(|a| StreamInfo { codec: a.into(), ..Default::default() }),
+        };
+        assert_eq!(precise_cut_encoders(&mk("h264", Some("aac"))), Some(("libx264", Some("aac"))));
+        assert_eq!(precise_cut_encoders(&mk("hevc", None)), Some(("libx265", None)));
+        // ProRes мы перекодировать тем же кодеком не умеем — честный
+        // откат на резку по опорным кадрам, а не битый файл.
+        assert_eq!(precise_cut_encoders(&mk("prores", Some("pcm_s16le"))), None);
+        // Видео нет вовсе — точную резку делать не на чем.
+        let audio_only = MediaInfo { duration: 1.0, container: "wav".into(), video: None, audio: None };
+        assert_eq!(precise_cut_encoders(&audio_only), None);
+    }
+
+    #[test]
+    fn next_keyframe_after_skips_the_one_we_are_standing_on() {
+        let kf = [0.0, 2.0, 4.0, 6.0];
+        assert_eq!(next_keyframe_after(2.0, &kf), Some(4.0));
+        assert_eq!(next_keyframe_after(2.5, &kf), Some(4.0));
+        assert_eq!(next_keyframe_after(6.0, &kf), None);
+        assert_eq!(next_keyframe_after(0.0, &[]), None);
+    }
+
     // ---------- интеграционные (нужен реальный ffmpeg/ffprobe в PATH) ----------
     // Тот же приём, что у export_clip_produces_wav_of_requested_duration в
     // audio_qc.rs: пропускаем, а не падаем, если на машине, где гоняют
@@ -1218,9 +2003,9 @@ mod tests {
 
     #[test]
     fn cut_media_rejects_empty_or_invalid_segments() {
-        assert!(cut_media(&Progress::silent(), "whatever.mp4", &[], "/tmp", true, false).is_err());
+        assert!(cut_media(&Progress::silent(), "whatever.mp4", &[], "/tmp", true, false, false).is_err());
         let bad = vec![CutSegment { start: 2.0, end: 1.0 }];
-        assert!(cut_media(&Progress::silent(), "whatever.mp4", &bad, "/tmp", true, false).is_err());
+        assert!(cut_media(&Progress::silent(), "whatever.mp4", &bad, "/tmp", true, false, false).is_err());
     }
 
     #[test]
@@ -1232,7 +2017,7 @@ mod tests {
             CutSegment { start: 0.0, end: 2.0 },
             CutSegment { start: 3.0, end: 5.0 },
         ];
-        let result = cut_media(&Progress::silent(), &src, &segments, &dir.to_string_lossy(), true, true)
+        let result = cut_media(&Progress::silent(), &src, &segments, &dir.to_string_lossy(), true, true, false)
             .expect("cut_media не должен падать на валидном входе");
         assert_eq!(result.segment_paths.len(), 2, "оба сегмента должны остаться (keep_separate=true)");
         assert!(result.merged_path.is_some(), "merge=true должен дать склеенный файл");
@@ -1249,12 +2034,64 @@ mod tests {
     }
 
     #[test]
+    fn precise_cut_starts_where_asked_unlike_keyframe_cut() {
+        if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
+        let dir = std::env::temp_dir();
+        // GOP=50 при 25 fps — опорный кадр раз в две секунды. Просим
+        // отрезок [3.0, 7.0]: его начало заведомо НЕ на опорном кадре.
+        let out = dir.join("phoenix_mt_precise_src.mp4");
+        let gen = Command::new("ffmpeg")
+            .args([
+                "-v", "error", "-y",
+                "-f", "lavfi", "-i", "testsrc=duration=10:size=320x240:rate=25",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=10",
+                "-c:v", "libx264", "-g", "50", "-keyint_min", "50", "-sc_threshold", "0",
+                "-c:a", "aac",
+            ])
+            .arg(&out)
+            .output()
+            .expect("не удалось сгенерировать тестовое видео");
+        assert!(gen.status.success(), "{}", String::from_utf8_lossy(&gen.stderr));
+        let src = out.to_string_lossy().into_owned();
+        let segments = vec![CutSegment { start: 3.0, end: 7.0 }];
+
+        let rough_dir = dir.join("phoenix_precise_rough");
+        let exact_dir = dir.join("phoenix_precise_exact");
+        std::fs::create_dir_all(&rough_dir).unwrap();
+        std::fs::create_dir_all(&exact_dir).unwrap();
+
+        let rough = cut_media(&Progress::silent(), &src, &segments, &rough_dir.to_string_lossy(), true, false, false)
+            .expect("резка по опорным кадрам не должна падать");
+        let exact = cut_media(&Progress::silent(), &src, &segments, &exact_dir.to_string_lossy(), true, false, true)
+            .expect("точная резка не должна падать");
+
+        let rough_len = probe_media(&rough.segment_paths[0]).unwrap().duration;
+        let exact_len = probe_media(&exact.segment_paths[0]).unwrap().duration;
+
+        // Резка по опорным кадрам подъезжает к 2.0 — отрезок выходит
+        // примерно на секунду длиннее запрошенного.
+        assert!(
+            (rough_len - 5.0).abs() < 0.4,
+            "ожидали ~5с у резки по опорным кадрам (начало уехало на 2.0), получили {rough_len}"
+        );
+        // Точная — ровно то, что просили.
+        assert!(
+            (exact_len - 4.0).abs() < 0.25,
+            "точная резка должна дать ~4с, получили {exact_len}"
+        );
+
+        let _ = std::fs::remove_dir_all(&rough_dir);
+        let _ = std::fs::remove_dir_all(&exact_dir);
+        let _ = std::fs::remove_file(&out);
+    }
+
+    #[test]
     fn cut_media_can_discard_separate_files_when_only_merge_requested() {
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
         let src = make_test_video(&dir, "phoenix_mt_cut_mergeonly.mp4", 4);
         let segments = vec![CutSegment { start: 0.0, end: 1.0 }, CutSegment { start: 2.0, end: 3.0 }];
-        let result = cut_media(&Progress::silent(), &src, &segments, &dir.to_string_lossy(), false, true)
+        let result = cut_media(&Progress::silent(), &src, &segments, &dir.to_string_lossy(), false, true, false)
             .expect("cut_media не должен падать");
         assert!(result.segment_paths.is_empty(), "keep_separate=false — отдельных файлов быть не должно");
         assert!(result.merged_path.is_some());
