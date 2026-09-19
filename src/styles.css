@@ -1951,12 +1951,25 @@ kbd {
   background: color-mix(in srgb, currentColor 22%, transparent);
 }
 .board-card .ttl { font-size: 13px; font-weight: 600; margin: 0 0 8px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
-.board-card .foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 6px; }
+/* justify-content больше не space-between: с третьим блоком в потоке
+   (счётчики файлов/заметок) это растащило бы его от дедлайна в
+   отдельный угол вместо соседства. deadline-pill сам прижимается
+   вправо через margin-left:auto — тот же приём, что у .kpi-row. */
+.board-card .foot { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .board-card .deadline-pill {
   font-size: 10.5px; color: var(--ink-soft); font-weight: 600; white-space: nowrap;
   background: var(--surface-2); border-radius: 999px; padding: 3px 8px;
+  margin-left: auto;
 }
 .board-card .deadline-pill.overdue { color: var(--s-stop); background: color-mix(in srgb, var(--s-stop) 14%, var(--surface-2)); font-weight: 700; }
+/* Счётчики вложений/заметок на карточке — перенесено вживую с
+   референса пользователя (Dribbble: Xentra Digital Marketing
+   Dashboard, dribbble.com/shots/27265906): там на карточке проекта
+   видно число файлов и комментариев, не только сам факт их наличия.
+   files_count/notes_count считает бэкенд (_attach_counts в
+   miniapp/server.py), прокидывает board.rs как есть. */
+.board-card-counts { display: flex; gap: 8px; width: 100%; margin-top: 2px; }
+.board-card-counts span { font-size: 10.5px; color: var(--ink-dim); white-space: nowrap; }
 .board-col-more { width: 100%; font-size: 12px; padding: 6px; }
 .board-col-empty { text-align: center; color: var(--ink-dim); font-size: 12px; padding: 14px 4px; }
 .board-card .avatar-bubble { width: 24px; height: 24px; font-size: 11px; border-width: 2.5px; }

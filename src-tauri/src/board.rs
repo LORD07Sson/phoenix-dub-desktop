@@ -70,6 +70,13 @@ pub struct BoardCard {
     /// разбирать здесь нечего.
     #[serde(default)]
     pub assignees: serde_json::Value,
+    /// Число вложений/заметок — тоже прокидывается как есть, посчитаны
+    /// на сервере (см. _attach_counts в miniapp/server.py). Нужны для
+    /// бейджей 📎N/💬N на карточке (перенос референса Xentra).
+    #[serde(default)]
+    pub files_count: u32,
+    #[serde(default)]
+    pub notes_count: u32,
 }
 
 #[derive(Deserialize)]
@@ -128,6 +135,8 @@ pub struct BoardCardOut {
     /// 0..1 — насколько карточка «горит». Фронтенд рисует этим
     /// насыщенность полоски, а не придумывает свою шкалу.
     pub heat: f64,
+    pub files_count: u32,
+    pub notes_count: u32,
 }
 
 #[derive(Serialize)]
@@ -276,6 +285,8 @@ pub fn layout(columns: Vec<BoardColumnIn>, view: &BoardView) -> BoardLayout {
                 age_days,
                 stale,
                 unassigned,
+                files_count: card.files_count,
+                notes_count: card.notes_count,
             });
         }
 
@@ -353,6 +364,8 @@ mod tests {
             } else {
                 serde_json::json!([])
             },
+            files_count: 0,
+            notes_count: 0,
         }
     }
 
