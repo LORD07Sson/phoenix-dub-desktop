@@ -94,6 +94,11 @@ rustup target add x86_64-pc-windows-gnu
 cargo clippy --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets
 ```
 
+Это ловит опечатки и несовпадение типов, но НЕ выполняет сами тесты —
+для этого нужен запуск скомпилированного `.exe`, а `wine` в этом
+окружении не установлен. Тесты модуля (в т.ч. на аргументы запуска
+mpv) реально прогоняются только на CI под настоящей Windows.
+
 ## Окно
 
 Системный заголовок у окна выключен (`decorations: false` в
