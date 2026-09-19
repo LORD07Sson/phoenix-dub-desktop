@@ -577,13 +577,27 @@ body.window-maximized .win-btn .ic-restore { display: block; }
 
 /* KPI-плитки с дополнительной визуализацией (спарклайн/кольцо) —
    число и график в одной строке, число не подстраивается под график:
-   тренд — это контекст сбоку, а не равноправная часть заголовка. */
-.kpi-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.kpi-spark { flex: none; opacity: .9; }
+   тренд — это контекст сбоку, а не равноправная часть заголовка.
+   justify-content больше не space-between: третий постоянный элемент
+   (kpi-icon) в начале строки иначе растащило бы иконку и число по
+   разным углам вместо соседства — спарклайн/кольцо теперь прижимаются
+   вправо собственным margin-left:auto. */
+.kpi-row { display: flex; align-items: center; gap: 10px; }
+.kpi-spark { flex: none; opacity: .9; margin-left: auto; }
 .sparkline { display: block; overflow: visible; }
 .sparkline-area { opacity: .16; }
 .sparkline-line { stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.kpi-ring-wrap { flex: none; }
+.kpi-ring-wrap { flex: none; margin-left: auto; }
+
+/* Цветная иконка-плашка перед числом KPI-плитки — перенесено вживую с
+   референса пользователя (Dribbble: Xentra Digital Marketing
+   Dashboard, dribbble.com/shots/27265906): там у каждой карточки в
+   шапке слева от числа сидит закруглённый цветной квадрат с пиктограммой. */
+.kpi-icon {
+  width: 34px; height: 34px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; flex: none;
+}
 .kpi-ring-track { stroke: var(--surface-2); }
 .kpi-ring-fill { transition: stroke-dashoffset 1s var(--ease); }
 
