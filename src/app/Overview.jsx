@@ -18,7 +18,19 @@ import { $, esc, initials, STATUS_COLOR_VAR } from "./utils.js";
 // donutHtml в charts.js). В JSX его быть не должно: Solid экранирует
 // текстовые узлы сам, и esc() поверх этого даёт двойное экранирование —
 // имя «Иванов & Co» рендерилось как «Иванов &amp; Co».
-import { donutHtml, donutLegendHtml, playDonutIntro, sparklineHtml, kpiRingHtml, playRingIntro } from "./charts.js";
+import { donutHtml, donutLegendHtml, playDonutIntro, sparklineHtml, kpiRingHtml, playRingIntro, segmentedBarHtml, segBadgesHtml, segLegendHtml, playSegBarIntro, deltaPillHtml } from "./charts.js";
+
+// Сравнивает вторую половину 14-дневного окна с первой — тот же смысл,
+// что "From Last Month" у референса, но на доступных нам данных
+// (помесячного среза бэкенд не считает, а придумывать число нельзя).
+function periodDeltaPct(days) {
+  if (!days || days.length < 4) return null;
+  const mid = Math.floor(days.length / 2);
+  const firstHalf = days.slice(0, mid).reduce((s, x) => s + x.created, 0);
+  const secondHalf = days.slice(mid).reduce((s, x) => s + x.created, 0);
+  if (firstHalf === 0) return secondHalf === 0 ? 0 : null;
+  return Math.round(((secondHalf - firstHalf) / firstHalf) * 100);
+}
 import { avatarHtml, loadAvatars } from "./profile.js";
 
 function TrendChart(props) {
@@ -71,13 +83,14 @@ function Overview(props) {
     - (d.reports.statuses.find(s => s.status === "cancelled")?.count || 0);
 
   let donutRoot;
-  onMount(() => { playDonutIntro(donutRoot); playRingIntro(donutRoot); });
+  onMount(() => { playDonutIntro(donutRoot); playRingIntro(donutRoot); playSegBarIntro(donutRoot); });
 
   // Спарклайн под «Всего активных» — тренд входящих (created) за то же
   // окно, что и большой график динамики ниже: показывает, разгоняется
   // или затихает поток новых серий, не только текущий снимок числа.
   const createdSeries = props.trend?.days?.map(x => x.created) || null;
   const overdueFrac = activeTotal ? d.reports.overdue / activeTotal : 0;
+  const activeDelta = periodDeltaPct(props.trend?.days);
 
   return (
     <div class="bento" ref={donutRoot}>
@@ -89,7 +102,7 @@ function Overview(props) {
         </div>
       </div>
       <div class="bcell kpi-cell" style={{ "animation-delay": "60ms" }}>
-        <h3>Всего активных</h3>
+        <h3><span>Всего активных</span><Show when={activeDelta !== null}><span innerHTML={deltaPillHtml(activeDelta)} /></Show></h3>
         <div class="kpi-row">
           <div class="big-num">{activeTotal}</div>
           <Show when={createdSeries}>
@@ -97,6 +110,9 @@ function Overview(props) {
           </Show>
         </div>
         <div class="sub">из {d.reports.total} всего</div>
+        <div class="seg-badges" innerHTML={segBadgesHtml(segments)} />
+        <div innerHTML={segmentedBarHtml(segments)} />
+        <div class="seg-legend" innerHTML={segLegendHtml(segments)} />
       </div>
       <div class="bcell kpi-cell" style={{ "animation-delay": "100ms" }}>
         <h3>Просрочено</h3>

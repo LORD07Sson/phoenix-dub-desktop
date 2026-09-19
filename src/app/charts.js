@@ -59,6 +59,66 @@ export function donutLegendHtml(segments) {
   `).join("") || `<div class="no-assignee">Пока нет данных</div>`;
 }
 
+// Сегментированный прогресс-бар с легендой (Обзор, KPI-плитка «Всего
+// активных») — тот же набор segments, что уже идёт в donutHtml/
+// donutLegendHtml выше, но в виде одной горизонтальной полосы, разбитой
+// на цветные доли, плюс бейджи с количеством над ней и легенда под ней
+// без цифр (сами цифры уже в бейджах). Перенесено вживую с референса
+// пользователя (Dribbble: Xentra Digital Marketing Dashboard,
+// dribbble.com/shots/27265906) — там карточка «Projects Performance»
+// устроена именно так: большое число, бейджи "+N total" над полосой,
+// сама полоса, цветные точки-подписи под ней.
+export function segmentedBarHtml(segments) {
+  const total = segments.reduce((s, x) => s + x.count, 0);
+  const items = segments.filter(s => s.count > 0).map(s => {
+    const pct = total ? (s.count / total * 100) : 0;
+    return `<div class="seg-bar-item" style="background:var(${s.colorVar})" data-target-width="${pct}"></div>`;
+  }).join("");
+  return `<div class="seg-bar">${items}</div>`;
+}
+
+// Проигрывает заливку .seg-bar-item — тот же двух-кадровый
+// requestAnimationFrame приём, что playDonutIntro/playRingIntro выше
+// (без него браузер применил бы целевую ширину сразу, без перехода).
+export function playSegBarIntro(root) {
+  const items = root.querySelectorAll(".seg-bar-item");
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      items.forEach(el => { el.style.width = `${el.dataset.targetWidth}%`; });
+    });
+  });
+}
+
+export function segBadgesHtml(segments) {
+  return segments.filter(s => s.count > 0).map(s => `
+    <span class="seg-badge" style="color:var(${s.colorVar})">
+      <span class="dot" style="background:var(${s.colorVar})"></span>${s.count}
+    </span>
+  `).join("");
+}
+
+// Дельта-бейдж «+8%» / «-12%» рядом с заголовком KPI-плитки — тоже
+// перенесено вживую с референса (Xentra: у каждой из четырёх карточек
+// в шапке — число, цветная пилюля с процентом и подпись "From Last
+// Month"). У нас такой подписи по месяцам нет, считаем по тому же
+// 14-дневному тренду, что уже используется под «Всего активных»
+// (сравниваем вторую половину окна с первой) — тот же принцип, другое
+// окно, а не выдуманное число.
+export function deltaPillHtml(pct) {
+  if (pct === null || pct === undefined) return "";
+  const positive = pct >= 0;
+  return `<span class="delta-pill ${positive ? "up" : "down"}">${positive ? "+" : ""}${pct}%</span>`;
+}
+
+export function segLegendHtml(segments) {
+  return segments.filter(s => s.count > 0).map(s => `
+    <div class="seg-legend-item">
+      <span class="dot" style="background:var(${s.colorVar})"></span>
+      <span class="name">${esc(s.label)}</span>
+    </div>
+  `).join("") || `<div class="no-assignee">Пока нет данных</div>`;
+}
+
 // Мини-спарклайн под KPI-числом (Обзор) — компактная area+line без осей/
 // подписей, только форма тренда. Та же идея, что donutHtml: строим SVG
 // строкой, без сторонних chart-библиотек — конверсия нескольких точек

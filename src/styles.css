@@ -400,17 +400,22 @@ body.window-maximized .win-btn .ic-restore { display: block; }
 
 .app-body { flex: 1; display: flex; min-height: 0; }
 
+/* Подписанный сайдбар (логотип + сгруппированные пункты с текстом) —
+   перенесено вживую с референса пользователя (Dribbble: Xentra Digital
+   Marketing Dashboard, dribbble.com/shots/27265906): там боковая панель
+   не узкая иконка-полоска, а широкая, с секциями "MAIN MENU"/
+   "MANAGEMENT" и подписью у каждого пункта. Раньше здесь была голая
+   64px-полоска с одними иконками (см. историю) — узнаваема только по
+   title-тултипу на долгой наводке, не с одного взгляда. */
+
 .sidebar {
   flex: none;
-  width: 60px;
+  width: 208px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 0;
-  /* Тот же стеклянный приём, что у шапки, но чуть слабее (--glass-bg
-     вместо --glass-bg-strong) — вертикальная панель у'же и заметнее
-     мерцает при сильном блюре на скролле контента рядом с ней. */
+  align-items: stretch;
+  gap: 2px;
+  padding: 14px 10px;
   background: var(--glass-bg);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
@@ -420,30 +425,44 @@ body.window-maximized .win-btn .ic-restore { display: block; }
 }
 .sidebar-spacer { flex: 1; }
 
+.sidebar-brand {
+  display: flex; align-items: center; gap: 9px;
+  padding: 4px 8px 16px;
+  font-weight: 800; font-size: 15px; color: var(--ink);
+}
+.sidebar-brand-ic { font-size: 18px; line-height: 1; }
+
+.sidebar-group-label {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--ink-dim);
+  padding: 12px 8px 6px;
+}
+
 .tab-btn {
   border: none;
   background: transparent;
   color: var(--ink-soft);
-  width: 44px; height: 44px;
+  width: 100%; height: 38px;
+  padding: 0 10px;
   border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: 18px;
+  font-size: 15px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 10px;
+  justify-content: flex-start;
   transition: color .15s, background .15s, box-shadow .18s ease, transform .12s cubic-bezier(.2,.8,.3,1.4);
   position: relative;
 }
-.tab-btn:hover { transform: scale(1.05); }
-.tab-btn .tab-ic { line-height: 1; transition: transform .18s cubic-bezier(.2,.8,.3,1.4); }
+.tab-btn .tab-ic { line-height: 1; font-size: 17px; flex: none; transition: transform .18s cubic-bezier(.2,.8,.3,1.4); }
+.tab-btn .tab-lbl { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-btn:hover { color: var(--ink); background: var(--surface-2); }
-.tab-btn:active { transform: scale(.92); }
+.tab-btn:active { transform: scale(.98); }
 /* Активная вкладка — мягкая огненная заливка-градиент поверх стекла
    боковой панели плюс тонкое внутреннее кольцо и лёгкое свечение,
    тот же язык, что у активной плитки плавающего дока в мини-аппе
-   (.tab.on), адаптированный под узкую вертикальную кнопку: полоска
-   слева (::after) остаётся — она читается на боковой панели лучше,
-   чем нижняя обводка, — но теперь дополнена самим свечением кнопки. */
+   (.tab.on), теперь на всю ширину строки — полоска слева (::after)
+   остаётся, но дополнена самим свечением кнопки. */
 .tab-btn.active {
   color: var(--fire);
   background: linear-gradient(160deg, color-mix(in srgb, var(--fire) 20%, transparent), color-mix(in srgb, var(--gold) 9%, transparent));
@@ -453,11 +472,21 @@ body.window-maximized .win-btn .ic-restore { display: block; }
 .tab-btn.active::after {
   content: "";
   position: absolute;
-  left: -9px; top: 8px; bottom: 8px;
+  left: -9px; top: 6px; bottom: 6px;
   width: 3px;
   background: linear-gradient(180deg, var(--fire), var(--gold));
   border-radius: 0 3px 3px 0;
   box-shadow: 0 0 8px 1px rgba(255, 122, 69, .5);
+}
+
+/* Узкое окно (минимум по tauri.conf.json — 760px) — подписи сжирают
+   слишком много ширины у контента, возвращаемся к иконкам-квадратам,
+   тому же поведению, что было раньше у всего сайдбара. */
+@media (max-width: 860px) {
+  .sidebar { width: 60px; align-items: center; padding: 12px 8px; }
+  .sidebar-brand-txt, .sidebar-group-label, .tab-btn .tab-lbl { display: none; }
+  .sidebar-brand { padding: 4px 0 12px; justify-content: center; }
+  .tab-btn { width: 44px; height: 44px; padding: 0; justify-content: center; }
 }
 
 /* Счётчик непрочитанного на иконке вкладки (сейчас — «Лента»,
@@ -591,6 +620,44 @@ body.window-maximized .win-btn .ic-restore { display: block; }
 .donut-legend-item .dot { flex: none; }
 .donut-legend-item .name { flex: 1; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .donut-legend-item .count { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ---------- Сегментированный прогресс-бар (обзор, «Всего активных») ----------
+   Перенесено вживую с референса пользователя (Dribbble: Xentra Digital
+   Marketing Dashboard, dribbble.com/shots/27265906) — карточка
+   «Projects Performance»: бейджи с числом над полосой, сама полоса из
+   цветных долей, легенда без цифр под ней (цифры уже в бейджах). */
+
+.seg-badges { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.seg-badge { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.seg-badge .dot { width: 6px; height: 6px; }
+
+.seg-bar {
+  display: flex;
+  align-items: stretch;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-2);
+  margin-top: 6px;
+  gap: 2px;
+}
+.seg-bar-item {
+  width: 0%;
+  height: 100%;
+  transition: width 1s cubic-bezier(.22,.9,.3,1);
+  min-width: 3px;
+}
+
+.seg-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; }
+.seg-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-dim); }
+.seg-legend-item .dot { flex: none; }
+
+.delta-pill {
+  font-size: 10.5px; font-weight: 800; font-variant-numeric: tabular-nums;
+  padding: 2px 7px; border-radius: 999px; flex: none;
+}
+.delta-pill.up { color: var(--s-done); background: color-mix(in srgb, var(--s-done) 18%, transparent); }
+.delta-pill.down { color: var(--s-stop); background: color-mix(in srgb, var(--s-stop) 18%, transparent); }
 
 /* ---------- Динамика за 14 дней (обзор) ---------- */
 
