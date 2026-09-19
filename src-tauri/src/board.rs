@@ -66,6 +66,11 @@ pub struct BoardCard {
     /// «сколько она уже лежит в этом статусе».
     #[serde(default)]
     pub updated_at: Option<String>,
+    /// Когда отчёт создан — вместе с deadline даёт реальный (не
+    /// выдуманный) диапазон дат для таймлайна на доске: «когда взяли»
+    /// → «когда сдать». Прокидывается как есть, без вычислений здесь.
+    #[serde(default)]
+    pub created_at: Option<String>,
     /// Прокидывается обратно в неизменном виде: рисует его фронтенд,
     /// разбирать здесь нечего.
     #[serde(default)]
@@ -124,6 +129,7 @@ pub struct BoardCardOut {
     pub title: String,
     pub priority: Option<String>,
     pub deadline: Option<String>,
+    pub created_at: Option<String>,
     pub assignees: serde_json::Value,
     /// Дней до срока: отрицательное — просрочено, None — срока нет.
     pub days_left: Option<i64>,
@@ -279,6 +285,7 @@ pub fn layout(columns: Vec<BoardColumnIn>, view: &BoardView) -> BoardLayout {
                 heat: if terminal { 0.0 } else { heat(days_left, card.priority.as_deref(), age_days, stale_after) },
                 priority: card.priority,
                 deadline: card.deadline,
+                created_at: card.created_at,
                 assignees: card.assignees,
                 days_left,
                 overdue,
@@ -359,6 +366,7 @@ mod tests {
             priority: Some(priority.into()),
             deadline: deadline.map(str::to_string),
             updated_at: updated.map(str::to_string),
+            created_at: None,
             assignees: if assigned {
                 serde_json::json!([{ "telegram_id": 1, "name": "Кто-то" }])
             } else {
