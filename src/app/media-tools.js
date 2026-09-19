@@ -313,6 +313,12 @@ function cutDuration() {
 // должны оставаться теми же самыми, не пересоздаваться на каждый клик.
 let cutMpvLoadedPath = null;
 let cutMpvUnlisten = null;
+// true между началом closeCutMpv() и следующим openCutMpv() — отличает
+// «пользователь сам закрыл плеер» от «mpv упал сам»: событие "exited" от
+// бэкенда приходит асинхронно (после graceful quit/kill), и без этого
+// флага могло проскочить уже после того, как панель закрыта, показывая
+// тост «плеер неожиданно завершился» на обычное закрытие.
+let cutMpvClosingIntentionally = false;
 // ResizeObserver, следящий за плейсхолдером видео — по спецификации при
 // отключении/удалении наблюдаемого элемента он шлёт ЕЩЁ ОДИН callback с
 // нулевым размером, а сам инстанс живёт, пока explicitly не
@@ -370,6 +376,7 @@ async function syncMpvBounds(root) {
 // окно переживают закрытую панель и остаются висеть ПОВЕРХ интерфейса —
 // чёрный прямоугольник с чужим видео на весь список отчётов.
 async function closeCutMpv() {
+  cutMpvClosingIntentionally = true;
   if (cutMpvUnlisten) { cutMpvUnlisten(); cutMpvUnlisten = null; }
   if (cutMpvResizeObserver) { cutMpvResizeObserver.disconnect(); cutMpvResizeObserver = null; }
   if (cutMpvWindowResizeHandler) {
@@ -383,6 +390,7 @@ async function closeCutMpv() {
 async function openCutMpv(root) {
   const rect = videoSurfaceRect(root);
   if (!rect) { mpvLog.warn("плейсхолдер видео ещё не разложен — плеер не создаём"); return; }
+  cutMpvClosingIntentionally = false;
   mpvLog.info("mpv_create", rect);
   try {
     await invoke("mpv_create", rect);
@@ -459,7 +467,10 @@ function onMpvState(root, { name, data }) {
       cutMpvLoadedPath = null;
       cutState.mpvPaused = true;
       updatePlayButton(root);
-      toast("Плеер mpv неожиданно завершился.", "error");
+      // Событие приходит асинхронно и могло проскочить уже после того,
+      // как пользователь сам закрыл плеер (closeCutMpv) — в этом случае
+      // это не крах, а ожидаемое завершение, тост не нужен.
+      if (!cutMpvClosingIntentionally) toast("Плеер mpv неожиданно завершился.", "error");
       break;
     default:
       break;

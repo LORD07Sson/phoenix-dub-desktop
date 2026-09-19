@@ -638,9 +638,26 @@ pub async fn mpv_close(app: &tauri::AppHandle) -> Result<(), String> {
     };
     if let Some(mut s) = taken {
         // Сначала вежливо просим выйти (mpv успеет корректно отпустить
-        // файл и устройство вывода), и только потом добиваем.
+        // файл и устройство вывода) и ДАЁМ ему на это время: раньше kill()
+        // шёл сразу следующей строкой и убивал процесс раньше, чем mpv
+        // успевал прочитать команду из пайпа — quit не работал вообще,
+        // это был обычный hard kill с лишним шагом. Короткий поллинг
+        // try_wait() вместо фиксированного sleep — не ждём все 300мс,
+        // если mpv вышел раньше.
         let _ = s.write_half.write_all(b"{\"command\":[\"quit\"]}\n").await;
-        let _ = s.child.kill();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
+        let exited_gracefully = loop {
+            match s.child.try_wait() {
+                Ok(Some(_)) => break true,
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                _ => break false,
+            }
+        };
+        if !exited_gracefully {
+            let _ = s.child.kill();
+        }
         // wait() обязателен: без него дескриптор процесса остаётся у нас
         // до конца жизни приложения (на Windows — незакрытый handle,
         // на других ОС — зомби).
