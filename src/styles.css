@@ -1866,9 +1866,15 @@ kbd {
 }
 .board-col-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 4px; gap: 6px; }
 .board-col-head .lb { font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Тонирован в цвет колонки (--col-accent, тот же STATUS_COLOR_VAR, что
+   красит точку рядом и полоску сверху) — у референса (Dribbble: Xentra
+   Digital Marketing Dashboard, dribbble.com/shots/27265906) счётчик в
+   шапке колонки цветной, не нейтрально-серый; тот же язык, что уже у
+   .pr-badge/.delta-pill/.kpi-icon в этом приложении. */
 .board-col-head .cnt {
-  font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; flex: none;
-  background: var(--surface-2); border-radius: 999px; padding: 1px 8px; font-weight: 700;
+  font-size: 11px; color: var(--col-accent); font-variant-numeric: tabular-nums; flex: none;
+  background: color-mix(in srgb, var(--col-accent) 18%, var(--surface-2));
+  border-radius: 999px; padding: 1px 8px; font-weight: 700;
 }
 
 /* Значки состояния колонки: просрочено / залежалось / без исполнителя.
