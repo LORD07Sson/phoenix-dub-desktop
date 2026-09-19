@@ -229,6 +229,16 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
   transition: border-color .15s var(--ease), transform .12s var(--ease);
 }
 .chip.overdue { border-color: var(--s-stop); color: var(--s-stop); }
+/* Статусный чип был нейтрально-серым с одной цветной точкой внутри —
+   тот же пробел, что уже закрыт у счётчика колонки доски (#82):
+   тонируем в цвет самого статуса (STATUS_COLOR_VAR), а не оставляем
+   цвет только на точке. Общий класс на три места вывода статуса
+   (Список, карточка отчёта, пин-окно) — один источник правды. */
+.chip.status-chip {
+  background: color-mix(in srgb, var(--chip-accent) 16%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--chip-accent) 35%, var(--line));
+  color: var(--chip-accent);
+}
 .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .dot.draft { background: var(--s-draft); }
 .dot.work { background: var(--s-work); }
@@ -1105,8 +1115,14 @@ tbody td.deadline.overdue { color: var(--s-stop); font-weight: 600; }
 .priority-chip.normal .dot { background: var(--s-review); }
 .priority-chip.high .dot { background: var(--s-work); }
 .priority-chip.urgent .dot { background: var(--s-stop); }
+/* Раньше только urgent был тонирован фоном, low/normal/high — голая
+   точка на нейтрально-сером. Тот же самый пробел, что закрыт у
+   .status-chip чуть выше — тонируем все четыре уровня одинаково,
+   теми же цветами, что уже красят точку. */
+.priority-chip.low { color: var(--s-done); background: color-mix(in srgb, var(--s-done) 14%, var(--surface-2)); }
+.priority-chip.normal { color: var(--s-review); background: color-mix(in srgb, var(--s-review) 14%, var(--surface-2)); }
+.priority-chip.high { color: var(--s-work); background: color-mix(in srgb, var(--s-work) 14%, var(--surface-2)); }
 .priority-chip.urgent { color: var(--s-stop); background: color-mix(in srgb, var(--s-stop) 14%, var(--surface-2)); }
-.priority-chip.high { color: var(--s-work); }
 
 .avatar-stack { display: flex; align-items: center; }
 .avatar-bubble {

@@ -8,7 +8,7 @@
 
 import { state } from "./state.js";
 import { apiGet, apiPost, openSheet, toast } from "./api.js";
-import { $, $all, esc, initials, isOverdue, STATUS_DOT_CLASS, PRIORITY_LABELS, showContextMenu } from "./utils.js";
+import { $, $all, esc, initials, isOverdue, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS, showContextMenu } from "./utils.js";
 import { openReportDetail } from "./report-detail.js";
 import { isFavorite, toggleFavorite, favoriteIds } from "./favorites.js";
 
@@ -156,7 +156,7 @@ export function renderReports() {
         ${esc(r.public_id)}
       </td>
       <td>${esc(r.title)}</td>
-      <td><span class="chip"><span class="dot ${dotClass}"></span>${esc(r.status_label)}</span></td>
+      <td><span class="chip status-chip" style="--chip-accent: var(${STATUS_COLOR_VAR[r.status] || "--s-draft"})"><span class="dot ${dotClass}"></span>${esc(r.status_label)}</span></td>
       <td><span class="priority-chip ${esc(r.priority)}"><span class="dot"></span>${esc(r.priority_label)}</span></td>
       <td class="deadline ${overdue ? "overdue" : ""}">${overdue ? "⏰ " : ""}${esc(r.deadline || "без срока")}</td>
       <td>${assigneesHtml(r.assignees)}</td>

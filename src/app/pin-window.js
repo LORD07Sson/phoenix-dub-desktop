@@ -9,7 +9,7 @@
 import { invoke, listen, getCurrentWindow, PIN_REPORT_EVENT } from "./tauri.js";
 import { state } from "./state.js";
 import { apiGet } from "./api.js";
-import { esc, STATUS_DOT_CLASS, isOverdue, parseNoteTime } from "./utils.js";
+import { esc, STATUS_DOT_CLASS, STATUS_COLOR_VAR, isOverdue, parseNoteTime } from "./utils.js";
 
 // Тема — то же localStorage-значение, что читает theme.js в основном
 // окне (общий origin у всех webview одного Tauri-приложения, см.
@@ -85,7 +85,7 @@ async function load() {
         </div>
         <div class="pin-title">${esc(detail.title)}</div>
         <div class="detail-chips" style="margin:8px 0;">
-          <span class="chip"><span class="dot ${dotClass}"></span>${esc(detail.status_label)}</span>
+          <span class="chip status-chip" style="--chip-accent: var(${STATUS_COLOR_VAR[detail.status] || "--s-draft"})"><span class="dot ${dotClass}"></span>${esc(detail.status_label)}</span>
           <span class="chip">${esc(detail.priority_label)}</span>
           <span class="chip" style="${overdue ? "border-color:var(--s-stop); color:var(--s-stop);" : ""}">${overdue ? "⏰ " : "📅 "}${esc(detail.deadline || "без срока")}</span>
         </div>
