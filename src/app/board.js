@@ -24,6 +24,7 @@
 import { apiGet, apiPost, toast, dialogSkeletonHtml } from "./api.js";
 import { invoke } from "./tauri.js";
 import { $, esc, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS } from "./utils.js";
+import { timelineHtml } from "./charts.js";
 import { assigneesHtml } from "./reports.js";
 import { openReportDetail } from "./report-detail.js";
 import { state } from "./state.js";
@@ -44,6 +45,15 @@ function writeCollapsed(set) {
 }
 
 const PRIORITY_COLOR_VAR = { urgent: "--s-stop", high: "--ember", normal: "--ink-soft", low: "--ink-dim" };
+
+// Позиция статуса в пайплайне студии, в процентах — НЕ метрика
+// «сколько реально сделано» (такого поля у отчёта нет и не будет,
+// категориальный статус не сводится к проценту без выдумывания
+// числа), а фиксированная, задокументированная шкала «как далеко по
+// пайплайну», тем же приёмом, что PRIORITY_RANK_SQL в board.rs уже
+// сводит priority к числу для сортировки. cancelled сюда не входит —
+// у отменённой серии «прогресс» не имеет смысла, полоску не рисуем.
+const STATUS_PROGRESS = { draft: 5, working: 40, review: 70, revision: 55, completed: 100 };
 const DRAG_THRESHOLD_PX = 6;
 
 // pointerup снимает .dragging до того, как браузер успевает выстрелить
@@ -78,10 +88,43 @@ function writeSort(value) {
   try { localStorage.setItem(sortKey(), value); } catch (_) { /* не критично */ }
 }
 
-const boardView = { sort: readSort(), query: "" };
+const boardView = { sort: readSort(), query: "", seasonId: 0, titleId: 0 };
 // Последний ответ сервера — чтобы пересортировать и отфильтровать доску
 // мгновенно, не ходя за теми же данными второй раз.
 let lastBoardData = null;
+
+// Списки сезонов/тайтлов для фильтра доски — тот же /public/seasons +
+// /public/seasons/{id}/titles, что уже используют вкладка «Тайтлы»
+// (см. titles.js). season_id/title_id доска и раньше принимала на
+// сервере (_board_filter_conditions в miniapp/server.py) — фильтр-бар
+// на клиенте просто никогда их не отправлял. Кэшируется в памяти
+// (сезоны редко меняются в рамках одной сессии), не в localStorage:
+// список студии актуальнее всего при живом запросе.
+let seasonsList = null;
+const titlesBySeasonCache = new Map();
+
+async function ensureSeasonsLoaded() {
+  if (seasonsList) return seasonsList;
+  try {
+    const d = await apiGet("/public/seasons");
+    seasonsList = d.seasons || [];
+  } catch (_) {
+    seasonsList = [];
+  }
+  return seasonsList;
+}
+
+async function ensureTitlesLoaded(seasonId) {
+  if (!seasonId) return [];
+  if (titlesBySeasonCache.has(seasonId)) return titlesBySeasonCache.get(seasonId);
+  let titles = [];
+  try {
+    const d = await apiGet(`/public/seasons/${seasonId}/titles`);
+    titles = d.titles || [];
+  } catch (_) { /* пусто — фильтр по тайтлу просто останется недоступен */ }
+  titlesBySeasonCache.set(seasonId, titles);
+  return titles;
+}
 
 // Сегодняшняя дата глазами клиента: «просрочено» должно считаться по
 // местному календарю студии, а не по часовому поясу процесса.
@@ -135,6 +178,10 @@ function boardCardHtml(c, status) {
         ${c.priority ? `<span class="pr-badge" style="color:${prColor}; border-color:${prColor};">${c.priority === "urgent" ? "⚡ " : ""}${esc(PRIORITY_LABELS[c.priority] || c.priority)}</span>` : ""}
       </div>
       <div class="ttl">${esc(c.title)}</div>
+      ${STATUS_PROGRESS[status] != null ? `<div class="board-card-progress-row">
+        <span>Прогресс</span><span>${STATUS_PROGRESS[status]}%</span>
+      </div>
+      <div class="board-card-progress-track"><i style="width:${STATUS_PROGRESS[status]}%; background:${accent};"></i></div>` : ""}
       <div class="foot">
         ${assigneesHtml(c.assignees)}
         <span class="deadline-pill ${c.overdue ? "overdue" : ""}" title="${esc(c.deadline || "срок не назначен")}">${c.overdue ? "⏰ " : "📅 "}${esc(deadlineLabel(c))}</span>
@@ -401,12 +448,22 @@ function boardToolbarHtml(layout) {
   if (layout.totalOverdue) summary.push(`<span class="board-sum late">⏰ ${layout.totalOverdue} просрочено</span>`);
   if (layout.totalStale) summary.push(`<span class="board-sum stale">🕸 ${layout.totalStale} без движения</span>`);
   if (!summary.length) summary.push(`<span class="board-sum ok">✓ всё в сроках</span>`);
+  const seasons = seasonsList || [];
+  const titles = boardView.seasonId ? (titlesBySeasonCache.get(boardView.seasonId) || []) : [];
   return `
     <div class="board-toolbar">
       <label class="board-search">
         <span aria-hidden="true">🔎</span>
         <input type="search" id="board-search" placeholder="Номер или название" value="${esc(boardView.query)}" autocomplete="off">
       </label>
+      <select id="board-season" class="board-sort" title="Фильтр по сезону">
+        <option value="0" ${boardView.seasonId ? "" : "selected"}>Все сезоны</option>
+        ${seasons.map(s => `<option value="${s.id}" ${s.id === boardView.seasonId ? "selected" : ""}>${esc(s.name)}</option>`).join("")}
+      </select>
+      <select id="board-title" class="board-sort" title="Фильтр по тайтлу" ${boardView.seasonId ? "" : "disabled"}>
+        <option value="0" ${boardView.titleId ? "" : "selected"}>Все тайтлы</option>
+        ${titles.map(t => `<option value="${t.id}" ${t.id === boardView.titleId ? "selected" : ""}>${esc(t.name)}</option>`).join("")}
+      </select>
       <select id="board-sort" class="board-sort" title="Порядок карточек в колонках">
         ${SORTS.map(([v, l]) => `<option value="${v}" ${v === boardView.sort ? "selected" : ""}>${esc(l)}</option>`).join("")}
       </select>
@@ -436,6 +493,47 @@ function columnHtml(col, collapsed) {
     </div>`;
 }
 
+// Гант-таймлайн над доской — перенос референса пользователя: там
+// «Project Timeline» показывает активные задачи вдоль оси дат. Строки —
+// только незавершённые карточки (draft/working/review/revision) с
+// обоими реальными полями (created_at И deadline) — без выдуманной
+// «даты начала работ». Ограничено 8 строками (самые срочные по heat,
+// то же поле, что уже красит полоску карточки) — иначе на большой
+// студии таймлайн растянулся бы на весь экран, а на карточке референса
+// их и так с десяток от силы.
+const TERMINAL_STATUSES = new Set(["completed", "cancelled"]);
+const TIMELINE_MAX_ROWS = 8;
+
+function timelineSectionHtml(layout) {
+  const rows = [];
+  for (const col of layout.columns) {
+    if (TERMINAL_STATUSES.has(col.status)) continue;
+    for (const c of col.cards) {
+      if (!c.createdAt || !c.deadline) continue;
+      const startMs = Date.parse(c.createdAt);
+      const endMs = Date.parse(c.deadline);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) continue;
+      rows.push({
+        label: c.publicId,
+        title: c.title,
+        colorVar: STATUS_COLOR_VAR[col.status] || "--s-draft",
+        startMs, endMs, heat: c.heat || 0,
+      });
+    }
+  }
+  if (!rows.length) return "";
+  rows.sort((a, b) => b.heat - a.heat);
+  const shown = rows.slice(0, TIMELINE_MAX_ROWS);
+  const now = Date.now();
+  const rangeStart = Math.min(...shown.map(r => r.startMs));
+  const rangeEnd = Math.max(now, ...shown.map(r => r.endMs));
+  return `
+    <div class="bcell wide board-timeline-cell">
+      <h3>Таймлайн активных серий</h3>
+      ${timelineHtml(shown, rangeStart, rangeEnd, now)}
+    </div>`;
+}
+
 // Перерисовка доски из уже полученных данных — без похода на сервер.
 // Нужна поиску и переключателю сортировки: оба меняют только раскладку.
 async function renderBoard(root) {
@@ -457,6 +555,7 @@ async function renderBoard(root) {
   const collapsed = readCollapsed();
   root.innerHTML = `
     ${boardToolbarHtml(layout)}
+    ${timelineSectionHtml(layout)}
     <div class="board">${layout.columns.map(col => columnHtml(col, collapsed)).join("")}</div>
   `;
   wireBoardCards(root);
@@ -468,10 +567,26 @@ async function renderBoard(root) {
 function wireBoardToolbar(root) {
   const search = root.querySelector("#board-search");
   const sort = root.querySelector("#board-sort");
+  const season = root.querySelector("#board-season");
+  const title = root.querySelector("#board-title");
   if (sort) sort.addEventListener("change", () => {
     boardView.sort = sort.value;
     writeSort(boardView.sort);
     renderBoard(root);
+  });
+  // Сезон/тайтл сужают выборку на сервере (season_id/title_id в
+  // /api/board) — в отличие от поиска и сортировки это не
+  // client-side-перекладка уже полученных карточек, нужен новый
+  // поход за данными (loadBoard), не renderBoard.
+  if (season) season.addEventListener("change", async () => {
+    boardView.seasonId = parseInt(season.value, 10) || 0;
+    boardView.titleId = 0;
+    if (boardView.seasonId) await ensureTitlesLoaded(boardView.seasonId);
+    await loadBoard();
+  });
+  if (title) title.addEventListener("change", async () => {
+    boardView.titleId = parseInt(title.value, 10) || 0;
+    await loadBoard();
   });
   if (search) {
     // Дебаунс: перерисовка доски на каждое нажатие клавиши крала бы
@@ -510,7 +625,11 @@ function wireColumnButtons(root) {
       btn.disabled = true;
       btn.textContent = "Загрузка…";
       try {
-        const res = await apiGet(`/board/column/${status}`, { offset, limit: 60 });
+        const res = await apiGet(`/board/column/${status}`, {
+          offset, limit: 60,
+          season_id: boardView.seasonId || undefined,
+          title_id: boardView.titleId || undefined,
+        });
         // Догруженное уходит в тот же кэш и проходит ту же раскладку —
         // иначе новые карточки встали бы в конец колонки без сортировки
         // и без отметок «просрочено», в отличие от уже показанных.
@@ -532,8 +651,12 @@ function wireColumnButtons(root) {
 export async function loadBoard() {
   const root = $("#board-body");
   root.innerHTML = dialogSkeletonHtml(5, "cards");
+  await ensureSeasonsLoaded();
   try {
-    lastBoardData = await apiGet("/board");
+    lastBoardData = await apiGet("/board", {
+      season_id: boardView.seasonId || undefined,
+      title_id: boardView.titleId || undefined,
+    });
   } catch (e) {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить доску: ${esc(e.message)}</div>`;
     return false;

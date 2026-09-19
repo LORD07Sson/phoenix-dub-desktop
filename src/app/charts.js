@@ -119,6 +119,41 @@ export function segLegendHtml(segments) {
   `).join("") || `<div class="no-assignee">Пока нет данных</div>`;
 }
 
+// Гант-таймлайн «когда взяли — когда сдать» (Доска) — перенос
+// референса пользователя: горизонтальные полоски задач вдоль оси дат
+// с вертикальной отметкой «сегодня». Диапазоны — реальные
+// created_at/deadline, которые уже приходят с сервера (не выдуманные
+// «дата старта работ»); карточки без обеих дат сюда просто не
+// попадают — фильтрация на стороне board.js, здесь только отрисовка.
+export function timelineHtml(rows, rangeStart, rangeEnd, todayMs) {
+  const span = Math.max(1, rangeEnd - rangeStart);
+  const pct = ms => Math.max(0, Math.min(100, ((ms - rangeStart) / span) * 100));
+  const fmt = ms => {
+    const d = new Date(ms);
+    return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+  };
+  const bars = rows.map(r => {
+    const left = pct(r.startMs);
+    const width = Math.max(2, pct(r.endMs) - left);
+    return `
+      <div class="gantt-row">
+        <div class="gantt-row-label" title="${esc(r.title)}">${esc(r.label)}</div>
+        <div class="gantt-track">
+          <div class="gantt-bar" style="left:${left.toFixed(2)}%; width:${width.toFixed(2)}%; background:var(${r.colorVar});"
+               title="${esc(r.title)}: ${esc(fmt(r.startMs))} → ${esc(fmt(r.endMs))}">${esc(r.label)}</div>
+        </div>
+      </div>`;
+  }).join("");
+  return `
+    <div class="gantt">
+      <div class="gantt-axis"><span>${fmt(rangeStart)}</span><span>${fmt(rangeEnd)}</span></div>
+      <div class="gantt-body" style="--today-pct:${pct(todayMs).toFixed(2)}%;">
+        <div class="gantt-today-line" title="Сегодня"></div>
+        ${bars || `<div class="no-assignee">Нет активных серий со сроком</div>`}
+      </div>
+    </div>`;
+}
+
 // Мини-спарклайн под KPI-числом (Обзор) — компактная area+line без осей/
 // подписей, только форма тренда. Та же идея, что donutHtml: строим SVG
 // строкой, без сторонних chart-библиотек — конверсия нескольких точек
