@@ -1598,8 +1598,14 @@ pub(crate) fn run_ffmpeg(
         let mut c = handle.lock().map_err(|_| "внутренняя ошибка блокировки")?;
         c.wait().map_err(|e| format!("ffmpeg завершился с ошибкой ожидания: {e}"))?
     };
+    // Чистим слот, только если он всё ещё указывает на ЭТУ задачу: если
+    // где-то параллельно уже запущена другая (слот успел смениться),
+    // затирать её нельзя — иначе «Отмена» и cancel_current_job перестают
+    // попадать в реально работающий процесс.
     if let Ok(mut slot) = current_job().lock() {
-        *slot = None;
+        if matches!(slot.as_ref(), Some(current) if std::sync::Arc::ptr_eq(current, &handle)) {
+            *slot = None;
+        }
     }
 
     let cancelled = CANCEL_REQUESTED.swap(false, Ordering::SeqCst);
@@ -1626,6 +1632,22 @@ mod tests {
 
     fn ffmpeg_available() -> bool {
         Command::new("ffmpeg").arg("-version").output().map(|o| o.status.success()).unwrap_or(false)
+    }
+
+    // run_ffmpeg делит один процессный `current_job`/CANCEL_REQUESTED на
+    // все вызовы (см. комментарий у current_job() выше) — это осознанный
+    // компромисс для приложения, где панель не даёт запустить вторую
+    // операцию, пока идёт первая. Но `cargo test` по умолчанию гоняет
+    // тесты в несколько потоков ОДНОГО процесса, и тесты этого файла
+    // тогда нарушают то самое предположение: два run_ffmpeg из разных
+    // тестов реально работают параллельно и топчут чужой слот/флаг —
+    // тест с "Отмена" мог убить процесс от другого теста, а тот
+    // получал пустой stderr и падал с "ffmpeg завершился с ошибкой".
+    // Не баг прод-кода — баг предположения тестов, лечится сериализацией
+    // именно тестов, гоняющих реальный ffmpeg через run_ffmpeg.
+    fn ffmpeg_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     // ---------- чистые функции без ffmpeg ----------
@@ -1974,6 +1996,7 @@ mod tests {
 
     #[test]
     fn probe_media_reads_duration_and_streams() {
+        let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
         let src = make_test_video(&dir, "phoenix_mt_probe.mp4", 3);
@@ -1986,6 +2009,7 @@ mod tests {
 
     #[test]
     fn probe_keyframes_returns_at_least_one_point_at_start() {
+        let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
         let src = make_test_video(&dir, "phoenix_mt_kf.mp4", 3);
@@ -2010,6 +2034,7 @@ mod tests {
 
     #[test]
     fn cut_media_produces_separate_and_merged_outputs() {
+        let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
         let src = make_test_video(&dir, "phoenix_mt_cut.mp4", 6);
@@ -2035,6 +2060,7 @@ mod tests {
 
     #[test]
     fn precise_cut_starts_where_asked_unlike_keyframe_cut() {
+        let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
         // GOP=50 при 25 fps — опорный кадр раз в две секунды. Просим
@@ -2087,6 +2113,7 @@ mod tests {
 
     #[test]
     fn cut_media_can_discard_separate_files_when_only_merge_requested() {
+        let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
         let src = make_test_video(&dir, "phoenix_mt_cut_mergeonly.mp4", 4);
@@ -2103,6 +2130,7 @@ mod tests {
 
     #[test]
     fn extract_audio_produces_playable_audio_only_file() {
+        let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
         let src = make_test_video(&dir, "phoenix_mt_audio.mp4", 2);
@@ -2123,6 +2151,7 @@ mod tests {
 
     #[test]
     fn concat_media_uses_fast_copy_path_for_matching_inputs() {
+        let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
         let a = make_test_video(&dir, "phoenix_mt_concat_a.mp4", 2);
@@ -2139,6 +2168,7 @@ mod tests {
 
     #[test]
     fn cancel_kills_the_job_and_removes_the_half_written_file() {
+        let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
         let src = make_test_video(&dir, "phoenix_mt_cancel_src.mp4", 30);
@@ -2217,6 +2247,7 @@ mod tests {
 
     #[test]
     fn mux_media_combines_video_and_audio_with_language_and_default() {
+        let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
         let video = make_test_video(&dir, "phoenix_mt_mux_video.mp4", 2);
