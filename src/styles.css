@@ -2102,7 +2102,12 @@ body.focus-mode .report-detail-overlay .sheet {
   background: var(--surface-2); border-radius: var(--radius-sm); padding: 6px 10px;
 }
 .mt-player-bar .icon-btn { padding: 4px 9px; font-size: 13px; }
-.mt-player-bar .mt-play { min-width: 40px; font-size: 15px; }
+/* justify-content: center обязателен — у .icon-btn его нет (не нужен
+   там, где кнопка ровно по контенту), а здесь min-width шире одного
+   символа-глифа ("▶"/"⏸"), и без центрирования по flex-start глиф
+   прижимался к левому краю, оставляя пустоту справа — кнопка выглядела
+   кривой. */
+.mt-player-bar .mt-play { min-width: 40px; font-size: 15px; justify-content: center; }
 .mt-player-spacer { flex: 1; }
 .mt-time {
   font-family: ui-monospace, "SF Mono", monospace; font-size: 12px;
