@@ -27,6 +27,7 @@ import { $, esc, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS } from "./u
 import { assigneesHtml } from "./reports.js";
 import { openReportDetail } from "./report-detail.js";
 import { state } from "./state.js";
+import { loadSidebarStatusCounts } from "./tabs.js";
 
 // Свёрнутые колонки — узкая студия часто держит "Завершено"/"Отменено"
 // сложенными: сами по себе они редко нужны, но занимают на широкой
@@ -301,7 +302,7 @@ function wireCardDrag(card) {
       if (!targetStatus || targetStatus === card.dataset.status) return;
       try {
         const res = await apiPost(`/report/${encodeURIComponent(card.dataset.id)}/status`, { status: targetStatus });
-        if (res.changed) { toast("Статус изменён."); await loadBoard(); }
+        if (res.changed) { toast("Статус изменён."); await loadBoard(); loadSidebarStatusCounts(); }
         else if (res.detail) toast(res.detail, "error");
       } catch (e) {
         toast(`Не удалось перенести карточку: ${e.message}`, "error");

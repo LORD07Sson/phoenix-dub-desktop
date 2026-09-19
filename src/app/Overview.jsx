@@ -102,10 +102,11 @@ function Overview(props) {
         </div>
       </div>
       <div class="bcell kpi-cell" style={{ "animation-delay": "60ms" }}>
-        <h3><span>Всего активных</span><Show when={activeDelta !== null}><span innerHTML={deltaPillHtml(activeDelta)} /></Show></h3>
+        <h3>Всего активных</h3>
         <div class="kpi-row">
           <span class="kpi-icon" style={{ background: "color-mix(in srgb, var(--fire) 20%, var(--surface-2))" }}>📁</span>
           <div class="big-num">{activeTotal}</div>
+          <Show when={activeDelta !== null}><span innerHTML={deltaPillHtml(activeDelta)} /></Show>
           <Show when={createdSeries}>
             <div class="kpi-spark" innerHTML={sparklineHtml(createdSeries, { colorVar: "--ember" })} />
           </Show>

@@ -2,7 +2,7 @@
 
 import { state } from "./state.js";
 import { apiGet, toast } from "./api.js";
-import { $, $all } from "./utils.js";
+import { $, $all, esc, STATUS_COLOR_VAR } from "./utils.js";
 import { loadOverview } from "./Overview.jsx";
 import { loadReports } from "./reports.js";
 import { loadBoard } from "./board.js";
@@ -123,3 +123,33 @@ export async function loadUsers() {
 }
 
 $("#refresh-btn").addEventListener("click", refreshAll);
+
+// Вложенные пункты под «Доской» в сайдбаре — статусы с точкой-цветом и
+// числом справа. Перенесено вживую с референса пользователя (Dribbble:
+// Xentra Digital Marketing Dashboard, dribbble.com/shots/27265906) —
+// там под «Projects» раскрыт список статусов с их количеством, тем же
+// приёмом, что уже красит колонки самой доски (STATUS_COLOR_VAR). Число
+// берём из /overview (то же, что уже питает донат-чарт «Структура
+// загрузки») — отдельным, независимым от активной вкладки запросом
+// при входе, тем же способом, что pingPresence()/loadTitlebarTeam()
+// в auth.js: сайдбар виден всегда, не только когда открыт «Обзор».
+export async function loadSidebarStatusCounts() {
+  const el = $("#sidebar-board-sub");
+  if (!el) return;
+  try {
+    const d = await apiGet("/overview");
+    const statuses = (d.reports && d.reports.statuses) || [];
+    if (!statuses.length) { el.hidden = true; return; }
+    el.innerHTML = statuses.map(s => `
+      <div class="sidebar-sub-item" data-goto-status="${esc(s.status)}">
+        <span class="dot" style="background:var(${STATUS_COLOR_VAR[s.status] || "--s-draft"})"></span>
+        <span class="lbl">${esc(s.label)}</span>
+        <span class="cnt">${s.count}</span>
+      </div>
+    `).join("");
+    el.hidden = false;
+    el.querySelectorAll("[data-goto-status]").forEach(row => {
+      row.addEventListener("click", () => switchTab("board"));
+    });
+  } catch (_) { /* не критично — сайдбар просто останется без раскладки по статусам */ }
+}
