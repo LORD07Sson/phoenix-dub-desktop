@@ -1651,7 +1651,7 @@ function framesPanelHtml() {
       </select>
     </div>
     ${framesState.kind === "single" ? `
-      <div class="mt-form-row"><span>Секунда</span>
+      <div class="mt-form-row"><span>Секунда / ширина, px</span>
         <input id="mt-frames-at" type="number" step="0.1" min="0" style="width:110px;" value="${esc(framesState.at)}">
         <input id="mt-frames-width" type="number" min="1" style="width:110px;" value="${esc(framesState.width)}" title="Ширина, px">
       </div>` : ""}
@@ -1751,8 +1751,13 @@ function wireFramesPanel(root) {
 // иначе голос «поедет». См. change_speed в media_tools.rs.
 // ============================================================
 
-const SPEED_PRESETS = [0.5, 0.9, 0.95, 1.05, 1.1, 1.25, 1.5, 2];
-const speedState = { poolIndex: null, path: null, info: null, speed: "1.05", keepPitch: true };
+// 1 обязателен в списке — без него у "без изменений" не было своей
+// кнопки (скачок сразу с 0.95× на 1.1×), а speedState.speed по умолчанию
+// был "1.05", а не "1": открыть вкладку и сразу нажать «Применить»,
+// не приглядевшись к числу, молча ускоряло файл на 5% вместо того,
+// чтобы ничего не менять.
+const SPEED_PRESETS = [0.5, 0.9, 0.95, 1, 1.05, 1.1, 1.25, 1.5, 2];
+const speedState = { poolIndex: null, path: null, info: null, speed: "1", keepPitch: true };
 
 function speedPanelHtml() {
   const picker = `<div class="mt-file-row">${poolSelectHtml("mt-speed-pick", speedState.poolIndex, f => f.info && (f.info.video || f.info.audio))}${speedState.path ? infoLineHtml(speedState.info) : ""}</div>`;
