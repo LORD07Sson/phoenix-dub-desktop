@@ -688,7 +688,11 @@ body.window-maximized .win-btn .ic-restore { display: block; }
   width: 34px; height: 34px; border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
   font-size: 16px; flex: none;
+  transition: transform .35s cubic-bezier(.34, 1.56, .64, 1), filter .25s var(--ease);
 }
+/* Плитка целиком реагирует, не только текст — иконка чуть подрастает и
+   покачивается, как активный элемент, а не декорация без интерактива. */
+.bcell:hover .kpi-icon { transform: scale(1.12) rotate(-4deg); filter: brightness(1.2) saturate(1.3); }
 .kpi-ring-track { stroke: var(--surface-2); }
 .kpi-ring-fill { transition: stroke-dashoffset 1s var(--ease); }
 
@@ -1977,8 +1981,9 @@ kbd {
   position: absolute; bottom: 0; height: 6px; min-width: 10px;
   border-radius: 4px;
   box-shadow: var(--shadow-xs);
-  transition: width .8s cubic-bezier(.22,.9,.3,1);
+  transition: width .8s cubic-bezier(.22,.9,.3,1), box-shadow .2s var(--ease), filter .2s var(--ease);
 }
+.gantt-row:hover .gantt-bar { box-shadow: 0 0 10px -1px currentColor, var(--shadow-xs); filter: brightness(1.15); }
 
 .board { display: flex; gap: 14px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; cursor: grab; scroll-behavior: smooth; touch-action: pan-y; }
 .board.panning { cursor: grabbing; }
@@ -2114,7 +2119,22 @@ kbd {
    такого поля у отчёта нет). */
 .board-card-progress-row { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--ink-dim); margin-bottom: 4px; }
 .board-card-progress-track { height: 4px; border-radius: 99px; background: var(--surface-3); overflow: hidden; margin-bottom: 8px; }
-.board-card-progress-track i { display: block; height: 100%; border-radius: 99px; }
+/* Заливка едет из 0 до реального значения при появлении карточки —
+   тот же приём, что у gantt-bar/seg-bar/donut (см. playBoardCardsIntro
+   в board.js), а не статично готовая полоска. */
+.board-card-progress-track i { display: block; height: 100%; border-radius: 99px; width: 0; transition: width .9s cubic-bezier(.22,.9,.3,1); }
+
+/* Карточки колонки появляются каскадом (не все разом одним row-in) —
+   первые 8 получают нарастающую задержку через nth-child, дальше
+   разница уже незаметна глазу, так что не расписываем дальше. */
+.board-cards .board-card:nth-child(1) { animation-delay: .02s; }
+.board-cards .board-card:nth-child(2) { animation-delay: .06s; }
+.board-cards .board-card:nth-child(3) { animation-delay: .1s; }
+.board-cards .board-card:nth-child(4) { animation-delay: .14s; }
+.board-cards .board-card:nth-child(5) { animation-delay: .18s; }
+.board-cards .board-card:nth-child(6) { animation-delay: .22s; }
+.board-cards .board-card:nth-child(7) { animation-delay: .26s; }
+.board-cards .board-card:nth-child(8) { animation-delay: .3s; }
 /* Срок сдачи — маленькой строкой НАД карточкой (как "Due: May 08,
    2026" у референса), а не пилюлей в подвале: перенос геометрии по
    явной просьбе пользователя свериться ещё раз "точь-в-точь". */

@@ -184,7 +184,7 @@ function boardCardHtml(c, status) {
       ${STATUS_PROGRESS[status] != null ? `<div class="board-card-progress-row">
         <span>Прогресс</span><span>${STATUS_PROGRESS[status]}%</span>
       </div>
-      <div class="board-card-progress-track"><i style="width:${STATUS_PROGRESS[status]}%; background:${accent};"></i></div>` : ""}
+      <div class="board-card-progress-track"><i style="background:${accent};" data-target-width="${STATUS_PROGRESS[status]}"></i></div>` : ""}
       <div class="foot">
         ${assigneesHtml(c.assignees)}
         ${c.filesCount || c.notesCount ? `<span class="board-card-counts">
@@ -577,6 +577,18 @@ async function renderBoard(root) {
   wireColumnButtons(root);
   wireBoardHeaderActions(root);
   playTimelineIntro(root);
+  playBoardCardsIntro(root);
+}
+
+// Заливка прогресс-бара карточки едет из 0 до реального значения при
+// появлении доски — тот же приём, что у playTimelineIntro/playSegBarIntro.
+function playBoardCardsIntro(root) {
+  const bars = root.querySelectorAll(".board-card-progress-track i");
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      bars.forEach(el => { el.style.width = `${el.dataset.targetWidth}%`; });
+    });
+  });
 }
 
 function wireBoardToolbar(root) {
