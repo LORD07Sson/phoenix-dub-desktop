@@ -2098,10 +2098,19 @@ body.focus-mode .report-detail-overlay .sheet {
    child-окна не гарантирован — оверлей на этом месте рисковал бы быть
    перекрыт видео и никогда не увиден. */
 .mt-player-bar {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  /* flex-wrap — панель управления (12+ элементов: перемотка, play,
+     A-B, скриншот, дорожки, громкость, скорость) шире узкого окна
+     плеера. Без wrap лишнее не переносилось, а обрезалось краем
+     модалки — до элементов вроде выбора скорости нужно было
+     докручивать по горизонтали, что легко пропустить. */
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px;
   background: var(--surface-2); border-radius: var(--radius-sm); padding: 6px 10px;
 }
-.mt-player-bar .icon-btn { padding: 4px 9px; font-size: 13px; }
+/* white-space: nowrap — без него кнопка "🔁 A-B" при нехватке места
+   переносила подпись на две строки ("A-" / "B" друг под другом)
+   вместо того, чтобы остаться на одной строке или уйти на новую
+   строку панели целиком (см. flex-wrap выше). */
+.mt-player-bar .icon-btn { padding: 4px 9px; font-size: 13px; white-space: nowrap; }
 /* justify-content: center обязателен — у .icon-btn его нет (не нужен
    там, где кнопка ровно по контенту), а здесь min-width шире одного
    символа-глифа ("▶"/"⏸"), и без центрирования по flex-start глиф
