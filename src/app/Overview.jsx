@@ -104,6 +104,7 @@ function Overview(props) {
       <div class="bcell kpi-cell" style={{ "animation-delay": "60ms" }}>
         <h3><span>Всего активных</span><Show when={activeDelta !== null}><span innerHTML={deltaPillHtml(activeDelta)} /></Show></h3>
         <div class="kpi-row">
+          <span class="kpi-icon" style={{ background: "color-mix(in srgb, var(--fire) 20%, var(--surface-2))" }}>📁</span>
           <div class="big-num">{activeTotal}</div>
           <Show when={createdSeries}>
             <div class="kpi-spark" innerHTML={sparklineHtml(createdSeries, { colorVar: "--ember" })} />
@@ -117,6 +118,7 @@ function Overview(props) {
       <div class="bcell kpi-cell" style={{ "animation-delay": "100ms" }}>
         <h3>Просрочено</h3>
         <div class="kpi-row">
+          <span class="kpi-icon" style={{ background: `color-mix(in srgb, var(${d.reports.overdue > 0 ? "--s-stop" : "--s-done"}) 20%, var(--surface-2))` }}>⏰</span>
           <div class={`big-num ${d.reports.overdue > 0 ? "danger" : ""}`}>{d.reports.overdue}</div>
           <Show when={activeTotal > 0}>
             <div class="kpi-ring-wrap" innerHTML={kpiRingHtml(overdueFrac, { colorVar: d.reports.overdue > 0 ? "--s-stop" : "--s-done" })} />
@@ -126,12 +128,18 @@ function Overview(props) {
       </div>
       <div class="bcell" style={{ "animation-delay": "140ms" }}>
         <h3>Доступ</h3>
-        <div class="big-num">{d.access.allowed}</div>
+        <div class="kpi-row">
+          <span class="kpi-icon" style={{ background: "color-mix(in srgb, var(--s-done) 20%, var(--surface-2))" }}>🔓</span>
+          <div class="big-num">{d.access.allowed}</div>
+        </div>
         <div class="sub">{d.access.pending_requests ? `${d.access.pending_requests} заявок ждут решения` : "заявок нет"}</div>
       </div>
       <div class="bcell" style={{ "animation-delay": "180ms" }}>
         <h3>Тикеты в поддержку</h3>
-        <div class={`big-num ${d.open_tickets > 0 ? "warn" : ""}`}>{d.open_tickets}</div>
+        <div class="kpi-row">
+          <span class="kpi-icon" style={{ background: `color-mix(in srgb, var(${d.open_tickets > 0 ? "--s-work" : "--ink-dim"}) 20%, var(--surface-2))` }}>🎫</span>
+          <div class={`big-num ${d.open_tickets > 0 ? "warn" : ""}`}>{d.open_tickets}</div>
+        </div>
         <div class="sub">открыто сейчас</div>
       </div>
       <TrendChart trend={props.trend} />
