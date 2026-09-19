@@ -8,6 +8,7 @@ import { refreshAll, clearTabDom, restoreLastTab } from "./tabs.js";
 import { resetAssignmentsBaseline } from "./notifications.js";
 import { resetFeedBadge } from "./feed-badge.js";
 import { pingPresence } from "./presence.js";
+import { loadTitlebarTeam } from "./profile.js";
 
 // Экран загрузки при старте — тот же маскот/прогресс-бар, что и в
 // мини-аппе (см. #splash в miniapp/static/index.html). Держим минимум
@@ -95,6 +96,7 @@ export function showApp() {
   // presence.js стартует при загрузке страницы, когда токена ещё нет,
   // и его первый заход всегда уходил впустую.
   pingPresence();
+  loadTitlebarTeam();
 }
 
 async function submitCode() {

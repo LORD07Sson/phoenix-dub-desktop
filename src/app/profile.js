@@ -138,6 +138,29 @@ function goalRingHtml(pct, over) {
   </svg>`;
 }
 
+// Аватар-стек команды в общей шапке (titlebar) — виден на любой
+// вкладке, не только на «Я». Перенесено вживую с референса пользователя
+// (Dribbble: Xentra Digital Marketing Dashboard, dribbble.com/shots/27265906)
+// — там кластер "N People / Team Members" с перекрывающимися аватарами
+// висит в шапке постоянно. Данные и разметка — те же /team + avatarHtml,
+// что уже питают тизер на вкладке «Я» и полный список (openTeamSheet)
+// ниже, просто с другим местом вывода и лимитом превью.
+export async function loadTitlebarTeam() {
+  const el = $("#titlebar-team");
+  if (!el) return;
+  try {
+    const d = await apiGet("/team");
+    const users = d.users || [];
+    if (!users.length) { el.hidden = true; return; }
+    const preview = users.slice(0, 4);
+    const stack = preview.map(u => avatarHtml(u.telegram_id, u.name, "sm")).join("");
+    el.innerHTML = `<span class="stack">${stack}</span><span class="tt">${users.length} ${pluralColleagues(users.length)}</span>`;
+    el.hidden = false;
+    loadAvatars(el);
+  } catch (_) { /* не критично — шапка просто останется без кластера */ }
+}
+$("#titlebar-team")?.addEventListener("click", openTeamSheet);
+
 function teamTeaserHtml(me) {
   if (!me.team || !me.team.count) return "";
   const stack = me.team.preview.map(u => avatarHtml(u.telegram_id, u.name, "sm")).join("");
@@ -559,7 +582,7 @@ function monthlyGoalDialog(current) {
 
 // ---------- Команда / чужой профиль ----------
 
-async function openTeamSheet() {
+export async function openTeamSheet() {
   const overlay = openSheet(dialogSkeletonHtml(6), "wide");
   overlay.querySelector(".sheet").innerHTML = `<h2>Команда</h2>` + dialogSkeletonHtml(6);
   let d;

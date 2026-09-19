@@ -906,6 +906,32 @@ body.window-maximized .win-btn .ic-restore { display: block; }
 .team-teaser .go { margin-left: auto; color: var(--ink-dim); font-size: 14px; flex: none; }
 .goal-card { cursor: pointer; }
 
+/* Тот же .team-teaser, но компактно в общей шапке (см. loadTitlebarTeam
+   в profile.js) — кластер "N People" из референса, только на всех
+   вкладках сразу, а не только на «Я». */
+.titlebar-team {
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: var(--radius-md);
+  transition: background .15s ease;
+}
+.titlebar-team:hover { background: var(--surface-2); }
+.titlebar-team .tt { font-size: 12px; font-weight: 700; color: var(--ink-soft); white-space: nowrap; }
+/* На узком окне полоса заголовка и так плотная (кнопки QC/ffmpeg/
+   обновить/выйти) — подпись кластера первой уступает место. Порог выше,
+   чем кажется нужным на глаз: дефолтная ширина окна по tauri.conf.json —
+   1180px, и на ней шапка уже переносится без права на запас. */
+@media (max-width: 1300px) {
+  .titlebar-team .tt { display: none; }
+}
+/* У самого минимума (760px по tauri.conf.json minWidth) даже голый стек
+   аватаров лишний — там и без него ужимаются кнопки; та же граница,
+   что уже сворачивает сайдбар. Полный список команды остаётся доступен
+   через вкладку «Я» — эта шапка только быстрый доступ, не единственный. */
+@media (max-width: 860px) {
+  .titlebar-team { display: none; }
+}
+
 /* ---------- Обновление ---------- */
 
 .update-progress-track { height: 8px; border-radius: 5px; background: var(--surface-2); overflow: hidden; margin: 14px 0 6px; }
