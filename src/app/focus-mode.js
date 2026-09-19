@@ -81,7 +81,9 @@ document.addEventListener("report-detail-closed", () => {
 // в принципе). Работает только пока открыта карточка отчёта — иначе
 // молча ничего не делает, полю ввода "F" перехватывать незачем.
 document.addEventListener("keydown", e => {
-  if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.key.toLowerCase() !== "f") return;
+  // e.code — физическая клавиша, не зависит от раскладки (см. командную
+  // палитру в command-palette.js: та же причина, что и там).
+  if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.code !== "KeyF") return;
   if (!document.querySelector(".report-detail-overlay")) return;
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA") return;

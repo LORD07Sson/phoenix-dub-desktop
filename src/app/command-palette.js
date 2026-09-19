@@ -134,7 +134,11 @@ function openPalette() {
 }
 
 document.addEventListener("keydown", e => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+  // e.code, а не e.key: e.key зависит от раскладки клавиатуры (с русской
+  // ЙЦУКЕН физическая "K" даёт e.key === "л", а не "k" — Ctrl+K тогда
+  // молча никогда не срабатывал бы). e.code — код физической клавиши,
+  // от раскладки не зависит.
+  if ((e.ctrlKey || e.metaKey) && e.code === "KeyK") {
     e.preventDefault();
     if ($(".cmdk-overlay")) return; // уже открыта — второй Ctrl+K не плодит вторую
     openPalette();
