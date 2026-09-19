@@ -4,13 +4,39 @@
 //! пакетов. Только Windows (весь проект собирается только под Windows —
 //! CI, ffmpeg.exe/ffprobe.exe, keyring windows-native).
 //!
-//! mpv не рисует в HTML/DOM — он рендерит в НАТИВНОЕ Win32-окно. Схема:
-//! мы сами создаём child-окно (`CreateWindowExW`, `WS_CHILD`) как ребёнка
-//! главного окна Tauri, отдаём его HWND аргументом `--wid=` в `mpv.exe`,
-//! и mpv рендерит видео прямо в это окно. Дальше МЫ двигаем/ресайзим это
-//! окно (`SetWindowPos`), синхронизируя его с прямоугольником HTML-
-//! плейсхолдера (см. media-tools.js: ResizeObserver + mpv_set_bounds) —
-//! mpv сам подхватывает новый размер, ему для этого ничего слать не нужно.
+//! mpv не рисует в HTML/DOM — он рендерит в НАТИВНОЕ Win32-окно. ВАЖНО:
+//! это окно — НЕ дочернее (`WS_CHILD`) окно главного окна Tauri, а
+//! отдельное владеемое (`owned`, hwndParent без WS_CHILD) топ-левел
+//! окно (`WS_POPUP` + `WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE`). Раньше было
+//! child-окно, и это не работало НИКОГДА: WebView2 у Tauri хостится
+//! через `ICoreWebView2Controller` (обычный HWND-режим — библиотека wry
+//! не поддерживает composition/DirectComposition-режим WebView2 вовсе,
+//! проверено по исходникам wry 0.55), а controller-режим WebView2 рисует
+//! через собственный DirectComposition-таргет, который по подтверждению
+//! самой Microsoft перекрывает ЛЮБОЕ дочернее окно того же родителя вне
+//! зависимости от Win32 z-order — SetWindowPos/HWND_TOP на этот случай
+//! не действует (см. MicrosoftEdge/WebView2Feedback#708). Раньше здесь
+//! пробовали разные VO (gpu-next/direct3d) в расчёте, что дело в DXGI
+//! flip-model поверхности — не помогло: подтверждено на реальном видео,
+//! current-vo/current-ao поднимаются штатно, а кадра всё равно нет,
+//! потому что sibling-child-окно в принципе не может отрисоваться поверх
+//! WebView2 этим способом, независимо от VO.
+//!
+//! Владеемое (не дочернее) окно решает это иначе: оно не «внутри»
+//! клиентской области главного окна с точки зрения Win32, а отдельное
+//! top-level окно, которое (а) не показывается в панели задач/Alt+Tab
+//! (`WS_EX_TOOLWINDOW`), (б) Windows сама держит выше окна-владельца по
+//! z-order и автоматически скрывает при сворачивании владельца — без
+//! WS_EX_TOPMOST, то есть оно не перекрывает ДРУГИЕ приложения, когда
+//! пользователь переключается на них. Мы вручную синхронизируем его
+//! позицию/размер с прямоугольником HTML-плейсхолдера (см. media-tools.js:
+//! ResizeObserver + mpv_set_bounds), пересчитывая клиентские координаты
+//! плейсхолдера в ЭКРАННЫЕ через `ClientToScreen` (у owned-окна нет
+//! родительской клиентской системы координат, как была бы у child-окна),
+//! и досинхронизируем при любом перемещении/ресайзе самого главного окна
+//! (main.rs: `WindowEvent::Moved`/`Resized` → `mpv_resync_bounds`), не
+//! дожидаясь очередного тика ResizeObserver на JS-стороне.
+//!
 //! Управление (play/pause/seek/громкость/скорость/покадрово) — через JSON
 //! IPC по именованному пайпу (mpv.io/manual/master/#json-ipc): команды —
 //! JSON-строки `{"command":[...]}\n`, события (после `observe_property`) —
@@ -37,12 +63,13 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, WriteHalf};
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 use tokio::sync::Mutex as AsyncMutex;
 use windows::core::w;
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, POINT};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, IsWindowVisible, RegisterClassW,
-    SetWindowPos, CS_HREDRAW, CS_VREDRAW, HWND_TOP, SWP_NOACTIVATE, WNDCLASSW, WS_CHILD,
-    WS_EX_NOACTIVATE, WS_VISIBLE,
+    SetWindowPos, CS_HREDRAW, CS_VREDRAW, HWND_TOP, SWP_NOACTIVATE, WNDCLASSW, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
 };
 
 use crate::audio_qc::{hidden_command, resolve_binary_uncached};
@@ -114,8 +141,20 @@ fn ensure_class_registered() {
     });
 }
 
+/// Переводит прямоугольник в клиентских координатах главного окна (то,
+/// что реально шлёт media-tools.js — `getBoundingClientRect()` страницы)
+/// в экранные — у owned top-level окна нет системы координат «внутри
+/// родителя», как была бы у child-окна, приходится считать самим.
+fn client_rect_to_screen(parent_raw: isize, b: MpvBounds) -> Result<MpvBounds, String> {
+    let mut origin = POINT { x: 0, y: 0 };
+    unsafe { ClientToScreen(HWND(parent_raw as _), &mut origin) }
+        .ok()
+        .map_err(|e| format!("ClientToScreen: {e}"))?;
+    Ok(MpvBounds { x: b.x + origin.x, y: b.y + origin.y, width: b.width, height: b.height })
+}
+
 /// Синхронная часть создания окна — вызывается ТОЛЬКО с главного потока
-/// (см. `create_child_window_on_main`).
+/// (см. `create_child_window_on_main`). `b` — уже в ЭКРАННЫХ координатах.
 fn create_child_window_raw(parent_raw: isize, b: MpvBounds) -> Result<isize, String> {
     ensure_class_registered();
     let hinstance = unsafe { GetModuleHandleW(None) }.map_err(|e| e.to_string())?;
@@ -123,10 +162,20 @@ fn create_child_window_raw(parent_raw: isize, b: MpvBounds) -> Result<isize, Str
         CreateWindowExW(
             // NOACTIVATE — клик по видео не должен воровать фокус клавиатуры
             // у остального интерфейса (таймлайн/кнопки живут в HTML-части).
-            WS_EX_NOACTIVATE,
+            // TOOLWINDOW — не показывать в панели задач/Alt+Tab: с точки
+            // зрения пользователя это не отдельное окно, а часть панели
+            // «Обрезка».
+            WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
             CLASS_NAME,
             w!(""),
-            WS_CHILD | WS_VISIBLE,
+            // WS_POPUP, НЕ WS_CHILD — см. комментарий в шапке модуля:
+            // owned top-level окно вместо child, потому что WebView2
+            // рисует поверх любого child-окна того же родителя вне
+            // зависимости от Win32 z-order. hwndParent без WS_CHILD
+            // делает окно «owned» (не «child») — Windows сама держит его
+            // выше владельца и скрывает при его сворачивании, без
+            // WS_EX_TOPMOST (который перекрывал бы и ДРУГИЕ приложения).
+            WS_POPUP | WS_VISIBLE,
             b.x,
             b.y,
             b.width,
@@ -145,12 +194,14 @@ fn create_child_window_raw(parent_raw: isize, b: MpvBounds) -> Result<isize, Str
     let visible = unsafe { IsWindowVisible(hwnd) }.as_bool();
     let got_rect = unsafe { GetClientRect(hwnd, &mut rect) }.is_ok();
     log::info!(
-        "child-окно создано: hwnd={:?} видимо={visible} клиент={}x{} (запрошено {}x{})",
+        "owned-окно создано: hwnd={:?} видимо={visible} клиент={}x{} (запрошено {}x{}, экранные {},{})",
         hwnd.0,
         if got_rect { rect.right - rect.left } else { -1 },
         if got_rect { rect.bottom - rect.top } else { -1 },
         b.width,
-        b.height
+        b.height,
+        b.x,
+        b.y
     );
     Ok(hwnd.0 as isize)
 }
@@ -158,30 +209,33 @@ fn create_child_window_raw(parent_raw: isize, b: MpvBounds) -> Result<isize, Str
 async fn create_child_window_on_main(
     app: &tauri::AppHandle,
     parent_raw: isize,
-    b: MpvBounds,
+    client_bounds: MpvBounds,
 ) -> Result<isize, String> {
-    on_main_thread(app, move || create_child_window_raw(parent_raw, b)).await?
+    on_main_thread(app, move || {
+        let screen = client_rect_to_screen(parent_raw, client_bounds)?;
+        create_child_window_raw(parent_raw, screen)
+    })
+    .await?
 }
 
-/// Двигает окно плеера и КАЖДЫЙ РАЗ поднимает его поверх соседей.
+/// Двигает окно плеера. `b` — клиентские координаты плейсхолдера (как
+/// шлёт media-tools.js), пересчитываются в экранные здесь же.
 ///
-/// Поднимать обязательно: вебвью WebView2 — такое же дочернее окно
-/// главного окна, то есть сосед нашего по z-порядку. Стоит ему оказаться
-/// выше (а он оказывается — например, после того как страница получила
-/// фокус), и видео полностью перекрыто веб-слоем: на экране остаётся
-/// чёрный прямоугольник HTML-плейсхолдера, при том что mpv исправно
-/// декодирует и позиция воспроизведения идёт. Раньше здесь стоял
-/// SWP_NOZORDER, то есть z-порядок сохранялся каким был.
-async fn set_bounds_on_main(app: &tauri::AppHandle, hwnd_raw: isize, b: MpvBounds) -> Result<(), String> {
+/// HWND_TOP на всякий случай (несколько owned-окон одного владельца
+/// друг друга не переупорядочивают сами) — но не решает исходную
+/// проблему «поверх WebView2»: owned-окно и так стоит выше владельца
+/// по умолчанию, см. комментарий в шапке модуля.
+async fn set_bounds_on_main(app: &tauri::AppHandle, parent_raw: isize, hwnd_raw: isize, b: MpvBounds) -> Result<(), String> {
     on_main_thread(app, move || {
+        let screen = client_rect_to_screen(parent_raw, b)?;
         unsafe {
             SetWindowPos(
                 HWND(hwnd_raw as _),
                 Some(HWND_TOP),
-                b.x,
-                b.y,
-                b.width,
-                b.height,
+                screen.x,
+                screen.y,
+                screen.width,
+                screen.height,
                 SWP_NOACTIVATE,
             )
         }
@@ -209,6 +263,12 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 struct MpvState {
     generation: u64,
     hwnd: isize,
+    parent_hwnd: isize,
+    // Последние клиентские координаты плейсхолдера — чтобы пересчитать
+    // экранную позицию owned-окна при перемещении/ресайзе ГЛАВНОГО окна
+    // (main.rs: WindowEvent::Moved/Resized → mpv_resync_bounds), не
+    // дожидаясь очередного тика ResizeObserver на JS-стороне.
+    last_client_bounds: MpvBounds,
     child: Child,
     write_half: WriteHalf<NamedPipeClient>,
 }
@@ -361,8 +421,10 @@ pub async fn mpv_create(app: &tauri::AppHandle, bounds: MpvBounds) -> Result<(),
         let alive = !matches!(existing.child.try_wait(), Ok(Some(_)));
         if alive {
             let hwnd_raw = existing.hwnd;
+            let parent_raw = existing.parent_hwnd;
+            existing.last_client_bounds = bounds;
             drop(guard);
-            return set_bounds_on_main(app, hwnd_raw, bounds).await;
+            return set_bounds_on_main(app, parent_raw, hwnd_raw, bounds).await;
         }
         // Процесс умер — окно осталось висеть. Сносим и поднимаем заново.
         log::warn!("mpv_create: прошлый процесс mpv мёртв, пересоздаём плеер");
@@ -499,16 +561,48 @@ pub async fn mpv_create(app: &tauri::AppHandle, bounds: MpvBounds) -> Result<(),
         let _ = app_events.emit("mpv-state", json!({ "name": "exited", "data": true }));
     });
 
-    *guard = Some(MpvState { generation, hwnd: hwnd_raw, child, write_half });
+    *guard = Some(MpvState {
+        generation,
+        hwnd: hwnd_raw,
+        parent_hwnd: parent_raw,
+        last_client_bounds: bounds,
+        child,
+        write_half,
+    });
     Ok(())
 }
 
 pub async fn mpv_set_bounds(app: &tauri::AppHandle, bounds: MpvBounds) -> Result<(), String> {
-    let hwnd_raw = {
-        let guard = state().lock().await;
-        guard.as_ref().ok_or("mpv не создан")?.hwnd
+    let (hwnd_raw, parent_raw) = {
+        let mut guard = state().lock().await;
+        let s = guard.as_mut().ok_or("mpv не создан")?;
+        s.last_client_bounds = bounds;
+        (s.hwnd, s.parent_hwnd)
     };
-    set_bounds_on_main(app, hwnd_raw, bounds).await
+    set_bounds_on_main(app, parent_raw, hwnd_raw, bounds).await
+}
+
+/// Пересинхронизирует позицию owned-окна с ПОСЛЕДНИМИ известными
+/// клиентскими координатами плейсхолдера — для случая, когда сдвинулось
+/// или изменило размер само ГЛАВНОЕ окно (перетаскивание, Aero Snap,
+/// смена монитора), а не плейсхолдер внутри него: ResizeObserver на
+/// JS-стороне на это не реагирует (размер/положение плейсхолдера
+/// ОТНОСИТЕЛЬНО страницы не поменялись), а owned-окно должно уехать
+/// вместе с владельцем. Вызывается из main.rs на WindowEvent::Moved/
+/// Resized главного окна. Тихо ничего не делает, если плеер не создан —
+/// вызывается на КАЖДОЕ перемещение окна, а не только когда открыта
+/// панель «Обрезка».
+pub async fn mpv_resync_bounds(app: &tauri::AppHandle) {
+    let (hwnd_raw, parent_raw, bounds) = {
+        let guard = state().lock().await;
+        match guard.as_ref() {
+            Some(s) => (s.hwnd, s.parent_hwnd, s.last_client_bounds),
+            None => return,
+        }
+    };
+    if let Err(e) = set_bounds_on_main(app, parent_raw, hwnd_raw, bounds).await {
+        log::warn!("mpv_resync_bounds: {e}");
+    }
 }
 
 async fn send_command(cmd: serde_json::Value) -> Result<(), String> {
