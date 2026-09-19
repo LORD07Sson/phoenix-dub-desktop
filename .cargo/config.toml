@@ -1,0 +1,10 @@
+# Статическая линковка C-рантайма (VCRUNTIME140.dll, VCRUNTIME140_1.dll,
+# MSVCP140.dll) — без этого готовый .exe требует Visual C++ Redistributable
+# на машине пользователя, а установщик (build.yml/build-alpha.yml, Velopack)
+# его не ставит и не проверяет. На машине с установленными build tools
+# (как эта, для разработки) все нужные DLL уже есть в PATH/System32, и
+# отсутствие зависимости незаметно — до первого запуска на чистой
+# пользовательской машине без Visual Studio/VC++ Redist, где приложение
+# тогда падает с "VCRUNTIME140.dll не найдена" ещё до своего окна.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
