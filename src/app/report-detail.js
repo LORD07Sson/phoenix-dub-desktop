@@ -8,6 +8,7 @@ import { invoke, pickOutputFile, pickInputFile, revealInFolder, pinReportWindow 
 import { esc, initials, STATUS_DOT_CLASS, STATUS_COLOR_VAR, isOverdue, parseNoteTime, secondsFromTimeInput, noteTimePrefix, formatRange } from "./utils.js";
 import { runQcAnalysis, QC_EXTENSIONS } from "./qc.js";
 import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
+import { loadSidebarStatusCounts } from "./tabs.js";
 import { loadRoles, loadAssignable, userOptionsHtml } from "./titles-admin.js";
 import { setDropTarget } from "./file-drop.js";
 import { recordRecentReport } from "./recent-reports.js";
@@ -244,6 +245,7 @@ export async function openReportDetail(publicId) {
           toast("Отчёт удалён.");
           overlay.remove();
           await loadReports();
+          loadSidebarStatusCounts();
         } else if (res.pending_approval) {
           toast("Запрос на удаление отправлен владельцу.");
           overlay.remove();
