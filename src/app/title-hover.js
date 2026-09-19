@@ -87,6 +87,7 @@ async function loadAndShow(anchor, titleId) {
     }
   }
   if (currentId !== titleId) return; // за время запроса курсор уже увели на другой тайтл
+  if (!anchor.isConnected) return; // сетку успели перерисовать (смена сезона и т.п.)
   renderPopover(anchor, data);
 }
 

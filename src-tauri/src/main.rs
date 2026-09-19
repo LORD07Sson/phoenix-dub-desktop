@@ -1124,6 +1124,35 @@ fn apply_windows_11_chrome(win: &tauri::WebviewWindow) {
     }
 }
 
+/// WebView2 по умолчанию сам перехватывает часть «браузерных» горячих
+/// клавиш (Ctrl+F/Ctrl+P/Ctrl+K и т.п. — то же, что в обычном Edge) ДО
+/// того, как они доходят до keydown-слушателя страницы. У нас Ctrl+K —
+/// это command-palette.js (document.addEventListener("keydown", ...)),
+/// и в реальном приложении на Windows он никогда не срабатывал, хотя в
+/// headless Playwright-тестах на Linux (не настоящий WebView2 — синтетика
+/// диспетчерит события прямо в DOM, минуя браузерный слой) всё было
+/// зелёным. AreBrowserAcceleratorKeysEnabled=false отдаёт эти комбинации
+/// странице как обычные keydown.
+fn disable_browser_accelerator_keys(win: &tauri::WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+    use windows::core::Interface;
+    let result = win.with_webview(|webview| {
+        let apply = || -> windows::core::Result<()> {
+            let controller = webview.controller();
+            let core = unsafe { controller.CoreWebView2() }?;
+            let settings = unsafe { core.Settings() }?;
+            let settings3: ICoreWebView2Settings3 = settings.cast()?;
+            unsafe { settings3.SetAreBrowserAcceleratorKeysEnabled(false) }
+        };
+        if let Err(e) = apply() {
+            log::warn!("не удалось отключить браузерные accelerator keys WebView2 (Ctrl+K и другие горячие клавиши могут не доходить до страницы): {e}");
+        }
+    });
+    if let Err(e) = result {
+        log::warn!("disable_browser_accelerator_keys: with_webview не выполнился: {e}");
+    }
+}
+
 fn toggle_main_window(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let visible = win.is_visible().unwrap_or(false);
@@ -1315,6 +1344,8 @@ fn main() {
                 .ok_or("окно main не найдено — проверьте tauri.conf.json")?;
             #[cfg(windows)]
             apply_windows_11_chrome(&win);
+            #[cfg(windows)]
+            disable_browser_accelerator_keys(&win);
             let win_clone = win.clone();
             let handle = app.handle().clone();
             win.on_window_event(move |event| match event {

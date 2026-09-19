@@ -35,4 +35,7 @@ async function pollAssignments() {
   } catch (_) { /* тихо: трей не должен спамить ошибками сети раз в минуту */ }
 }
 
+// Сразу при старте — иначе первую минуту после входа новые назначения
+// молча не отслеживаются (тот же приём, что у presence.js/feed-badge.js).
+pollAssignments();
 setInterval(pollAssignments, POLL_INTERVAL_MS);

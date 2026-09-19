@@ -313,7 +313,9 @@ $all(".qf-chip").forEach(chip => {
 // (Escape, закрывающий верхнюю модалку, живёт теперь в api.js — рядом
 // с openSheet, к вкладке «Список» он отношения не имел.)
 document.addEventListener("keydown", e => {
-  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "f") return;
+  // e.code — физическая клавиша, не зависит от раскладки (см. командную
+  // палитру в command-palette.js: та же причина, что и там).
+  if (!(e.ctrlKey || e.metaKey) || e.code !== "KeyF") return;
   if (state.activeTab !== "list" || document.querySelector(".overlay")) return;
   e.preventDefault();
   $("#search-input").focus();
