@@ -137,6 +137,10 @@ function boardCardHtml(c, status) {
       <div class="foot">
         ${assigneesHtml(c.assignees)}
         <span class="deadline-pill ${c.overdue ? "overdue" : ""}" title="${esc(c.deadline || "срок не назначен")}">${c.overdue ? "⏰ " : "📅 "}${esc(deadlineLabel(c))}</span>
+        ${c.filesCount || c.notesCount ? `<span class="board-card-counts">
+          ${c.filesCount ? `<span title="Файлов: ${c.filesCount}">📎 ${c.filesCount}</span>` : ""}
+          ${c.notesCount ? `<span title="Заметок: ${c.notesCount}">💬 ${c.notesCount}</span>` : ""}
+        </span>` : ""}
       </div>
       ${c.stale || c.unassigned ? `<div class="board-card-flags">
         ${c.stale ? `<span class="board-flag stale" title="Ничего не менялось ${c.ageDays} дн.">🕸 ${c.ageDays} дн. без движения</span>` : ""}
