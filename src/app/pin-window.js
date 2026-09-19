@@ -86,7 +86,7 @@ async function load() {
         <div class="pin-title">${esc(detail.title)}</div>
         <div class="detail-chips" style="margin:8px 0;">
           <span class="chip status-chip" style="--chip-accent: var(${STATUS_COLOR_VAR[detail.status] || "--s-draft"})"><span class="dot ${dotClass}"></span>${esc(detail.status_label)}</span>
-          <span class="chip">${esc(detail.priority_label)}</span>
+          <span class="chip priority-chip ${esc(detail.priority)}"><span class="dot"></span>${esc(detail.priority_label)}</span>
           <span class="chip" style="${overdue ? "border-color:var(--s-stop); color:var(--s-stop);" : ""}">${overdue ? "⏰ " : "📅 "}${esc(detail.deadline || "без срока")}</span>
         </div>
         ${assignees ? `<div class="pin-row"><span>👤 Исполнители</span><b>${esc(assignees)}</b></div>` : `<div class="pin-row"><span>👤 Исполнители</span><span class="pin-empty-inline">никто</span></div>`}

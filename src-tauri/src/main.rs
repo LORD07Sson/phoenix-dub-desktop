@@ -946,10 +946,22 @@ const ALLOWED_UPLOAD_EXT: &[&str] = &[
 // раньше, чем сервер успел бы его отклонить.
 const MAX_UPLOAD_BYTES: u64 = 200 * 1024 * 1024;
 
-fn checked_upload_path(dropped: &DroppedFiles, file_path: &str) -> Result<PathBuf, String> {
+// Файл разрешён к загрузке, если пользователь сам его указал ЛЮБЫМ
+// из двух способов — перетащил в окно (DroppedFiles) или выбрал в
+// нативном диалоге (FileScope.readable, тот же скоуп, что уже даёт
+// mt_register_media_file и остальным ffmpeg-командам). Раньше
+// upload_report_file понимал только drag-drop — кнопка «Выбрать файл»
+// (если такая появится в интерфейсе) молча отклонялась бы с той же
+// ошибкой, хотя источник доверия ровно тот же: явный выбор
+// пользователя, а не путь, подставленный из вебвью.
+fn checked_upload_path(
+    dropped: &DroppedFiles,
+    scope: &file_scope::FileScope,
+    file_path: &str,
+) -> Result<PathBuf, String> {
     let path = PathBuf::from(file_path);
-    if !dropped.contains(&path) {
-        return Err("Этот файл не перетаскивали в окно — загрузка отклонена.".into());
+    if !dropped.contains(&path) && scope.check_read(file_path).is_err() {
+        return Err("Этот файл не выбирали в приложении — загрузка отклонена.".into());
     }
     let ext = path
         .extension()
@@ -986,7 +998,11 @@ async fn upload_report_file(
     init_data: String,
 ) -> Result<serde_json::Value, String> {
     let result = async {
-        let path = checked_upload_path(&app.state::<DroppedFiles>(), &file_path)?;
+        let path = checked_upload_path(
+            &app.state::<DroppedFiles>(),
+            &app.state::<file_scope::FileScope>(),
+            &file_path,
+        )?;
         let file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
