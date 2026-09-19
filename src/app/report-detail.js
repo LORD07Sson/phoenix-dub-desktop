@@ -117,7 +117,7 @@ export async function openReportDetail(publicId) {
 
       <div class="detail-chips">
         <span class="chip status-chip" id="chip-status" style="--chip-accent: var(${STATUS_COLOR_VAR[detail.status] || "--s-draft"})"><span class="dot ${dotClass}"></span>${esc(detail.status_label)}</span>
-        <span class="chip" id="chip-priority">${esc(detail.priority_label)}</span>
+        <span class="chip priority-chip ${esc(detail.priority)}" id="chip-priority"><span class="dot"></span>${esc(detail.priority_label)}</span>
         <span class="chip ${overdue ? "overdue" : ""}" id="chip-deadline">${overdue ? "⏰ " : "📅 "}${esc(detail.deadline || "без срока")}</span>
         <span class="chip" id="chip-assign">👤 Назначить</span>
       </div>

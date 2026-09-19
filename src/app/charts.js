@@ -132,15 +132,24 @@ export function timelineHtml(rows, rangeStart, rangeEnd, todayMs) {
     const d = new Date(ms);
     return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
   };
+  // Ширина стартует с 0 и доезжает до цели через playTimelineIntro —
+  // тот же приём, что у playSegBarIntro/playDonutIntro выше: полоса
+  // должна вырасти из точки, а не появиться сразу в целевом размере.
+  //
+  // Подпись — ОТДЕЛЬНАЯ плавающая плашка над тонкой цветной полосой
+  // (не текст внутри самой полосы, как было раньше): так у референса —
+  // обычно тёмная и приглушённая, но белая и жирная, если задача
+  // пересекает «сегодня» (тот же смысл, что подсветка today-строки на
+  // Гант-чарте референса).
   const bars = rows.map(r => {
     const left = pct(r.startMs);
     const width = Math.max(2, pct(r.endMs) - left);
+    const current = todayMs >= r.startMs && todayMs <= r.endMs;
     return `
-      <div class="gantt-row">
-        <div class="gantt-row-label" title="${esc(r.title)}">${esc(r.label)}</div>
+      <div class="gantt-row" title="${esc(r.title)}: ${esc(fmt(r.startMs))} → ${esc(fmt(r.endMs))}">
         <div class="gantt-track">
-          <div class="gantt-bar" style="left:${left.toFixed(2)}%; width:${width.toFixed(2)}%; background:var(${r.colorVar});"
-               title="${esc(r.title)}: ${esc(fmt(r.startMs))} → ${esc(fmt(r.endMs))}">${esc(r.label)}</div>
+          <div class="gantt-tag${current ? " current" : ""}" style="left:${left.toFixed(2)}%;">${esc(fmt(r.startMs))} ${esc(r.title)}</div>
+          <div class="gantt-bar" style="left:${left.toFixed(2)}%; width:0%; background:var(${r.colorVar});" data-target-width="${width.toFixed(2)}"></div>
         </div>
       </div>`;
   }).join("");
@@ -152,6 +161,17 @@ export function timelineHtml(rows, rangeStart, rangeEnd, todayMs) {
         ${bars || `<div class="no-assignee">Нет активных серий со сроком</div>`}
       </div>
     </div>`;
+}
+
+// Проигрывает заливку .gantt-bar — тот же двух-кадровый
+// requestAnimationFrame приём, что playSegBarIntro выше.
+export function playTimelineIntro(root) {
+  const bars = root.querySelectorAll(".gantt-bar");
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      bars.forEach(el => { el.style.width = `${el.dataset.targetWidth}%`; });
+    });
+  });
 }
 
 // Мини-спарклайн под KPI-числом (Обзор) — компактная area+line без осей/

@@ -153,7 +153,12 @@ export async function loadTitlebarTeam() {
     const users = d.users || [];
     if (!users.length) { el.hidden = true; return; }
     const preview = users.slice(0, 4);
-    const stack = preview.map(u => avatarHtml(u.telegram_id, u.name, "sm")).join("");
+    const overflow = users.length - preview.length;
+    // Стек аватаров заканчивается кружком "+N" на месте непоказанных
+    // участников — та же деталь, что у референса ("21+" в шапке), не
+    // просто текстовая подпись сбоку.
+    const stack = preview.map(u => avatarHtml(u.telegram_id, u.name, "sm")).join("")
+      + (overflow > 0 ? `<span class="avatar sm avatar-overflow">+${overflow}</span>` : "");
     el.innerHTML = `<span class="stack">${stack}</span><span class="tt">${users.length} ${pluralColleagues(users.length)}</span>`;
     el.hidden = false;
     loadAvatars(el);

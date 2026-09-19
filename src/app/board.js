@@ -21,14 +21,15 @@
 // надёжно доставляемый в любом Chromium-движке механизм, руками
 // реализующий тот же «взял — перенёс — отпустил».
 
-import { apiGet, apiPost, toast, dialogSkeletonHtml } from "./api.js";
-import { invoke } from "./tauri.js";
+import { apiGet, apiPost, toast, dialogSkeletonHtml, openSheet } from "./api.js";
+import { invoke, pickInputFile } from "./tauri.js";
 import { $, esc, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS } from "./utils.js";
-import { timelineHtml } from "./charts.js";
+import { timelineHtml, playTimelineIntro } from "./charts.js";
 import { assigneesHtml } from "./reports.js";
 import { openReportDetail } from "./report-detail.js";
 import { state } from "./state.js";
 import { loadSidebarStatusCounts } from "./tabs.js";
+import { ATTACH_EXTENSIONS } from "./file-drop.js";
 
 // Свёрнутые колонки — узкая студия часто держит "Завершено"/"Отменено"
 // сложенными: сами по себе они редко нужны, но занимают на широкой
@@ -51,9 +52,10 @@ const PRIORITY_COLOR_VAR = { urgent: "--s-stop", high: "--ember", normal: "--ink
 // категориальный статус не сводится к проценту без выдумывания
 // числа), а фиксированная, задокументированная шкала «как далеко по
 // пайплайну», тем же приёмом, что PRIORITY_RANK_SQL в board.rs уже
-// сводит priority к числу для сортировки. cancelled сюда не входит —
-// у отменённой серии «прогресс» не имеет смысла, полоску не рисуем.
-const STATUS_PROGRESS = { draft: 5, working: 40, review: 70, revision: 55, completed: 100 };
+// сводит priority к числу для сортировки. draft и cancelled сюда не
+// входят — у референса карточка «Pending» (наш «Черновик», работа ещё
+// не началась) вовсе без прогресс-бара, как и у отменённой серии.
+const STATUS_PROGRESS = { working: 40, review: 70, revision: 55, completed: 100 };
 const DRAG_THRESHOLD_PX = 6;
 
 // pointerup снимает .dragging до того, как браузер успевает выстрелить
@@ -88,7 +90,7 @@ function writeSort(value) {
   try { localStorage.setItem(sortKey(), value); } catch (_) { /* не критично */ }
 }
 
-const boardView = { sort: readSort(), query: "", seasonId: 0, titleId: 0 };
+const boardView = { sort: readSort(), query: "", seasonId: 0, titleId: 0, month: "" };
 // Последний ответ сервера — чтобы пересортировать и отфильтровать доску
 // мгновенно, не ходя за теми же данными второй раз.
 let lastBoardData = null;
@@ -173,6 +175,7 @@ function boardCardHtml(c, status) {
          data-open="${esc(c.publicId)}" data-id="${esc(c.publicId)}" data-status="${esc(status)}"
          style="--accent-dot: ${accent}; --heat: ${heat.toFixed(3)};">
       <span class="board-card-heat" style="background:${accent};"></span>
+      <div class="board-card-due ${c.overdue ? "overdue" : ""}" title="${esc(c.deadline || "срок не назначен")}">${c.overdue ? "⏰ " : "Срок: "}${esc(deadlineLabel(c))}</div>
       <div class="board-card-top">
         <span class="id">${esc(c.publicId)}</span>
         ${c.priority ? `<span class="pr-badge" style="color:${prColor}; border-color:${prColor};">${c.priority === "urgent" ? "⚡ " : ""}${esc(PRIORITY_LABELS[c.priority] || c.priority)}</span>` : ""}
@@ -184,7 +187,6 @@ function boardCardHtml(c, status) {
       <div class="board-card-progress-track"><i style="width:${STATUS_PROGRESS[status]}%; background:${accent};"></i></div>` : ""}
       <div class="foot">
         ${assigneesHtml(c.assignees)}
-        <span class="deadline-pill ${c.overdue ? "overdue" : ""}" title="${esc(c.deadline || "срок не назначен")}">${c.overdue ? "⏰ " : "📅 "}${esc(deadlineLabel(c))}</span>
         ${c.filesCount || c.notesCount ? `<span class="board-card-counts">
           ${c.filesCount ? `<span title="Файлов: ${c.filesCount}">📎 ${c.filesCount}</span>` : ""}
           ${c.notesCount ? `<span title="Заметок: ${c.notesCount}">💬 ${c.notesCount}</span>` : ""}
@@ -554,6 +556,17 @@ async function renderBoard(root) {
   }
   const collapsed = readCollapsed();
   root.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1>Доска</h1>
+        <div class="sub">Все активные серии студии, разложенные по статусам.</div>
+      </div>
+      <div class="page-header-actions">
+        <input type="month" id="board-month" class="board-sort" title="Показать серии со сроком в этом месяце" value="${esc(boardView.month)}">
+        <button class="btn ghost" id="board-import-btn">📥 Импорт</button>
+        <button class="btn primary" id="board-add-btn">＋ Добавить проект</button>
+      </div>
+    </div>
     ${boardToolbarHtml(layout)}
     ${timelineSectionHtml(layout)}
     <div class="board">${layout.columns.map(col => columnHtml(col, collapsed)).join("")}</div>
@@ -562,6 +575,8 @@ async function renderBoard(root) {
   wireBoardScroll(root.querySelector(".board"));
   wireBoardToolbar(root);
   wireColumnButtons(root);
+  wireBoardHeaderActions(root);
+  playTimelineIntro(root);
 }
 
 function wireBoardToolbar(root) {
@@ -569,6 +584,15 @@ function wireBoardToolbar(root) {
   const sort = root.querySelector("#board-sort");
   const season = root.querySelector("#board-season");
   const title = root.querySelector("#board-title");
+  const month = root.querySelector("#board-month");
+  // Тот же смысл, что у "April" в референсе — фильтр по месяцу СРОКА
+  // (deadline), реальный SQL-фильтр на сервере (month=YYYY-MM в
+  // _board_filter_conditions), не декорация. Тоже требует нового
+  // похода за данными, не client-side перекладки.
+  if (month) month.addEventListener("change", async () => {
+    boardView.month = month.value || "";
+    await loadBoard();
+  });
   if (sort) sort.addEventListener("change", () => {
     boardView.sort = sort.value;
     writeSort(boardView.sort);
@@ -629,6 +653,7 @@ function wireColumnButtons(root) {
           offset, limit: 60,
           season_id: boardView.seasonId || undefined,
           title_id: boardView.titleId || undefined,
+          month: boardView.month || undefined,
         });
         // Догруженное уходит в тот же кэш и проходит ту же раскладку —
         // иначе новые карточки встали бы в конец колонки без сортировки
@@ -648,6 +673,109 @@ function wireColumnButtons(root) {
   });
 }
 
+// Диалог создания проекта — «＋ Добавить проект»/«📥 Импорт» в шапке
+// доски. Реальный POST /api/reports (create_report — та же функция,
+// которой уже пользуется голосовой пайплайн бота), не кнопка-пустышка:
+// пользователь явно попросил не подделывать. filePicked (для «Импорт»)
+// — путь, уже выбранный через pickInputFile и потому разрешённый
+// FileScope на Rust-стороне; после успешного создания отчёта файл
+// прикрепляется тем же upload_report_file, что уже умеет drag-drop
+// (см. file-drop.js) — тут только другой источник пути.
+function reportCreateFormHtml(filePicked) {
+  const seasons = seasonsList || [];
+  const fileName = filePicked ? filePicked.split(/[\\/]/).pop() : "";
+  const guessedTitle = fileName ? fileName.replace(/\.[^.]+$/, "") : "";
+  return `
+    <h2>${filePicked ? "📥 Импорт файла" : "＋ Новый проект"}</h2>
+    ${filePicked ? `<div class="sub" style="margin:-8px 0 12px;">Файл: ${esc(fileName)}</div>` : ""}
+    <label class="field-label">Название</label>
+    <input type="text" id="rc-title" class="input" placeholder="Название серии" value="${esc(guessedTitle)}" maxlength="200">
+    <label class="field-label">Сезон</label>
+    <select id="rc-season" class="input">
+      <option value="0">Без сезона</option>
+      ${seasons.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}
+    </select>
+    <label class="field-label">Тайтл</label>
+    <select id="rc-title-id" class="input" disabled>
+      <option value="0">Сначала выберите сезон</option>
+    </select>
+    <label class="field-label">Приоритет</label>
+    <select id="rc-priority" class="input">
+      ${Object.entries(PRIORITY_LABELS).map(([v, l]) => `<option value="${v}" ${v === "normal" ? "selected" : ""}>${esc(l)}</option>`).join("")}
+    </select>
+    <label class="field-label">Срок (необязательно)</label>
+    <input type="date" id="rc-deadline" class="input">
+    <div class="sheet-actions">
+      <button class="btn ghost" data-close>Отмена</button>
+      <button class="btn primary" id="rc-submit">Создать</button>
+    </div>`;
+}
+
+async function openCreateProjectDialog(filePicked) {
+  await ensureSeasonsLoaded();
+  const overlay = openSheet(reportCreateFormHtml(filePicked));
+  const sheet = overlay.querySelector(".sheet");
+  sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+
+  const seasonSel = sheet.querySelector("#rc-season");
+  const titleSel = sheet.querySelector("#rc-title-id");
+  seasonSel.addEventListener("change", async () => {
+    const seasonId = parseInt(seasonSel.value, 10) || 0;
+    if (!seasonId) {
+      titleSel.innerHTML = `<option value="0">Сначала выберите сезон</option>`;
+      titleSel.disabled = true;
+      return;
+    }
+    titleSel.disabled = true;
+    titleSel.innerHTML = `<option value="0">Загрузка…</option>`;
+    const titles = await ensureTitlesLoaded(seasonId);
+    titleSel.innerHTML = `<option value="0">Без привязки к тайтлу</option>${titles.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}`;
+    titleSel.disabled = false;
+  });
+
+  sheet.querySelector("#rc-submit").addEventListener("click", async () => {
+    const title = sheet.querySelector("#rc-title").value.trim();
+    if (!title) { toast("Название обязательно.", "error"); return; }
+    const btn = sheet.querySelector("#rc-submit");
+    btn.disabled = true;
+    btn.textContent = "Создаю…";
+    try {
+      const res = await apiPost("/reports", {
+        title,
+        title_id: parseInt(titleSel.value, 10) || undefined,
+        priority: sheet.querySelector("#rc-priority").value,
+        deadline: sheet.querySelector("#rc-deadline").value || undefined,
+      });
+      if (filePicked) {
+        try {
+          await invoke("upload_report_file", { reportId: res.public_id, filePath: filePicked, initData: state.token || "" });
+        } catch (e) {
+          toast(`Проект создан (${res.public_id}), но файл не прикрепился: ${e}`, "error");
+        }
+      }
+      toast(`Проект создан: ${res.public_id}`);
+      overlay.remove();
+      await loadBoard();
+      loadSidebarStatusCounts();
+    } catch (e) {
+      toast(`Не удалось создать проект: ${e.message}`, "error");
+      btn.disabled = false;
+      btn.textContent = "Создать";
+    }
+  });
+}
+
+function wireBoardHeaderActions(root) {
+  const addBtn = root.querySelector("#board-add-btn");
+  const importBtn = root.querySelector("#board-import-btn");
+  if (addBtn) addBtn.addEventListener("click", () => openCreateProjectDialog(null));
+  if (importBtn) importBtn.addEventListener("click", async () => {
+    const filters = [{ name: "Медиа и документы", extensions: ATTACH_EXTENSIONS }];
+    const picked = await pickInputFile(filters);
+    if (picked) openCreateProjectDialog(picked);
+  });
+}
+
 export async function loadBoard() {
   const root = $("#board-body");
   root.innerHTML = dialogSkeletonHtml(5, "cards");
@@ -656,6 +784,7 @@ export async function loadBoard() {
     lastBoardData = await apiGet("/board", {
       season_id: boardView.seasonId || undefined,
       title_id: boardView.titleId || undefined,
+      month: boardView.month || undefined,
     });
   } catch (e) {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить доску: ${esc(e.message)}</div>`;
