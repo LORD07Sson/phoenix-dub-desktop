@@ -149,7 +149,7 @@ export function timelineHtml(rows, rangeStart, rangeEnd, todayMs) {
       <div class="gantt-row" title="${esc(r.title)}: ${esc(fmt(r.startMs))} → ${esc(fmt(r.endMs))}">
         <div class="gantt-track">
           <div class="gantt-tag${current ? " current" : ""}" style="left:${left.toFixed(2)}%;">${esc(fmt(r.startMs))} ${esc(r.title)}</div>
-          <div class="gantt-bar" style="left:${left.toFixed(2)}%; width:0%; background:var(${r.colorVar});" data-target-width="${width.toFixed(2)}"></div>
+          <div class="gantt-bar" style="left:${left.toFixed(2)}%; width:0%; background:var(${r.colorVar}); color:var(${r.colorVar});" data-target-width="${width.toFixed(2)}"></div>
         </div>
       </div>`;
   }).join("");
