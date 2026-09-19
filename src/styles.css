@@ -117,6 +117,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   --shadow-float: 0 10px 30px -8px rgba(60,30,20,.16), 0 1px 0 rgba(255,255,255,.6) inset;
 }
 
+/* Анимируемый угол для вращающихся конусных обводок карточек (.bcell,
+   .board-card) — без @property браузер не умеет интерполировать угол
+   плавно, только резко перескакивал бы между значениями. */
+@property --angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 html, body { height: 100%; }
@@ -184,7 +193,16 @@ body.drop-armed { outline: 3px dashed var(--fire); outline-offset: -3px; }
   box-shadow: var(--shadow-xs);
   transition: background .15s var(--ease), border-color .15s var(--ease), transform .1s var(--ease), box-shadow .15s var(--ease);
 }
-.btn:hover, .icon-btn:hover { background: var(--surface-3); border-color: var(--fire); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.btn:hover, .icon-btn:hover { background: var(--surface-3); border-color: var(--fire); transform: translateY(-1px); box-shadow: var(--shadow-sm), 0 0 0 1px color-mix(in srgb, var(--fire) 20%, transparent); }
+/* Микро-покачивание содержимого кнопки (эмодзи-иконка/глиф) при hover —
+   сама кнопка держит подъём transform выше, а её первый inline-child
+   вздрагивает отдельно, будто на пружинке, только пока курсор на ней. */
+.btn:hover > :first-child, .icon-btn:hover > :first-child { animation: icon-wiggle .45s cubic-bezier(.34, 1.56, .64, 1); }
+@keyframes icon-wiggle {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  30% { transform: rotate(-12deg) scale(1.15); }
+  60% { transform: rotate(8deg) scale(1.08); }
+}
 /* Нажатие «продавливает» кнопку внутрь, а не просто уменьшает её:
    scale без сброса тени выглядел как отдаление, а не как нажатие. */
 .btn:active, .icon-btn:active {
@@ -609,10 +627,11 @@ body.window-maximized .win-btn .ic-restore { display: block; }
   padding: 18px;
   opacity: 0;
   box-shadow: var(--shadow);
-  animation: bcell-in .45s var(--ease) forwards;
-  transition: transform .2s var(--ease), border-color .2s var(--ease), box-shadow .2s var(--ease);
+  animation: bcell-in .6s cubic-bezier(.34, 1.56, .64, 1) forwards;
+  transition: transform .3s cubic-bezier(.34, 1.56, .64, 1), border-color .2s var(--ease), box-shadow .3s var(--ease);
   position: relative;
   overflow: hidden;
+  --angle: 0deg;
 }
 /* Тонкая световая полоска сверху — та же роль, что у border-top цветной
    колонки канбана: плитка читается как отдельная карточка данных ещё до
@@ -622,13 +641,49 @@ body.window-maximized .win-btn .ic-restore { display: block; }
   position: absolute; inset: 0 0 auto 0; height: 2px;
   background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
   opacity: 0; transition: opacity .2s var(--ease);
+  z-index: 1;
+}
+/* Вращающаяся конусная обводка — тонкое кольцо света бежит по периметру
+   карточки при наведении, а не статичная линия. padding-box/border-box
+   маска вырезает из закрашенного квадрата ровно кольцо в 1.5px, поэтому
+   в состоянии покоя (opacity: 0) она не занимает лишнего места и не
+   мешает обычной border-color. Анимация крутится только пока карточка
+   реально наведена (animation-play-state) — простаивающие плитки не
+   тратят кадры впустую. */
+.bcell::after {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--angle),
+    transparent 0deg, var(--fire) 40deg, var(--gold) 90deg, transparent 140deg,
+    transparent 220deg, var(--sakura) 270deg, var(--fire) 320deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+  animation: spin-angle 3.2s linear infinite;
+  animation-play-state: paused;
+  transition: opacity .25s var(--ease);
+  z-index: 1;
 }
 .bcell:hover {
-  transform: translateY(-3px);
+  transform: translateY(-4px) scale(1.012);
   border-color: var(--fire);
-  box-shadow: var(--shadow-md), 0 0 0 1px color-mix(in srgb, var(--fire) 30%, transparent);
+  /* Слоёная тень вместо одной плоской: внешнее рассеянное свечение
+     (премиальная "глубина"), цветной ambient-glow пятном снизу под
+     карточкой и тонкий внутренний блик сверху (inset), имитирующий
+     отражение света на стеклянной поверхности. */
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 1px color-mix(in srgb, var(--fire) 35%, transparent),
+    0 22px 44px -18px color-mix(in srgb, var(--fire) 45%, transparent),
+    inset 0 1px 0 rgba(255,255,255,.06);
 }
 .bcell:hover::before { opacity: 1; }
+.bcell:hover::after { opacity: 1; animation-play-state: running; }
 /* Плитка-«герой» (сейчас — «Структура загрузки», первая в сетке) —
    тонкий фирменный градиент вместо плоской заливки, чтобы она читалась
    как главная карточка секции, а не просто более широкая версия
@@ -644,10 +699,19 @@ body.window-maximized .win-btn .ic-restore { display: block; }
   border-color: color-mix(in srgb, var(--fire) 30%, var(--line));
 }
 @media (max-width: 640px) { .bcell.wide, .bcell-hero { grid-column: span 1; } }
+/* Spring-появление с лёгким перелётом (overshoot) — карточка выезжает
+   снизу-с-увеличением, проскакивает финальный размер и слегка
+   покачивается обратно, а не просто линейно проявляется. cubic-bezier
+   самой анимации (.34,1.56,.64,1) уже даёт перелёт по времени; here
+   дополнительно перелёт и по масштабу/повороту внутри keyframes, чтобы
+   «пружина» читалась явно, а не только в первый кадр. */
 @keyframes bcell-in {
-  from { opacity: 0; transform: translateY(12px) scale(.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  0%   { opacity: 0; transform: translateY(22px) scale(.9) rotate(-1.2deg); }
+  55%  { opacity: 1; transform: translateY(-3px) scale(1.02) rotate(.4deg); }
+  80%  { transform: translateY(1px) scale(.995) rotate(-.15deg); }
+  100% { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); }
 }
+@keyframes spin-angle { to { --angle: 360deg; } }
 .bcell h3 {
   font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700;
   color: var(--ink-dim); margin: 0 0 12px; display: flex; align-items: center; justify-content: space-between;
@@ -688,11 +752,23 @@ body.window-maximized .win-btn .ic-restore { display: block; }
   width: 34px; height: 34px; border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
   font-size: 16px; flex: none;
-  transition: transform .35s cubic-bezier(.34, 1.56, .64, 1), filter .25s var(--ease);
+  position: relative;
+  transition: transform .4s cubic-bezier(.34, 1.56, .64, 1), filter .25s var(--ease), box-shadow .3s var(--ease);
 }
-/* Плитка целиком реагирует, не только текст — иконка чуть подрастает и
-   покачивается, как активный элемент, а не декорация без интерактива. */
-.bcell:hover .kpi-icon { transform: scale(1.12) rotate(-4deg); filter: brightness(1.2) saturate(1.3); }
+/* Плитка целиком реагирует, не только текст — иконка подрастает,
+   покачивается и обрастает собственным цветным свечением (не только
+   filter:brightness на самой плашке — box-shadow даёт настоящий
+   светящийся ореол вокруг, читаемый даже боковым зрением). */
+.bcell:hover .kpi-icon {
+  transform: scale(1.18) rotate(-6deg) translateY(-1px);
+  filter: brightness(1.25) saturate(1.4);
+  box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 12%, transparent), 0 6px 18px -4px color-mix(in srgb, currentColor 55%, transparent);
+}
+/* currentColor у .kpi-icon по умолчанию наследуется от .ink — задаём
+   явно тем же цветом, что и инлайновая заливка фона (см. Overview.jsx:
+   background: color-mix(currentVar 20%, surface)), чтобы box-shadow
+   светился в тон иконке, а не в нейтральный ink. Цвет прокидывается
+   инлайн-стилем `color` рядом с `background` в Overview.jsx. */
 .kpi-ring-track { stroke: var(--surface-2); }
 .kpi-ring-fill { transition: stroke-dashoffset 1s var(--ease); }
 
@@ -1016,8 +1092,20 @@ body.window-maximized .win-btn .ic-restore { display: block; }
 
 .team-teaser { display: flex; align-items: center; gap: 10px; }
 .team-teaser .stack { display: flex; flex: none; }
-.team-teaser .stack .avatar { border: 2px solid var(--surface); margin-left: -9px; }
+.team-teaser .stack .avatar {
+  border: 2px solid var(--surface); margin-left: -9px; position: relative;
+  transition: transform .25s cubic-bezier(.34, 1.56, .64, 1), box-shadow .25s var(--ease), z-index 0s;
+}
 .team-teaser .stack .avatar:first-child { margin-left: 0; }
+/* Аватар под курсором выходит вперёд из стопки (z-index + подъём +
+   collar свечения), соседние не двигаются — тот же читаемый акцент,
+   что "＋N Add Member" у референса, где стопка живая, не плоская
+   картинка. */
+.team-teaser .stack .avatar:hover {
+  transform: translateY(-3px) scale(1.15);
+  z-index: 5;
+  box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--fire), 0 6px 16px -4px color-mix(in srgb, var(--fire) 60%, transparent);
+}
 .team-teaser .tt { font-size: 13.5px; font-weight: 700; }
 .team-teaser .tsub { font-size: 11.5px; color: var(--ink-dim); }
 .team-teaser .go { margin-left: auto; color: var(--ink-dim); font-size: 14px; flex: none; }
@@ -1303,6 +1391,22 @@ html.net-busy .net-bar i { animation: net-sweep 1.1s var(--ease) .18s infinite; 
   .net-bar i { animation: none !important; transform: none !important; width: 100%; opacity: .5; }
   .skeleton-row { animation: none !important; }
   .board-card-heat { transition: none !important; }
+  /* Весь декоративный слой этой сессии (вращающиеся обводки, spring-
+     появление, дыхание прогресс-баров/today-линии, каскад gantt-строк,
+     wiggle иконок, всплытие аватаров в стопке) — тоже бесконечная или
+     подчёркнуто "живая" анимация не по делу для людей, которым движение
+     физически мешает (vestibular-триггеры), поэтому гасим одним блоком. */
+  .bcell::after, .board-card::after,
+  .board-card, .board-card-progress-track i, .board-card-heat.is-hot,
+  .gantt-today-line, .gantt-row, .gantt-tag, .gantt-bar::before, .gantt-bar::after,
+  .btn > :first-child, .icon-btn > :first-child,
+  .team-teaser .stack .avatar {
+    animation: none !important;
+  }
+  .board-card-progress-track i::after { display: none; }
+  .gantt-row { opacity: 1 !important; transform: none !important; }
+  .gantt-tag { opacity: 1 !important; transform: translateX(-2px) !important; }
+  .gantt-bar::before, .gantt-bar::after { transform: translateY(-50%) scale(1) !important; }
 }
 
 /* Переключение темы — плавный crossfade через View Transitions API
@@ -1954,28 +2058,63 @@ kbd {
 .gantt-body { position: relative; display: flex; flex-direction: column; gap: 8px; }
 .gantt-today-line {
   position: absolute; top: 0; bottom: 0; left: var(--today-pct, 50%);
-  width: 2px; background: var(--fire); box-shadow: 0 0 6px 1px rgba(255, 122, 69, .5);
+  width: 2px; background: var(--fire);
+  box-shadow: 0 0 6px 1px rgba(255, 122, 69, .5);
   z-index: 1;
+  animation: today-pulse 2.4s ease-in-out infinite;
+}
+@keyframes today-pulse {
+  0%, 100% { box-shadow: 0 0 6px 1px rgba(255, 122, 69, .5); }
+  50% { box-shadow: 0 0 12px 3px rgba(255, 122, 69, .8); }
 }
 /* Строка стала выше и без отдельной левой колонки-подписи (у
    референса подпись — часть плавающей плашки над полосой, не левый
-   столбец, см. .gantt-tag ниже) — track теперь на всю ширину. */
-.gantt-row { display: flex; align-items: center; height: 34px; }
+   столбец, см. .gantt-tag ниже) — track теперь на всю ширину.
+   Каждая строка появляется своим заходом — каскад по nth-child, тот же
+   принцип, что у .board-cards, только сдвиг по X, а не по Y (строки
+   и так растут по вертикали одна под другой, лишнее движение вниз
+   только мешало бы читать порядок). */
+.gantt-row { display: flex; align-items: center; height: 34px; opacity: 0; animation: gantt-row-in .5s cubic-bezier(.22,.9,.3,1) forwards; }
+/* +1 к индексу: .gantt-today-line — всегда первый ребёнок .gantt-body
+   перед строками (см. timelineHtml), поэтому первая .gantt-row — это
+   nth-child(2), не (1). */
+.gantt-row:nth-child(2) { animation-delay: .05s; }
+.gantt-row:nth-child(3) { animation-delay: .12s; }
+.gantt-row:nth-child(4) { animation-delay: .19s; }
+.gantt-row:nth-child(5) { animation-delay: .26s; }
+.gantt-row:nth-child(6) { animation-delay: .33s; }
+.gantt-row:nth-child(7) { animation-delay: .4s; }
+@keyframes gantt-row-in {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
 .gantt-track { flex: 1; position: relative; height: 100%; }
 /* Плавающая плашка с датой+названием над тонкой цветной полосой —
    обычно приглушённая, но белая и жирная, если задача пересекает
    «сегодня» (.current) — тот же акцент, что у самой today-линии. */
 .gantt-tag {
-  position: absolute; top: 0; transform: translateX(-2px);
+  position: absolute; top: 0; transform: translateX(-2px) scale(1);
   font-size: 10px; font-weight: 600; color: var(--ink-soft);
   background: var(--surface-3); border: 1px solid var(--line);
   border-radius: 6px; padding: 2px 7px; white-space: nowrap;
   max-width: 160px; overflow: hidden; text-overflow: ellipsis;
   z-index: 2;
+  opacity: 0;
+  transform-origin: left center;
+  animation: gantt-tag-in .5s cubic-bezier(.34, 1.56, .64, 1) forwards;
+  /* Плашка выезжает чуть позже своей строки (родитель уже начал
+     появляться) — почти незаметная, но ощутимая хореография "сначала
+     дорожка, потом подпись", а не всё одним слоем. */
+  animation-delay: .15s;
 }
 .gantt-tag.current {
   background: var(--ink); color: #1a0f0a; font-weight: 800; border-color: var(--ink);
   box-shadow: 0 2px 8px -2px rgba(0,0,0,.5);
+}
+@keyframes gantt-tag-in {
+  0%   { opacity: 0; transform: translateX(-2px) scale(.6); }
+  65%  { opacity: 1; transform: translateX(-2px) scale(1.08); }
+  100% { opacity: 1; transform: translateX(-2px) scale(1); }
 }
 .gantt-bar {
   position: absolute; bottom: 0; height: 6px; min-width: 10px;
@@ -1984,6 +2123,25 @@ kbd {
   transition: width .8s cubic-bezier(.22,.9,.3,1), box-shadow .2s var(--ease), filter .2s var(--ease);
 }
 .gantt-row:hover .gantt-bar { box-shadow: 0 0 10px -1px currentColor, var(--shadow-xs); filter: brightness(1.15); }
+/* Точки-маркеры на концах полосы — начало и срок задачи, как отдельные
+   вехи на дорожке референса, а не просто обрезанный прямоугольник.
+   Правая точка "дозревает" с задержкой ~ в длительность роста самой
+   полосы (playTimelineIntro/width transition .8s) — будто добирается
+   до финиша вслед за заливкой, а не стоит на месте готовой с самого
+   начала. */
+.gantt-bar::before, .gantt-bar::after {
+  content: "";
+  position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%;
+  background: currentColor; transform: translateY(-50%) scale(0);
+  box-shadow: 0 0 0 2px var(--bg-2), 0 0 6px 1px currentColor;
+  animation: gantt-dot-in .4s cubic-bezier(.34, 1.56, .64, 1) forwards;
+}
+.gantt-bar::before { left: -1px; animation-delay: .25s; }
+.gantt-bar::after { right: -1px; animation-delay: .95s; }
+@keyframes gantt-dot-in {
+  from { transform: translateY(-50%) scale(0); }
+  to { transform: translateY(-50%) scale(1); }
+}
 
 .board { display: flex; gap: 14px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; cursor: grab; scroll-behavior: smooth; touch-action: pan-y; }
 .board.panning { cursor: grabbing; }
@@ -2061,16 +2219,47 @@ kbd {
 .board-card {
   position: relative;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md);
-  padding: 11px 12px 11px 15px; cursor: pointer; animation: row-in .22s ease both;
+  padding: 11px 12px 11px 15px; cursor: pointer; animation: board-card-in .5s cubic-bezier(.34, 1.56, .64, 1) both;
   /* Лёгкое цветное свечение статуса поверх обычной тени — --accent-dot
      задаётся инлайном в board.js, поэтому карточка читается одним
      цветовым пятном ещё до текста, как в мини-аппе (.card). */
   box-shadow: var(--shadow), 0 0 0 1px rgba(255,255,255,.02) inset, 0 10px 22px -14px var(--accent-dot, transparent);
-  transition: border-color .15s ease, transform .15s ease, opacity .15s ease, box-shadow .18s ease;
+  transition: border-color .2s ease, transform .25s cubic-bezier(.34, 1.56, .64, 1), opacity .15s ease, box-shadow .25s ease;
   /* pan-y, как и у .board выше: горизонтальный жест пальцем по карточке
      прокручивает доску (см. wireCardDrag), вертикальный — страницу. */
   touch-action: pan-y;
   overflow: hidden;
+  --angle: 0deg;
+}
+/* Тот же приём вращающейся конусной обводки, что у .bcell (см. выше) —
+   карточка доски тоже «живая» на hover, не только плитки обзора. */
+.board-card::after {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--angle),
+    transparent 0deg, var(--accent-dot, var(--fire)) 45deg, transparent 100deg,
+    transparent 260deg, var(--gold) 320deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+  animation: spin-angle 3.2s linear infinite;
+  animation-play-state: paused;
+  transition: opacity .25s var(--ease);
+}
+.board-card:hover::after { opacity: 1; animation-play-state: running; }
+/* Spring-появление карточки доски — тот же язык, что у .bcell, но
+   короче и без вращения (карточки доски мельче и их много одновременно
+   на экране — лёгкий перелёт масштаба и подъём достаточно выразительны
+   и не перегружают колонку при полной перерисовке). */
+@keyframes board-card-in {
+  0%   { opacity: 0; transform: translateY(16px) scale(.92); }
+  60%  { opacity: 1; transform: translateY(-2px) scale(1.015); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* Левая полоска — не просто цвет статуса: её ширина и яркость показывают
@@ -2083,6 +2272,17 @@ kbd {
   width: calc(3px + var(--heat, 0) * 3px);
   opacity: calc(.35 + var(--heat, 0) * .65);
   transition: width .3s var(--ease), opacity .3s var(--ease);
+  box-shadow: 0 0 8px 0 currentColor;
+}
+/* Горящие карточки (heat >= .7, см. .is-hot в board.js) получают
+   собственное дыхание на полоске — тихий, но постоянный сигнал "смотри
+   сюда", не только насыщенность цвета. Спокойные карточки не мигают. */
+.board-card.is-hot .board-card-heat {
+  animation: heat-breathe 1.8s ease-in-out infinite;
+}
+@keyframes heat-breathe {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.5); }
 }
 .board-card.is-overdue { border-color: color-mix(in srgb, var(--s-stop) 40%, var(--line)); }
 
@@ -2098,8 +2298,12 @@ kbd {
 
 .board-card:hover {
   border-color: var(--fire);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md), 0 0 0 1px rgba(255,255,255,.03) inset, 0 14px 28px -14px var(--accent-dot, transparent);
+  transform: translateY(-3px) scale(1.015);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 1px rgba(255,255,255,.04) inset,
+    0 20px 36px -16px var(--accent-dot, transparent),
+    0 4px 14px -6px color-mix(in srgb, var(--fire) 30%, transparent);
 }
 .board-card.dragging { opacity: .35; }
 .board-card-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 5px; }
@@ -2118,11 +2322,37 @@ kbd {
    board.js — детерминированная шкала, не «реальный» процент готовности,
    такого поля у отчёта нет). */
 .board-card-progress-row { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--ink-dim); margin-bottom: 4px; }
-.board-card-progress-track { height: 4px; border-radius: 99px; background: var(--surface-3); overflow: hidden; margin-bottom: 8px; }
+.board-card-progress-track { height: 4px; border-radius: 99px; background: var(--surface-3); overflow: visible; margin-bottom: 8px; position: relative; }
 /* Заливка едет из 0 до реального значения при появлении карточки —
    тот же приём, что у gantt-bar/seg-bar/donut (см. playBoardCardsIntro
-   в board.js), а не статично готовая полоска. */
-.board-card-progress-track i { display: block; height: 100%; border-radius: 99px; width: 0; transition: width .9s cubic-bezier(.22,.9,.3,1); }
+   в board.js), но с "expo-out" easing — она резко срывается с места и
+   плавно тормозит у цели, ощутимо более "дорого", чем линейная. После
+   заливки полоска не замирает: лёгкое дыхание свечения (см.
+   @keyframes bar-breathe) с задержкой = длительности самой заливки,
+   чтобы пульс стартовал ровно в момент, когда бар доехал до места. */
+.board-card-progress-track i {
+  display: block; height: 100%; border-radius: 99px; width: 0; overflow: hidden;
+  transition: width 1.1s cubic-bezier(.16, 1, .3, 1);
+  animation: bar-breathe 2.2s ease-in-out .9s infinite;
+}
+/* Бегущий блик внутри самой заливки — та же "стеклянная" идея, что у
+   .btn.primary::after, только зациклена, а не только на hover: полоска
+   выглядит как живой индикатор процесса, а не закрашенный прямоугольник. */
+.board-card-progress-track i::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.55), transparent 60%);
+  background-size: 200% 100%;
+  animation: bar-sheen 2.6s linear infinite;
+}
+@keyframes bar-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; filter: brightness(1); }
+  50% { box-shadow: 0 0 10px 1px currentColor; filter: brightness(1.25); }
+}
+@keyframes bar-sheen {
+  from { background-position: 140% 0; }
+  to { background-position: -40% 0; }
+}
 
 /* Карточки колонки появляются каскадом (не все разом одним row-in) —
    первые 8 получают нарастающую задержку через nth-child, дальше

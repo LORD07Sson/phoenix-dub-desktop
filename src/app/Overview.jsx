@@ -93,6 +93,11 @@ function Overview(props) {
   const activeDelta = periodDeltaPct(props.trend?.days);
 
   return (
+    <>
+    <div class="page-header">
+      <h1>Обзор</h1>
+      <div class="sub">Нагрузка студии одним взглядом: что в работе, что горит, кто ведёт.</div>
+    </div>
     <div class="bento" ref={donutRoot}>
       <div class="bcell wide bcell-hero" style={{ "animation-delay": "0ms" }}>
         <h3>Структура загрузки</h3>
@@ -104,7 +109,7 @@ function Overview(props) {
       <div class="bcell kpi-cell" style={{ "animation-delay": "60ms" }}>
         <h3>Всего активных</h3>
         <div class="kpi-row">
-          <span class="kpi-icon" style={{ background: "color-mix(in srgb, var(--fire) 20%, var(--surface-2))" }}>📁</span>
+          <span class="kpi-icon" style={{ background: "color-mix(in srgb, var(--fire) 20%, var(--surface-2))", color: "var(--fire)" }}>📁</span>
           <div class="big-num">{activeTotal}</div>
           <Show when={activeDelta !== null}><span innerHTML={deltaPillHtml(activeDelta)} /></Show>
           <Show when={createdSeries}>
@@ -119,7 +124,7 @@ function Overview(props) {
       <div class="bcell kpi-cell" style={{ "animation-delay": "100ms" }}>
         <h3>Просрочено</h3>
         <div class="kpi-row">
-          <span class="kpi-icon" style={{ background: `color-mix(in srgb, var(${d.reports.overdue > 0 ? "--s-stop" : "--s-done"}) 20%, var(--surface-2))` }}>⏰</span>
+          <span class="kpi-icon" style={{ background: `color-mix(in srgb, var(${d.reports.overdue > 0 ? "--s-stop" : "--s-done"}) 20%, var(--surface-2))`, color: `var(${d.reports.overdue > 0 ? "--s-stop" : "--s-done"})` }}>⏰</span>
           <div class={`big-num ${d.reports.overdue > 0 ? "danger" : ""}`}>{d.reports.overdue}</div>
           <Show when={activeTotal > 0}>
             <div class="kpi-ring-wrap" innerHTML={kpiRingHtml(overdueFrac, { colorVar: d.reports.overdue > 0 ? "--s-stop" : "--s-done" })} />
@@ -130,7 +135,7 @@ function Overview(props) {
       <div class="bcell" style={{ "animation-delay": "140ms" }}>
         <h3>Доступ</h3>
         <div class="kpi-row">
-          <span class="kpi-icon" style={{ background: "color-mix(in srgb, var(--s-done) 20%, var(--surface-2))" }}>🔓</span>
+          <span class="kpi-icon" style={{ background: "color-mix(in srgb, var(--s-done) 20%, var(--surface-2))", color: "var(--s-done)" }}>🔓</span>
           <div class="big-num">{d.access.allowed}</div>
         </div>
         <div class="sub">{d.access.pending_requests ? `${d.access.pending_requests} заявок ждут решения` : "заявок нет"}</div>
@@ -138,7 +143,7 @@ function Overview(props) {
       <div class="bcell" style={{ "animation-delay": "180ms" }}>
         <h3>Тикеты в поддержку</h3>
         <div class="kpi-row">
-          <span class="kpi-icon" style={{ background: `color-mix(in srgb, var(${d.open_tickets > 0 ? "--s-work" : "--ink-dim"}) 20%, var(--surface-2))` }}>🎫</span>
+          <span class="kpi-icon" style={{ background: `color-mix(in srgb, var(${d.open_tickets > 0 ? "--s-work" : "--ink-dim"}) 20%, var(--surface-2))`, color: `var(${d.open_tickets > 0 ? "--s-work" : "--ink-dim"})` }}>🎫</span>
           <div class={`big-num ${d.open_tickets > 0 ? "warn" : ""}`}>{d.open_tickets}</div>
         </div>
         <div class="sub">открыто сейчас</div>
@@ -186,6 +191,7 @@ function Overview(props) {
         </div>
       </Show>
     </div>
+    </>
   );
 }
 

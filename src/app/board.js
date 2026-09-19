@@ -171,10 +171,10 @@ function boardCardHtml(c, status) {
   // датам.
   const heat = Math.max(0, Math.min(1, c.heat || 0));
   return `
-    <div class="board-card${c.overdue ? " is-overdue" : ""}${c.stale ? " is-stale" : ""}"
+    <div class="board-card${c.overdue ? " is-overdue" : ""}${c.stale ? " is-stale" : ""}${heat >= .7 ? " is-hot" : ""}"
          data-open="${esc(c.publicId)}" data-id="${esc(c.publicId)}" data-status="${esc(status)}"
          style="--accent-dot: ${accent}; --heat: ${heat.toFixed(3)};">
-      <span class="board-card-heat" style="background:${accent};"></span>
+      <span class="board-card-heat" style="background:${accent}; color:${accent};"></span>
       <div class="board-card-due ${c.overdue ? "overdue" : ""}" title="${esc(c.deadline || "срок не назначен")}">${c.overdue ? "⏰ " : "Срок: "}${esc(deadlineLabel(c))}</div>
       <div class="board-card-top">
         <span class="id">${esc(c.publicId)}</span>
@@ -184,7 +184,7 @@ function boardCardHtml(c, status) {
       ${STATUS_PROGRESS[status] != null ? `<div class="board-card-progress-row">
         <span>Прогресс</span><span>${STATUS_PROGRESS[status]}%</span>
       </div>
-      <div class="board-card-progress-track"><i style="background:${accent};" data-target-width="${STATUS_PROGRESS[status]}"></i></div>` : ""}
+      <div class="board-card-progress-track"><i style="background:${accent}; color:${accent};" data-target-width="${STATUS_PROGRESS[status]}"></i></div>` : ""}
       <div class="foot">
         ${assigneesHtml(c.assignees)}
         ${c.filesCount || c.notesCount ? `<span class="board-card-counts">
