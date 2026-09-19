@@ -1369,6 +1369,21 @@ fn main() {
                         scope.allow_read(p);
                     }
                 }
+                // mpv-плеер (mpv_embed.rs) сидит в отдельном owned-окне,
+                // не в дочернем, поэтому не переезжает и не ресайзится
+                // вместе с главным окном сам по себе — а ResizeObserver
+                // на JS-стороне здесь не поможет: прямоугольник
+                // плейсхолдера ОТНОСИТЕЛЬНО страницы не меняется, когда
+                // двигают/снапают само окно приложения. Досинхронизируем
+                // явно на каждое такое событие; если плеер сейчас не
+                // создан, mpv_resync_bounds тихо ничего не делает.
+                #[cfg(windows)]
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+                    let handle = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        mpv_embed::mpv_resync_bounds(&handle).await;
+                    });
+                }
                 _ => {}
             });
 
