@@ -4,7 +4,7 @@ import { invoke } from "./tauri.js";
 import { state, resetSessionState } from "./state.js";
 import { api, apiGet, armSessionExpiry, ensureMediaToken } from "./api.js";
 import { $ } from "./utils.js";
-import { refreshAll, clearTabDom, restoreLastTab } from "./tabs.js";
+import { refreshAll, clearTabDom, restoreLastTab, loadSidebarStatusCounts } from "./tabs.js";
 import { resetAssignmentsBaseline } from "./notifications.js";
 import { resetFeedBadge } from "./feed-badge.js";
 import { pingPresence } from "./presence.js";
@@ -97,6 +97,7 @@ export function showApp() {
   // и его первый заход всегда уходил впустую.
   pingPresence();
   loadTitlebarTeam();
+  loadSidebarStatusCounts();
 }
 
 async function submitCode() {

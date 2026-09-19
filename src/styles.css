@@ -479,12 +479,34 @@ body.window-maximized .win-btn .ic-restore { display: block; }
   box-shadow: 0 0 8px 1px rgba(255, 122, 69, .5);
 }
 
+/* Вложенные пункты под «Доской» — статусы отчётов с точкой-цветом и
+   числом справа. Перенесено вживую с референса пользователя (Dribbble:
+   Xentra Digital Marketing Dashboard, dribbble.com/shots/27265906) —
+   там под "Projects" раскрыт именно такой список: маленькая точка,
+   подпись, голое число справа (не бейдж с заливкой — у самих пунктов
+   верхнего уровня цветной фон уже есть, второй слой заливки здесь был
+   бы лишним). Отступ слева — та же лесенка, что в файловом дереве. */
+.sidebar-sub { display: flex; flex-direction: column; padding: 2px 0 4px 8px; }
+.sidebar-sub-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px 6px 22px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px; color: var(--ink-soft);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.sidebar-sub-item:hover { background: var(--surface-2); color: var(--ink); }
+.sidebar-sub-item .dot { width: 6px; height: 6px; flex: none; }
+.sidebar-sub-item .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-sub-item .cnt { font-size: 11.5px; font-weight: 700; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
 /* Узкое окно (минимум по tauri.conf.json — 760px) — подписи сжирают
    слишком много ширины у контента, возвращаемся к иконкам-квадратам,
-   тому же поведению, что было раньше у всего сайдбара. */
+   тому же поведению, что было раньше у всего сайдбара. Раскрытый
+   список статусов на такой ширине тем более не поместится читаемо. */
 @media (max-width: 860px) {
   .sidebar { width: 60px; align-items: center; padding: 12px 8px; }
-  .sidebar-brand-txt, .sidebar-group-label, .tab-btn .tab-lbl { display: none; }
+  .sidebar-brand-txt, .sidebar-group-label, .tab-btn .tab-lbl, .sidebar-sub { display: none; }
   .sidebar-brand { padding: 4px 0 12px; justify-content: center; }
   .tab-btn { width: 44px; height: 44px; padding: 0; justify-content: center; }
 }
