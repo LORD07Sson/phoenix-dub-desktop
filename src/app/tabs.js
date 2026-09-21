@@ -45,10 +45,15 @@ export function switchTab(name) {
   try { localStorage.setItem(LAST_TAB_KEY, name); } catch (_) { /* не критично */ }
   $all(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
   $all(".tab-panel").forEach(p => p.classList.toggle("active", p.dataset.panel === name));
-  // Переключение вкладки — не await: ловим падение сами, чтобы
-  // неожиданная ошибка рендера не уходила в консоль необработанным
-  // reject'ом.
-  loadActiveTab().catch(e => toast(`Не удалось открыть вкладку: ${e.message}`, "error"));
+  // force=true — каждый клик по вкладке идёт за свежими данными, а не
+  // отдаёт то, что было загружено в прошлый раз (раньше loadedTabs
+  // молча глушил повторную загрузку, и приходилось жать «Обновить»
+  // руками, чтобы, например, «Обзор» показал только что изменённый
+  // статус отчёта). Цена — один лишний запрос на каждый клик по уже
+  // открытой вкладке, для дашборд-вкладок студии (Обзор/Доска/Тайтлы/
+  // Аналитика/Сервисы/Команда) это то, чего и просили: не кэш, а
+  // текущее состояние.
+  loadActiveTab(true).catch(e => toast(`Не удалось открыть вкладку: ${e.message}`, "error"));
 }
 $all(".tab-btn").forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 

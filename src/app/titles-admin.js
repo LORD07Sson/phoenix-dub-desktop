@@ -167,6 +167,10 @@ async function openSeasonDetailAdmin(seasonId) {
           <input id="title-new" placeholder="Название тайтла…">
           <button class="btn" id="title-add">+</button>
         </div>
+        <div class="add-row" style="margin-top:6px;">
+          <input id="title-shiki" placeholder="…или ссылка на Shikimori (shikimori.one/animes/…)">
+          <button class="btn" id="title-shiki-add">🔗 Добавить</button>
+        </div>
       </div>
       <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
     `;
@@ -184,6 +188,31 @@ async function openSeasonDetailAdmin(seasonId) {
         toast("Тайтл создан.");
         await render();
       } catch (e) { toast(`Не удалось создать: ${e.message}`, "error"); }
+    });
+    // Создание в один шаг по ссылке на Shikimori — тот же create_title,
+    // что и у обычной кнопки «+», плюс сразу постер и персонажи (см.
+    // /api/seasons/{id}/titles/from-shikimori на сервере: parse id из
+    // ссылки → fetch_shikimori_by_id → create_title → fetch_title_characters).
+    // Двухшаговый путь (создать по имени → «🔍 Найти» внутри карточки
+    // тайтла) остаётся — годится, если по ссылке тайтл не нашёлся или
+    // нужен именно AniList.
+    sheet.querySelector("#title-shiki-add").addEventListener("click", async () => {
+      const input = sheet.querySelector("#title-shiki");
+      const url = input.value.trim();
+      if (!url) return;
+      const btn = sheet.querySelector("#title-shiki-add");
+      btn.disabled = true;
+      btn.textContent = "Добавляю…";
+      try {
+        const res = await apiPost(`/seasons/${seasonId}/titles/from-shikimori`, { url });
+        input.value = "";
+        toast(`Тайтл создан: ${res.name}${res.characters_count ? ` · ${res.characters_count} персонажей` : ""}`);
+        await render();
+      } catch (e) {
+        toast(`Не удалось добавить по ссылке: ${e.message}`, "error");
+        btn.disabled = false;
+        btn.textContent = "🔗 Добавить";
+      }
     });
   }
 
