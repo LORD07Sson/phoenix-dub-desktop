@@ -87,7 +87,7 @@ tauri-plugin-opener = "2.5.5"
 # отдаёт HWND именно из этой версии крейта, и нужно принимать его без
 # конвертаций через raw isize.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     # DwmSetWindowAttribute — скругление углов и цвет рамки окна под
     # Windows 11 (main.rs: apply_windows_11_chrome). Системный заголовок
