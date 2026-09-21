@@ -32,6 +32,7 @@ function periodDeltaPct(days) {
   return Math.round(((secondHalf - firstHalf) / firstHalf) * 100);
 }
 import { avatarHtml, loadAvatars } from "./profile.js";
+import { openReportDetail } from "./report-detail.js";
 
 function TrendChart(props) {
   return (
@@ -92,6 +93,16 @@ function Overview(props) {
   const overdueFrac = activeTotal ? d.reports.overdue / activeTotal : 0;
   const activeDelta = periodDeltaPct(props.trend?.days);
 
+  // «Требует внимания» — отчёты со статусом stuck (3+ дня без смены
+  // статуса, см. _attach_stuck на сервере), уже вложенные в борд
+  // /api/dashboard/phoenix отдельным запросом ниже: тот же смысл, что
+  // и раздел на Xentra-референсе, только на реальных отчётах, не на
+  // выдуманных карточках.
+  const stuckReports = (props.dash?.board?.columns || [])
+    .flatMap(c => c.reports || [])
+    .filter(r => r.stuck)
+    .slice(0, 6);
+
   return (
     <>
     <div class="page-header">
@@ -149,6 +160,21 @@ function Overview(props) {
         <div class="sub">открыто сейчас</div>
       </div>
       <TrendChart trend={props.trend} />
+      <Show when={stuckReports.length}>
+        <div class="bcell wide" style={{ "animation-delay": "210ms" }}>
+          <h3>Требует внимания</h3>
+          <div class="mini-list">
+            <For each={stuckReports}>
+              {r => (
+                <div class="mini-row" style={{ cursor: "pointer" }} onClick={() => openReportDetail(r.public_id)}>
+                  <span class="name">{r.title}</span>
+                  <span class="val" style={{ color: "var(--s-stop)" }}>{r.status_label} · без движения</span>
+                </div>
+              )}
+            </For>
+          </div>
+        </div>
+      </Show>
       <div class="bcell wide" style={{ "animation-delay": "220ms" }}>
         <h3>Топ исполнителей</h3>
         <div class="mini-list">
@@ -242,13 +268,19 @@ export async function loadOverview() {
   const root = $("#overview-body");
   if (disposePrev) { disposePrev(); disposePrev = null; }
   root.innerHTML = `<div class="skeleton-wrap"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>`;
-  let d, trend;
+  let d, trend, dash;
   try {
-    [d, trend] = await Promise.all([apiGet("/overview"), apiGet("/trend").catch(() => null)]);
+    [d, trend, dash] = await Promise.all([
+      apiGet("/overview"),
+      apiGet("/trend").catch(() => null),
+      // Не критично для остального Обзора — если недоступно, просто не
+      // покажем «Требует внимания», а не завалим всю вкладку.
+      apiGet("/dashboard/phoenix").catch(() => null),
+    ]);
   } catch (e) {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить обзор: ${esc(e.message)}</div>`;
     return false;
   }
   root.innerHTML = "";
-  disposePrev = render(() => <Overview data={d} trend={trend} />, root);
+  disposePrev = render(() => <Overview data={d} trend={trend} dash={dash} />, root);
 }

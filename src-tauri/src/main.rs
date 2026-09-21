@@ -656,12 +656,17 @@ async fn mpv_set_bounds(app: tauri::AppHandle, x: i32, y: i32, width: i32, heigh
 }
 
 #[tauri::command(async)]
-async fn mpv_load(path: String) -> Result<(), String> {
+async fn mpv_load(app: tauri::AppHandle, path: String) -> Result<(), String> {
     #[cfg(windows)]
-    let result = mpv_embed::mpv_load(&path).await;
+    let result = {
+        match app.state::<file_scope::FileScope>().check_read(&path) {
+            Ok(checked) => mpv_embed::mpv_load(&checked.to_string_lossy()).await,
+            Err(e) => Err(e),
+        }
+    };
     #[cfg(not(windows))]
     let result = {
-        let _ = path;
+        let _ = (app, path);
         Err(MPV_WINDOWS_ONLY.to_string())
     };
     log_result("mpv_load", result)
@@ -1222,8 +1227,8 @@ fn main() {
                 .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview))
                 .max_file_size(5_000_000)
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
-                .level(log::LevelFilter::Info)
-                .level_for("phoenix_dub_desktop", log::LevelFilter::Debug)
+                .level(log::LevelFilter::Off)
+                .level_for("phoenix_dub_desktop", log::LevelFilter::Off)
                 .build(),
         )
         .plugin(tauri_plugin_shell::init())
