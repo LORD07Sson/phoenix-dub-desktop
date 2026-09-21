@@ -14,6 +14,11 @@ import { $, esc } from "./utils.js";
 import { segmentedBarHtml, segBadgesHtml, segLegendHtml, playSegBarIntro, deltaPillHtml, kpiRingHtml, playRingIntro } from "./charts.js";
 
 const WORKLOAD_COLOR_VAR = { draft: "--s-draft", working: "--s-work", review: "--s-review", completed: "--s-done" };
+// Сервер отдаёт подписи колонок по-английски (Pending/In Progress/...,
+// см. _PHOENIX_BOARD_GROUPS в server.py) — тот же смысл, что и у
+// референса, но остальной интерфейс студии целиком на русском (та же
+// подмена, что уже сделана для превью-канбана на Обзоре).
+const WORKLOAD_LABELS = { draft: "Черновики", working: "В работе", review: "На проверке", completed: "Завершено" };
 
 function periodDeltaPct(current, prior) {
   if (!prior) return current > 0 ? null : 0;
@@ -22,7 +27,7 @@ function periodDeltaPct(current, prior) {
 
 function analyticsHtml(d) {
   const workload = (d.workload || []).map(w => ({
-    label: w.label, count: w.total, colorVar: WORKLOAD_COLOR_VAR[w.key] || "--s-draft",
+    label: WORKLOAD_LABELS[w.key] || w.label, count: w.total, colorVar: WORKLOAD_COLOR_VAR[w.key] || "--s-draft",
   }));
   const completedDelta = periodDeltaPct(d.completed_30d, d.completed_prior_30d);
   const onTimeFrac = d.on_time_rate === null || d.on_time_rate === undefined ? null : d.on_time_rate / 100;

@@ -650,7 +650,9 @@ async function openTelegramProfile(username) {
   }
 }
 
-async function openUserProfile(telegramId) {
+// Экспортирована для вкладки «Команда» (team.js) — та же карточка
+// коллеги, что уже открывается кликом по строке в openTeamSheet.
+export async function openUserProfile(telegramId) {
   const overlay = openSheet(dialogSkeletonHtml(6), "wide");
   let d;
   try {

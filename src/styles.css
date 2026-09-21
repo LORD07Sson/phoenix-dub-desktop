@@ -620,6 +620,23 @@ body.window-maximized .win-btn .ic-restore { display: block; }
   gap: 14px;
   margin-bottom: 16px;
 }
+
+/* Превью-канбан на Обзоре — компактная витрина «Доски» (карточки те
+   же .board-card, что и там, см. Overview.jsx: boardCardHtml), только
+   уже без drag&drop — сама работа с переносом остаётся на «Доске». */
+.preview-kanban-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.preview-kanban-col-head {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 8px;
+}
+.preview-kanban-col-head .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.preview-kanban-col-head b { font-weight: 700; }
+.preview-kanban-col-head span:last-child { color: var(--ink-soft); }
+.preview-kanban-cards { display: flex; flex-direction: column; gap: 8px; }
+.preview-kanban-cards .board-card { cursor: pointer; }
 .bcell {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -699,6 +716,10 @@ body.window-maximized .win-btn .ic-restore { display: block; }
   border-color: color-mix(in srgb, var(--fire) 30%, var(--line));
 }
 @media (max-width: 640px) { .bcell.wide, .bcell-hero { grid-column: span 1; } }
+
+/* На всю ширину бенто — для карточек, которым тесно даже в span 2
+   (превью-канбан на Обзоре: 4 колонки доски внутри одной клетки). */
+.bcell.full { grid-column: 1 / -1; }
 /* Spring-появление с лёгким перелётом (overshoot) — карточка выезжает
    снизу-с-увеличением, проскакивает финальный размер и слегка
    покачивается обратно, а не просто линейно проявляется. cubic-bezier
@@ -2029,7 +2050,11 @@ kbd {
 .board-search:focus-within { border-color: var(--fire); box-shadow: 0 0 0 3px var(--accent-soft); }
 .board-search span { color: var(--ink-dim); font-size: 12px; }
 .board-search input {
-  border: none; background: transparent; outline: none; width: 190px;
+  border: none; background: transparent; outline: none;
+  /* min-width вместо фиксированной width — иначе на узком окне сумма
+     фиксированных ширин (поиск + 3 select'а) могла вытолкнуть
+     .board-summary за правый край раньше, чем сработает flex-wrap. */
+  width: 190px; min-width: 90px; flex: 1 1 90px;
   font-size: 12.5px; color: var(--ink);
 }
 .board-search input::-webkit-search-cancel-button { filter: grayscale(1) opacity(.5); cursor: pointer; }
@@ -2039,7 +2064,7 @@ kbd {
   border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer;
 }
 .board-sort:hover { border-color: var(--fire); }
-.board-summary { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.board-summary { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; flex-shrink: 0; min-width: 0; max-width: 100%; }
 .board-sum {
   font-size: 11.5px; font-weight: 600; padding: 4px 9px; border-radius: 99px;
   background: var(--surface-2); color: var(--ink-soft);
@@ -2053,7 +2078,25 @@ kbd {
    задач вдоль оси дат, вертикальная линия «сегодня». Диапазоны —
    реальные created_at/deadline (см. timelineHtml в charts.js и
    timelineSectionHtml в board.js), не выдуманные. */
-.board-timeline-cell { margin-bottom: 14px; }
+/* Ряд из 4 stat-карточек над тулбаром доски — перенос референса
+   (Xentra) на реальные счётчики по статусам, см. board.js: boardStats. */
+.board-stats-row { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; }
+@media (max-width: 900px) { .board-stats-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Таймлайн + «Производительность» в одном ряду 1.7fr/1fr — та же
+   пропорция, что у "Project Timeline"/"Projects Performance" в
+   референсе. .single — когда таймлайну нечего показать (нет активных
+   серий с обоими датами) и карточка производительности одна на всю
+   ширину. */
+.board-top-row { display: grid; grid-template-columns: 1.7fr 1fr; gap: 14px; margin-bottom: 14px; align-items: start; }
+/* Без таймлайна (нет активных серий с обоими датами) карточка
+   производительности остаётся одна — растягивать её на всю ширину
+   доски смысла нет (внутри всего число+полоска+легенда, пустой
+   правый край выглядел как баг), поэтому трек сужен до размера
+   обычной карточки. */
+.board-top-row.single { grid-template-columns: minmax(0, 420px); }
+.board-top-row .board-timeline-cell, .board-performance-cell { margin-bottom: 0; }
+@media (max-width: 900px) { .board-top-row { grid-template-columns: 1fr; } }
 .gantt-axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--ink-dim); margin-bottom: 6px; }
 .gantt-body { position: relative; display: flex; flex-direction: column; gap: 8px; }
 .gantt-today-line {
@@ -2482,6 +2525,69 @@ kbd {
 .team-row .stat { font-size: 11.5px; color: var(--ink-soft); text-align: right; flex: none; }
 .team-row .online-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--s-done); flex: none; }
 .team-row .online-dot.off { background: var(--ink-dim); }
+
+/* Точка-статус с подсветкой (вкладка «Сервисы») — тот же приём
+   dotRing, что у карточек «Client Projects» на Xentra-референсе:
+   цветное свечение вокруг точки, а не просто точка сама по себе. */
+.svc-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.svc-pill {
+  font-size: 10.5px; font-weight: 800; letter-spacing: .02em;
+  padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+}
+
+/* Сетка карточек сервисов — вместо одного длинного узкого списка
+   (было .team-list) заполняет всю ширину панели «Процессы и
+   инфраструктура»: карточка на процесс, не строка списка. */
+.svc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+.svc-card {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-md);
+  padding: 12px;
+}
+.svc-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.svc-card-name { font-size: 13px; font-weight: 700; }
+.svc-card-desc { font-size: 11.5px; color: var(--ink-dim); margin-top: 2px; }
+.svc-card-detail { font-size: 11.5px; color: var(--ink-soft); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
+
+/* Список + история/инциденты рядом, 1.6fr/1fr — та же пропорция, что
+   у Timeline/Performance на «Доске» (.board-top-row). */
+.svc-bottom-row { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; align-items: start; }
+@media (max-width: 900px) { .svc-bottom-row { grid-template-columns: 1fr; } }
+
+/* Полоса 30-дневного аптайма — один блок на календарный день,
+   см. services.js: historyStripHtml. "Нет данных" (--ink-dim, тусклый) —
+   честный статус для дней до включения мониторинга, не зелёная
+   заливка наугад. */
+.svc-history-strip { display: flex; gap: 3px; }
+.svc-history-bar { flex: 1; height: 22px; border-radius: 2px; min-width: 3px; }
+.svc-history-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-dim); margin-top: 8px; }
+
+/* Сетка карточек команды (вкладка «Команда», team.js) — перенос
+   референса на реальные /api/team данные: без выдуманных тегов
+   специализации, только роль и настоящие счётчики. */
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+.team-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  padding: 20px 16px; text-align: center; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.team-card:hover { background: var(--surface-2); border-color: color-mix(in srgb, var(--fire) 30%, var(--line)); }
+.team-card .avatar.xl { margin: 0 auto 10px; }
+.team-card-name { font-size: 14px; font-weight: 700; }
+.team-card-role { font-size: 12px; color: var(--ink-dim); margin-top: 2px; margin-bottom: 14px; }
+.team-card-foot {
+  display: flex; flex-direction: column; gap: 6px; align-items: center;
+  padding-top: 12px; border-top: 1px solid var(--line-soft);
+  font-size: 11px; color: var(--ink-soft);
+}
+.team-card-status { display: flex; align-items: center; gap: 5px; }
 
 .dev-pill-toggle { display: flex; align-items: center; gap: 8px; }
 
