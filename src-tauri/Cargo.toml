@@ -103,7 +103,7 @@ windows = { version = "0.61", features = [
 # "webview2-com-sys" -> "windows 0.61.3"), чтобы ICoreWebView2Settings3
 # и windows::core::Interface были из одного и того же экземпляра крейта
 # windows-core, а не двух несовместимых версий одновременно.
-webview2-com = "0.38"
+webview2-com = "0.39"
 
 [profile.release]
 panic = "abort"
