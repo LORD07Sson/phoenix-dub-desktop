@@ -11,6 +11,7 @@ import { loadFeed } from "./feed.js";
 import { loadProfile } from "./profile.js";
 import { loadAnalytics } from "./analytics.js";
 import { loadServices } from "./services.js";
+import { loadTeam } from "./team.js";
 import { clearDirectoryCache } from "./titles-admin.js";
 
 // Загрузчики возвращают false, если данные взять не удалось (сеть/сервер)
@@ -23,12 +24,13 @@ const LOADERS = {
   feed: loadFeed,
   analytics: loadAnalytics,
   services: loadServices,
+  team: loadTeam,
   profile: loadProfile,
 };
 
 // Контейнеры вкладок — чистятся при выходе из аккаунта, чтобы данные
 // предыдущего пользователя не остались висеть в DOM.
-const TAB_BODIES = ["#overview-body", "#board-body", "#titles-body", "#feed-body", "#analytics-body", "#services-body", "#profile-body", "#reports-body"];
+const TAB_BODIES = ["#overview-body", "#board-body", "#titles-body", "#feed-body", "#analytics-body", "#services-body", "#team-body", "#profile-body", "#reports-body"];
 
 // Последняя открытая вкладка переживает не только смену пользователя
 // (см. комментарий у state.activeTab в state.js — это настройка

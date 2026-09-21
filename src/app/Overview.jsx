@@ -33,6 +33,114 @@ function periodDeltaPct(days) {
 }
 import { avatarHtml, loadAvatars } from "./profile.js";
 import { openReportDetail } from "./report-detail.js";
+import { boardCardHtml } from "./board.js";
+import { timelineHtml, playTimelineIntro } from "./charts.js";
+import { switchTab } from "./tabs.js";
+
+// Русские подписи колонок для превью-канбана — у /api/dashboard/phoenix
+// они приходят по-английски (Pending/In Progress/...), тем же смыслом,
+// что и у референса, но остальной интерфейс студии целиком на русском
+// (см. PRIORITY_LABELS/STATUS_DOT_CLASS в utils.js) — переопределяем
+// только подпись, сама группировка (draft/working/review+revision/
+// completed) остаётся серверной.
+const PREVIEW_COLUMN_LABELS = { draft: "Черновики", working: "В работе", review: "На проверке", completed: "Завершено" };
+const PREVIEW_CARDS_PER_COLUMN = 2;
+const PREVIEW_TIMELINE_MAX_ROWS = 6;
+
+function todayStr() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Превращает отчёт из /api/dashboard/phoenix в форму, которую ждёт
+// boardCardHtml (та же карточка, что рисует настоящая «Доска» —
+// board.js). daysLeft/overdue считаем тут же, как их считал бы
+// board_layout на стороне Rust: без выдуманных полей, только
+// deadline/status, которые и так пришли с сервера.
+function toBoardCardShape(r) {
+  const today = todayStr();
+  const hasDeadline = !!r.deadline;
+  const daysLeft = hasDeadline
+    ? Math.round((Date.parse(r.deadline) - Date.parse(today)) / 86400000)
+    : null;
+  const overdue = hasDeadline && r.deadline < today && r.status !== "completed" && r.status !== "cancelled";
+  return {
+    publicId: r.public_id,
+    deadline: r.deadline,
+    daysLeft,
+    overdue,
+    priority: r.priority,
+    title: r.title,
+    assignees: r.assignees || [],
+    filesCount: r.files_count || 0,
+    notesCount: r.notes_count || 0,
+    stale: false,
+    unassigned: !(r.assignees && r.assignees.length),
+    heat: 0,
+  };
+}
+
+function KanbanPreview(props) {
+  const columns = props.dash?.board?.columns || [];
+  let root;
+  onMount(() => { playTimelineIntro(root); });
+
+  const ganttRows = columns
+    .filter(col => col.key !== "completed")
+    .flatMap(col => col.reports || [])
+    .filter(r => r.created_at && r.deadline && Date.parse(r.deadline) > Date.parse(r.created_at))
+    .map(r => ({
+      title: r.title,
+      colorVar: STATUS_COLOR_VAR[r.status] || "--s-draft",
+      startMs: Date.parse(r.created_at),
+      endMs: Date.parse(r.deadline),
+    }))
+    .sort((a, b) => a.endMs - b.endMs)
+    .slice(0, PREVIEW_TIMELINE_MAX_ROWS);
+
+  const now = Date.now();
+  const rangeStart = ganttRows.length ? Math.min(...ganttRows.map(r => r.startMs)) : now;
+  const rangeEnd = ganttRows.length ? Math.max(now, ...ganttRows.map(r => r.endMs)) : now;
+
+  return (
+    <div class="bcell wide" style={{ "animation-delay": "230ms" }} ref={root}>
+      <h3>Проекты</h3>
+      <Show when={ganttRows.length}>
+        <div style={{ "margin-bottom": "14px" }} innerHTML={timelineHtml(ganttRows, rangeStart, rangeEnd, now)} />
+      </Show>
+      <div class="preview-kanban-grid">
+        <For each={columns}>
+          {col => (
+            <div class="preview-kanban-col">
+              <div class="preview-kanban-col-head">
+                <span class="dot" style={{ background: `var(${STATUS_COLOR_VAR[col.key] || "--s-draft"})` }} />
+                <b>{col.total}</b><span>{PREVIEW_COLUMN_LABELS[col.key] || col.label}</span>
+              </div>
+              <div
+                class="preview-kanban-cards"
+                onClick={e => {
+                  const cardEl = e.target.closest("[data-open]");
+                  if (cardEl) openReportDetail(cardEl.dataset.open);
+                }}
+                innerHTML={(col.reports || []).slice(0, PREVIEW_CARDS_PER_COLUMN)
+                  .map(r => boardCardHtml(toBoardCardShape(r), r.status)).join("")
+                  || `<div class="board-col-empty">пусто</div>`}
+              />
+            </div>
+          )}
+        </For>
+      </div>
+      <button
+        class="btn"
+        style={{ "margin-top": "8px", width: "100%", "justify-content": "center" }}
+        onClick={() => switchTab("board")}
+      >
+        🗂 Открыть доску →
+      </button>
+    </div>
+  );
+}
 
 function TrendChart(props) {
   return (
@@ -174,6 +282,9 @@ function Overview(props) {
             </For>
           </div>
         </div>
+      </Show>
+      <Show when={props.dash?.board?.columns?.length}>
+        <KanbanPreview dash={props.dash} />
       </Show>
       <div class="bcell wide" style={{ "animation-delay": "220ms" }}>
         <h3>Топ исполнителей</h3>

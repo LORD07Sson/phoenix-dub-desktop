@@ -24,7 +24,7 @@
 import { apiGet, apiPost, toast, dialogSkeletonHtml, openSheet } from "./api.js";
 import { invoke, pickInputFile } from "./tauri.js";
 import { $, esc, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS } from "./utils.js";
-import { timelineHtml, playTimelineIntro } from "./charts.js";
+import { timelineHtml, playTimelineIntro, segmentedBarHtml, segBadgesHtml, segLegendHtml, playSegBarIntro } from "./charts.js";
 import { assigneesHtml } from "./reports.js";
 import { openReportDetail } from "./report-detail.js";
 import { state } from "./state.js";
@@ -162,7 +162,9 @@ function deadlineLabel(c) {
   return c.deadline;
 }
 
-function boardCardHtml(c, status) {
+// Экспортирована для превью-канбана на Обзоре (Overview.jsx) — та же
+// разметка карточки, что и здесь, без второй копии кода.
+export function boardCardHtml(c, status) {
   const accent = `var(${STATUS_COLOR_VAR[status] || "--s-draft"})`;
   const prColor = `var(${PRIORITY_COLOR_VAR[c.priority] || "--ink-soft"})`;
   // Полоска слева — не просто цвет статуса: её насыщенность показывает
@@ -495,6 +497,62 @@ function columnHtml(col, collapsed) {
     </div>`;
 }
 
+// Ряд stat-карточек и «Производительность» над доской — перенос
+// референса пользователя (Dribbble: Xentra Digital Marketing
+// Dashboard) один в один по вёрстке, но на реальных данных: те же 4
+// группы, что уже использует /api/dashboard/phoenix (draft→Черновики,
+// working→В работе, review+revision→На проверке, completed→
+// Завершено), посчитанные здесь же из layout.columns — уже
+// загруженных для самой доски, без второго похода на сервер. Без
+// дельты «+N% от прошлого месяца»: сравнивать не с чем, выдумывать
+// процент — нет.
+const BOARD_STAT_GROUPS = [
+  { key: "draft", label: "Черновики", statuses: ["draft"], icon: "📁" },
+  { key: "working", label: "В работе", statuses: ["working"], icon: "⏳" },
+  { key: "review", label: "На проверке", statuses: ["review", "revision"], icon: "🔍" },
+  { key: "completed", label: "Завершено", statuses: ["completed"], icon: "✅" },
+];
+
+function boardStats(layout) {
+  const totals = {};
+  for (const col of layout.columns) totals[col.status] = col.total || 0;
+  return BOARD_STAT_GROUPS.map(g => ({
+    ...g,
+    count: g.statuses.reduce((sum, st) => sum + (totals[st] || 0), 0),
+  }));
+}
+
+function statCardsHtml(stats) {
+  return `
+    <div class="bento board-stats-row">
+      ${stats.map((s, i) => {
+        const colorVar = STATUS_COLOR_VAR[s.statuses[0]] || "--s-draft";
+        return `
+        <div class="bcell" style="animation-delay:${i * 40}ms;">
+          <h3>${esc(s.label)}</h3>
+          <div class="kpi-row">
+            <span class="kpi-icon" style="background:color-mix(in srgb, var(${colorVar}) 20%, var(--surface-2)); color:var(${colorVar});">${s.icon}</span>
+            <div class="big-num">${s.count}</div>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
+function performanceHtml(stats) {
+  const total = stats.reduce((sum, s) => sum + s.count, 0);
+  const segments = stats.map(s => ({ label: s.label, count: s.count, colorVar: STATUS_COLOR_VAR[s.statuses[0]] || "--s-draft" }));
+  return `
+    <div class="bcell board-performance-cell">
+      <h3>Производительность</h3>
+      <div class="big-num" style="font-size:30px;">${total}</div>
+      <div class="sub" style="margin:-4px 0 12px;">Активных серий всего</div>
+      <div class="seg-badges">${segBadgesHtml(segments)}</div>
+      ${segmentedBarHtml(segments)}
+      <div class="seg-legend">${segLegendHtml(segments)}</div>
+    </div>`;
+}
+
 // Гант-таймлайн над доской — перенос референса пользователя: там
 // «Project Timeline» показывает активные задачи вдоль оси дат. Строки —
 // только незавершённые карточки (draft/working/review/revision) с
@@ -530,7 +588,7 @@ function timelineSectionHtml(layout) {
   const rangeStart = Math.min(...shown.map(r => r.startMs));
   const rangeEnd = Math.max(now, ...shown.map(r => r.endMs));
   return `
-    <div class="bcell wide board-timeline-cell">
+    <div class="bcell board-timeline-cell">
       <h3>Таймлайн активных серий</h3>
       ${timelineHtml(shown, rangeStart, rangeEnd, now)}
     </div>`;
@@ -555,6 +613,8 @@ async function renderBoard(root) {
     return;
   }
   const collapsed = readCollapsed();
+  const stats = boardStats(layout);
+  const timelineCell = timelineSectionHtml(layout);
   root.innerHTML = `
     <div class="page-header">
       <div>
@@ -567,8 +627,12 @@ async function renderBoard(root) {
         <button class="btn primary" id="board-add-btn">＋ Добавить проект</button>
       </div>
     </div>
+    ${statCardsHtml(stats)}
     ${boardToolbarHtml(layout)}
-    ${timelineSectionHtml(layout)}
+    <div class="board-top-row${timelineCell ? "" : " single"}">
+      ${timelineCell}
+      ${performanceHtml(stats)}
+    </div>
     <div class="board">${layout.columns.map(col => columnHtml(col, collapsed)).join("")}</div>
   `;
   wireBoardCards(root);
@@ -577,6 +641,7 @@ async function renderBoard(root) {
   wireColumnButtons(root);
   wireBoardHeaderActions(root);
   playTimelineIntro(root);
+  playSegBarIntro(root);
   playBoardCardsIntro(root);
 }
 
