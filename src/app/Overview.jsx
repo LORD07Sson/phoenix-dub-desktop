@@ -197,7 +197,13 @@ function Overview(props) {
   // Спарклайн под «Всего активных» — тренд входящих (created) за то же
   // окно, что и большой график динамики ниже: показывает, разгоняется
   // или затихает поток новых серий, не только текущий снимок числа.
-  const createdSeries = props.trend?.days?.map(x => x.created) || null;
+  // .some(v => v > 0) — спарклайн из одних нулей рисовался плоской
+  // линией фиксированной ширины (100px), которая при малом количестве
+  // отчётов не помещалась в узкую плитку и вылезала за её правый
+  // край поверх соседней карточки: график "нулевого тренда" всё
+  // равно бессмысленен, честнее просто не показывать его.
+  const createdSeriesRaw = props.trend?.days?.map(x => x.created) || null;
+  const createdSeries = createdSeriesRaw && createdSeriesRaw.some(v => v > 0) ? createdSeriesRaw : null;
   const overdueFrac = activeTotal ? d.reports.overdue / activeTotal : 0;
   const activeDelta = periodDeltaPct(props.trend?.days);
 

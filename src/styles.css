@@ -759,7 +759,7 @@ body.window-maximized .win-btn .ic-restore { display: block; }
    разным углам вместо соседства — спарклайн/кольцо теперь прижимаются
    вправо собственным margin-left:auto. */
 .kpi-row { display: flex; align-items: center; gap: 10px; }
-.kpi-spark { flex: none; opacity: .9; margin-left: auto; }
+.kpi-spark { flex: none; opacity: .9; margin-left: auto; max-width: 100px; overflow: hidden; }
 .sparkline { display: block; overflow: visible; }
 .sparkline-area { opacity: .16; }
 .sparkline-line { stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
