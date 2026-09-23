@@ -4073,7 +4073,8 @@ body.focus-mode .report-detail-overlay .sheet {
 .ms-msg.grouped { margin-top: 2px; }
 .ms-msg.in { align-self: flex-start; }
 .ms-msg.out { align-self: flex-end; flex-direction: row-reverse; }
-.ms-av { width: 30px; height: 30px; margin: 0; font-size: 11.5px; flex: none; }
+/* :root[data-density] — иначе компактная плотность ужимала аватар до 20px */
+.ms-av, :root[data-density] .ms-msg .ms-av { width: 36px; height: 36px; margin: 0; font-size: 14px; flex: none; }
 .ms-msg-col { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .ms-msg.out .ms-msg-col { align-items: flex-end; }
 .ms-meta { display: flex; align-items: baseline; gap: 8px; padding: 0 4px; font-size: 11px; color: var(--ink-dim); }
