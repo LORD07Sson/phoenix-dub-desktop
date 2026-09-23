@@ -9,6 +9,10 @@ export function applyTheme(theme) {
   let saved = null;
   try { saved = localStorage.getItem("phoenix-theme"); } catch (_) {}
   applyTheme(saved || "dark");
+  // Вариант оформления тёмной темы: "glow" (по умолчанию) или "fire".
+  let look = null;
+  try { look = localStorage.getItem("phoenix-look"); } catch (_) {}
+  document.documentElement.dataset.look = look || "glow";
 })();
 
 // Смена темы раньше была одним мгновенным щелчком — все цвета разом.
