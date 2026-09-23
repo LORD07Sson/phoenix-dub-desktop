@@ -62,7 +62,7 @@ export function resetAssignmentsBaseline() {
 }
 
 async function pollAssignments() {
-  if (!state.token) return;
+  if (!state.token || !state.isAdmin) return;
   try {
     const r = await apiGet("/reports", { assignee: "me", page_size: 100 });
     const ids = new Set((r.reports || []).map(x => x.public_id));

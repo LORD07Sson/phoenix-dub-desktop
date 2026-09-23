@@ -4022,3 +4022,158 @@ body.focus-mode .report-detail-overlay .sheet {
 @keyframes oops-tilt { 0% { transform: rotate(-25deg) scale(.8); } 50% { transform: rotate(8deg) scale(1.05); } 100% { transform: none; } }
 @keyframes oops-leave { to { opacity: 0; transform: translate(-50%, -30px) scale(.96); } }
 @media (prefers-reduced-motion: reduce) { .auth-oops.drop, .auth-oops.drop .auth-oops-img, .auth-oops.leave { animation: none; } }
+
+/* ================================================================
+   Сообщения — список бесед слева, беседа справа.
+   ================================================================ */
+.ms-root { flex: 1; min-height: 0; display: flex; padding: 16px 24px 20px; }
+.ms-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--surface); }
+.ms-side { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 35%, var(--surface)); }
+.ms-side-head { padding: 16px 14px 10px; display: flex; flex-direction: column; gap: 10px; }
+.ms-side-head h1 { font-size: 18px; margin: 0; }
+.ms-search { min-width: 0; height: 34px; }
+.ms-filters { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); }
+.ms-filters .seg-btn { padding: 0 6px; font-size: 11.5px; }
+.ms-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.ms-empty-list { padding: 18px 10px; color: var(--ink-dim); font-size: 12.5px; text-align: center; }
+.ms-chat { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 10px; align-items: center; padding: 9px 10px; border-radius: 11px; border: none; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.ms-chat:hover { background: var(--surface-2); }
+.ms-chat.active { background: color-mix(in srgb, var(--fire) 12%, var(--surface-2)); box-shadow: inset 3px 0 0 var(--fire); }
+.ms-chat-av { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 800; letter-spacing: -.3px;
+  color: color-mix(in srgb, var(--c) 85%, #fff); background: color-mix(in srgb, var(--c) 18%, var(--surface-2)); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); flex: none; }
+.ms-chat-av.general { background: var(--accent-grad); color: var(--on-accent); border: none; }
+.ms-chat-av svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.ms-chat-av.lg { width: 42px; height: 42px; }
+.ms-chat-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ms-chat-top { display: flex; align-items: baseline; gap: 8px; }
+.ms-chat-top b { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-chat-top time { font-size: 10.5px; color: var(--ink-dim); flex: none; }
+.ms-chat-bottom { display: flex; align-items: center; gap: 6px; }
+.ms-chat-last { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--fire); color: var(--on-accent); font-size: 10.5px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.ms-badge.mention { background: var(--gold); }
+
+.ms-thread { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.ms-head { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.ms-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ms-head-text b { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-head-text span { font-size: 11.5px; color: var(--ink-dim); display: inline-flex; align-items: center; gap: 4px; }
+.ms-status { width: 7px; height: 7px; border-radius: 50%; background: var(--c); display: inline-block; font-style: normal; }
+.ms-people { display: flex; }
+.ms-people .avatar-bubble { width: 26px; height: 26px; margin-left: -7px; border: 2px solid var(--surface); font-size: 10px; }
+.ms-people .avatar-bubble:first-child { margin-left: 0; }
+
+.ms-msgs { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 4px; user-select: text; }
+.ms-empty { margin: auto; color: var(--ink-dim); font-size: 13px; padding: 24px; text-align: center; }
+.ms-day { display: flex; justify-content: center; margin: 12px 0 6px; }
+.ms-day span { font-size: 11px; font-weight: 600; color: var(--ink-dim); background: var(--surface-2); padding: 3px 10px; border-radius: 999px; }
+.ms-event { align-self: center; display: flex; align-items: center; gap: 8px; margin: 6px 0; padding: 4px 12px; border: 1px dashed var(--line); border-radius: 999px; font-size: 11.5px; color: var(--ink-soft); max-width: 80%; }
+.ms-event time { color: var(--ink-dim); font-size: 10.5px; }
+.ms-msg { display: flex; gap: 8px; align-items: flex-end; max-width: 72%; margin-top: 8px; }
+.ms-msg.grouped { margin-top: 2px; }
+.ms-msg.in { align-self: flex-start; }
+.ms-msg.out { align-self: flex-end; flex-direction: row-reverse; }
+.ms-av { width: 30px; height: 30px; margin: 0; font-size: 11.5px; flex: none; }
+.ms-msg-col { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ms-msg.out .ms-msg-col { align-items: flex-end; }
+.ms-meta { display: flex; align-items: baseline; gap: 8px; padding: 0 4px; font-size: 11px; color: var(--ink-dim); }
+.ms-meta b { color: var(--ink-soft); font-size: 11.5px; }
+.ms-bubble { padding: 8px 12px; border-radius: 14px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.ms-msg.in .ms-bubble { background: var(--surface-2); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.ms-msg.out .ms-bubble { background: var(--accent-grad); color: var(--on-accent); border-bottom-right-radius: 4px; }
+.ms-msg.in.grouped .ms-bubble { border-top-left-radius: 6px; }
+.ms-msg.out.grouped .ms-bubble { border-top-right-radius: 6px; }
+.ms-tc { display: inline-flex; align-items: center; padding: 0 6px; margin: 0 1px; border-radius: 6px; border: none; font: 700 12px ui-monospace, Consolas, monospace; cursor: pointer;
+  background: color-mix(in srgb, var(--fire) 22%, transparent); color: var(--fire); }
+.ms-msg.out .ms-tc { background: rgba(0, 0, 0, .18); color: var(--on-accent); }
+.ms-tc:hover { filter: brightness(1.2); }
+.ms-mention { font-weight: 700; color: var(--gold); }
+.ms-msg.out .ms-mention { color: var(--on-accent); text-decoration: underline; }
+.ms-mention.me { background: color-mix(in srgb, var(--gold) 20%, transparent); border-radius: 4px; padding: 0 3px; }
+
+.ms-compose { position: relative; display: flex; gap: 8px; align-items: flex-end; padding: 12px 18px 16px; border-top: 1px solid var(--line); }
+.ms-compose textarea { flex: 1; resize: none; min-height: 42px; max-height: 160px; padding: 10px 14px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); font: inherit; font-size: 13px; line-height: 1.45; }
+.ms-compose textarea:focus { outline: none; border-color: var(--fire); }
+.ms-send { width: 42px; height: 42px; padding: 0; justify-content: center; border-radius: 12px; }
+.ms-send svg { width: 16px; height: 16px; }
+.ms-suggest { position: absolute; left: 18px; bottom: calc(100% - 6px); min-width: 220px; padding: 4px; border-radius: 12px; background: var(--glass-bg-strong); backdrop-filter: blur(10px); border: 1px solid var(--line); box-shadow: var(--shadow-md); display: flex; flex-direction: column; z-index: 3; }
+.ms-suggest[hidden] { display: none; }
+.ms-pick { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; border: none; background: transparent; color: var(--ink); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; }
+.ms-pick:hover, .ms-pick:first-child { background: var(--surface-2); }
+.ms-pick .avatar-bubble { width: 22px; height: 22px; margin: 0; font-size: 9.5px; }
+@media (max-width: 900px) { .ms-layout { grid-template-columns: 1fr; } .ms-side { display: none; } }
+.ms-side-title { display: flex; align-items: center; gap: 8px; }
+.ms-side-title h1 { flex: 1; }
+.ms-new { height: 30px; padding: 0 10px; font-size: 12px; }
+.ms-picker { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+.ms-picker[hidden] { display: none; }
+.ms-picker input { height: 32px; padding: 0 10px; border-radius: 9px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); font: inherit; font-size: 12.5px; }
+.ms-picker input:focus { outline: none; border-color: var(--fire); }
+.ms-picker-list { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.ms-pick i { font-style: normal; color: var(--ink-dim); font-size: 11px; }
+.ms-chat-av.person { border-radius: 50%; width: 40px; height: 40px; margin: 0; font-size: 14px; background: var(--accent-grad); color: var(--on-accent); border: none; overflow: hidden; }
+.ms-chat-av.person.lg { width: 42px; height: 42px; }
+.ms-people-more { font-size: 11px; color: var(--ink-dim); margin-left: 6px; align-self: center; }
+.ms-tc { cursor: default; }
+
+/* Рядовой участник студии: только «Тайтлы», «Сообщения», «Команда», «Я».
+   Админские кнопки и разделы — прочь (сервер их всё равно не пустит). */
+:root[data-role="member"] .tab-btn:not([data-tab="titles"]):not([data-tab="messages"]):not([data-tab="team"]):not([data-tab="profile"]),
+:root[data-role="member"] #sidebar-board-sub,
+:root[data-role="member"] .sidebar-group-label:has(+ .tab-btn[data-tab="overview"]),
+:root[data-role="member"] #titles-admin-btn,
+:root[data-role="member"] #team-roles-btn,
+:root[data-role="member"] #tn-edit,
+:root[data-role="member"] #st-studio,
+:root[data-role="member"] [data-st-go="st-studio"],
+:root[data-role="member"] #idle-slot { display: none !important; }
+
+/* Удаление сообщений */
+.ms-bubble-row { display: flex; align-items: center; gap: 6px; }
+.ms-msg.out .ms-bubble-row { flex-direction: row-reverse; }
+.ms-del { opacity: 0; width: 26px; height: 26px; border-radius: 8px; border: none; background: transparent; color: var(--ink-dim); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; transition: opacity .15s; }
+.ms-del svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.ms-msg:hover .ms-del, .ms-del:focus-visible { opacity: 1; }
+.ms-del:hover { color: var(--s-stop); background: var(--surface-2); }
+.ms-deleted { font-style: italic; color: var(--ink-dim) !important; background: transparent !important; border: 1px dashed var(--line) !important; }
+
+/* Каналы и темы в «Сообщениях» */
+.ms-section { display: flex; align-items: center; gap: 6px; padding: 12px 10px 4px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--ink-dim); }
+.ms-section span { flex: 1; }
+.ms-section-btn { width: 22px; height: 22px; border-radius: 7px; border: none; background: var(--surface-2); color: var(--ink-soft); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.ms-section-btn:hover { background: var(--fire); color: var(--on-accent); }
+.ms-section-btn svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.ms-empty-list.small { padding: 6px 10px; text-align: left; font-size: 11.5px; }
+.ms-chat-av.poster { object-fit: cover; padding: 0; border: 1px solid var(--line); background: var(--surface-2); }
+.ms-chat-av.channel { background: var(--surface-3); color: var(--ink-soft); border: none; }
+.ms-channel-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 11px; border: none; background: transparent; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
+.ms-channel-row:hover { background: var(--surface-2); }
+.ms-channel-row .ms-chat-av { width: 32px; height: 32px; border-radius: 9px; }
+.ms-channel-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-chevron { display: flex; color: var(--ink-dim); transition: transform .15s var(--ease); }
+.ms-chevron svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ms-channel.open .ms-chevron { transform: rotate(90deg); }
+.ms-topics { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 6px 18px; padding-left: 10px; border-left: 1px solid var(--line); }
+.ms-topic { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: center; padding: 7px 8px; border-radius: 10px; border: none; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.ms-topic:hover { background: var(--surface-2); }
+.ms-topic.active { background: color-mix(in srgb, var(--fire) 12%, var(--surface-2)); box-shadow: inset 3px 0 0 var(--fire); }
+.ms-topic-hash { font-weight: 800; color: var(--ink-dim); text-align: center; }
+.ms-topic .ms-chat-top b { font-size: 12.5px; }
+.ms-topic .ms-chat-last { font-size: 11.5px; }
+.ms-new-topic input { width: 100%; box-sizing: border-box; height: 30px; padding: 0 10px; border-radius: 9px; border: 1px dashed var(--line); background: transparent; color: var(--ink); font: inherit; font-size: 12px; }
+.ms-new-topic input:focus { outline: none; border-style: solid; border-color: var(--fire); background: var(--surface-2); }
+.ms-head-channel { color: var(--ink-soft); font-weight: 600; }
+.ms-head-sep { color: var(--ink-dim); margin: 0 6px; }
+.sheet.ms-channel-sheet { width: min(620px, calc(100vw - 48px)); max-width: none; }
+.ms-channel-form { display: flex; gap: 8px; margin-bottom: 12px; }
+.ms-channel-form input { flex: 1; height: 36px; padding: 0 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); font: inherit; font-size: 13px; }
+.ms-channel-form input:focus { outline: none; border-color: var(--fire); }
+.ms-cf-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-dim); margin: 4px 0 8px; }
+.ms-cf-titles { display: flex; flex-direction: column; gap: 4px; max-height: 44vh; overflow-y: auto; }
+.ms-cf-title { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.ms-cf-title:hover:not([disabled]) { background: var(--surface-2); border-color: var(--line); }
+.ms-cf-title img, .ms-cf-title .ms-chat-av { width: 36px; height: 50px; border-radius: 6px; object-fit: cover; flex: none; }
+.ms-cf-title span { min-width: 0; display: flex; flex-direction: column; }
+.ms-cf-title b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-cf-title i { font-style: normal; font-size: 11px; color: var(--ink-dim); }
+.ms-cf-title.taken { opacity: .5; cursor: default; }

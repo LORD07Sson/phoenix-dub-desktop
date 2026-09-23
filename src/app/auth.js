@@ -60,6 +60,7 @@ export async function tryRestoreSession() {
   try {
     const who = await api("GET", "/whoami");
     state.telegramId = who.telegram_id;
+    applyRole(!!who.is_admin);
     await ensureMediaToken();
     showApp();
     restoreLastTab();
@@ -97,6 +98,13 @@ function replayWordmark() {
   const word = document.querySelector(".auth-word");
   if (!word) return;
   word.querySelectorAll(".aw-part i").forEach(i => { i.style.animation = "none"; void i.offsetWidth; i.style.animation = ""; });
+}
+
+// Админ или рядовой участник: у участника прячем админские вкладки и
+// кнопки (CSS по data-role) и не запускаем опросы админских данных.
+export function applyRole(isAdmin) {
+  state.isAdmin = isAdmin;
+  document.documentElement.dataset.role = isAdmin ? "admin" : "member";
 }
 
 export function showAuth(err) {
@@ -146,6 +154,7 @@ async function submitCode() {
     state.telegramId = result.telegram_id;
     setDisplayName(result.name);
     await invoke("token_save", { token: result.token });
+    try { applyRole(!!(await api("GET", "/whoami")).is_admin); } catch (_) { applyRole(false); }
     await ensureMediaToken();
     showApp();
     restoreLastTab();

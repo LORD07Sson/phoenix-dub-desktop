@@ -447,7 +447,7 @@ export async function loadProfile() {
   // Обе догрузки — без await: профиль уже отрисован, и ждать ради
   // подсказки в одном блоке незачем (иначе на них ждала бы и кнопка
   // «Обновить», которая дожидается loadProfile).
-  fillIdleSlot(root);
+  if (state.isAdmin) fillIdleSlot(root);
   fillPauseCard(root, me.telegram_id);
   fillRemindersCard(root);
   let suggested = null;
@@ -710,7 +710,10 @@ export async function openUserProfile(telegramId) {
     <div class="bento">${badgesBentoHtml(d, 0)}</div>
     ${person ? "" : reportsHtml}
     ${devModeActive() ? devPanelHtml(d) : ""}
-    <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
+    <div class="sheet-actions">
+      ${state.isDeveloper && String(telegramId) !== String(state.telegramId) ? `<button class="btn danger" data-purge-chats title="Только владелец студии">Удалить личные переписки</button><span style="flex:1"></span>` : ""}
+      <button class="btn" data-close>Закрыть</button>
+    </div>
   `;
   wireProfileCommon(sheet, telegramId, async () => { await openUserProfile(telegramId); overlay.remove(); });
   sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
@@ -718,5 +721,14 @@ export async function openUserProfile(telegramId) {
     row.addEventListener("click", () => openReportDetail(row.dataset.openReport));
   });
   if (person) wireWorkSection(sheet, person, async () => { await openUserProfile(telegramId); overlay.remove(); });
+  const purgeBtn = sheet.querySelector("[data-purge-chats]");
+  if (purgeBtn) purgeBtn.addEventListener("click", async () => {
+    if (!confirm(`Удалить ВСЕ личные переписки ${d.name || "этого человека"}? Они сотрутся целиком, у обеих сторон. Общий чат не затронут. Вернуть нельзя.`)) return;
+    purgeBtn.disabled = true;
+    try {
+      const r = await apiPost("/chats/purge-person", { telegram_id: telegramId });
+      toast(r.chats ? `Удалено переписок: ${r.chats}, сообщений: ${r.messages}.` : "Личных переписок у человека не было.");
+    } catch (e) { toast(e.message, "error"); purgeBtn.disabled = false; }
+  });
   if (devModeActive()) wireDevPanel(sheet, telegramId, async () => { await openUserProfile(telegramId); overlay.remove(); }, d.role);
 }

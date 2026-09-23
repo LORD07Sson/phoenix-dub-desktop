@@ -5,6 +5,7 @@
 // глобальный keydown на Escape закрывает верхний ".overlay", ничего
 // специального тут переопределять не нужно).
 
+import { state } from "./state.js";
 import { openSheet, apiGet } from "./api.js";
 import { $, esc } from "./utils.js";
 import { switchTab } from "./tabs.js";
@@ -101,7 +102,7 @@ function openPalette() {
     if (q.length < 2) return;
     searchDebounce = setTimeout(async () => {
       try {
-        const res = await apiGet("/reports", { q, page_size: 6, sort: "new" });
+        const res = state.isAdmin ? await apiGet("/reports", { q, page_size: 6, sort: "new" }) : { reports: [] };
         const reportItems = (res.reports || []).map(r => ({
           label: `${r.public_id} · ${r.title}`,
           icon: "📄",
