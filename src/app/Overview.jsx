@@ -13,12 +13,12 @@
 import { render } from "solid-js/web";
 import { For, Show, onMount } from "solid-js";
 import { apiGet, openSheet, dialogSkeletonHtml } from "./api.js";
-import { $, esc, initials, STATUS_COLOR_VAR } from "./utils.js";
+import { $, esc, initials, relTime, STATUS_COLOR_VAR } from "./utils.js";
 // esc() нужен только в строковых шаблонах (openMonthlyTopSheet ниже,
 // donutHtml в charts.js). В JSX его быть не должно: Solid экранирует
 // текстовые узлы сам, и esc() поверх этого даёт двойное экранирование —
 // имя «Иванов & Co» рендерилось как «Иванов &amp; Co».
-import { donutHtml, donutLegendHtml, playDonutIntro, sparklineHtml, kpiRingHtml, playRingIntro, segmentedBarHtml, segBadgesHtml, segLegendHtml, playSegBarIntro, deltaPillHtml } from "./charts.js";
+import { donutHtml, donutLegendHtml, playDonutIntro } from "./charts.js";
 
 // Сравнивает вторую половину 14-дневного окна с первой — тот же смысл,
 // что "From Last Month" у референса, но на доступных нам данных
@@ -104,8 +104,8 @@ function KanbanPreview(props) {
   const rangeEnd = ganttRows.length ? Math.max(now, ...ganttRows.map(r => r.endMs)) : now;
 
   return (
-    <div class="bcell wide" style={{ "animation-delay": "230ms" }} ref={root}>
-      <h3>Проекты</h3>
+    <div class="bcell full" style={{ "animation-delay": "380ms" }} ref={root}>
+      <h3>Доска</h3>
       <Show when={ganttRows.length}>
         <div style={{ "margin-bottom": "14px" }} innerHTML={timelineHtml(ganttRows, rangeStart, rangeEnd, now)} />
       </Show>
@@ -136,203 +136,212 @@ function KanbanPreview(props) {
         style={{ "margin-top": "8px", width: "100%", "justify-content": "center" }}
         onClick={() => switchTab("board")}
       >
-        🗂 Открыть доску →
+        Открыть доску
       </button>
     </div>
   );
 }
 
 function TrendChart(props) {
+  const days = props.trend?.days || [];
+  const peak = Math.max(1, ...days.map(x => Math.max(x.created, x.completed)));
+  const noMovement = days.every(x => x.created === 0 && x.completed === 0);
   return (
-    <Show when={props.trend && props.trend.days && props.trend.days.length}>
-      {() => {
-        const days = props.trend.days;
-        const peak = Math.max(1, ...days.map(x => Math.max(x.created, x.completed)));
-        const noMovement = peak <= 1 && days.every(x => x.created === 0 && x.completed === 0);
-        return (
-          <div class="bcell wide" style={{ "animation-delay": "200ms" }}>
-            <h3>Динамика за 14 дней</h3>
-            <Show
-              when={!noMovement}
-              fallback={<div class="no-assignee">🌱 Пока без движения</div>}
-            >
-              <div class="trend-chart">
-                <For each={days}>
-                  {x => (
-                    <div class="trend-col" title={`${x.date}: ${x.created} создано, ${x.completed} завершено`}>
-                      <div class="trend-bar-fill created" style={{ height: `${Math.round((x.created / peak) * 100)}%` }} />
-                      <div class="trend-bar-fill completed" style={{ height: `${Math.round((x.completed / peak) * 100)}%` }} />
-                    </div>
-                  )}
-                </For>
+    <div class="bcell dash-trend-cell" style={{ "animation-delay": "160ms" }}>
+      <div class="dash-cell-head">
+        <span class="dash-cell-title">Создано и завершено</span>
+        <span class="dash-cell-hint">последние 14 дней</span>
+      </div>
+      <div class="dash-legend">
+        <span><i style={{ background: "var(--surface-4)" }} />создано</span>
+        <span><i style={{ background: "var(--s-done)" }} />завершено</span>
+      </div>
+      <Show when={days.length && !noMovement} fallback={<div class="no-assignee">Пока без движения</div>}>
+        <div class="dash-trend">
+          <For each={days}>
+            {x => (
+              <div class="dash-trend-col" title={`${x.date}: ${x.created} создано, ${x.completed} завершено`}>
+                <div class="dash-trend-bars">
+                  <div class="dash-trend-bar created" style={{ height: `${Math.round((x.created / peak) * 100)}%` }} />
+                  <div class="dash-trend-bar completed" style={{ height: `${Math.round((x.completed / peak) * 100)}%` }} />
+                </div>
+                <div class="dash-trend-label">{Number(x.date.slice(8, 10))}</div>
               </div>
-              <div class="trend-axis">
-                <span>{days[0].date.slice(5).replace("-", ".")}</span>
-                <span>{days[days.length - 1].date.slice(5).replace("-", ".")}</span>
-              </div>
-              <div class="trend-legend-row">
-                <span><i style={{ background: "var(--ember)" }} />создано</span>
-                <span><i style={{ background: "var(--s-done)" }} />завершено</span>
-              </div>
-            </Show>
-          </div>
-        );
-      }}
-    </Show>
+            )}
+          </For>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+function StatCard(props) {
+  return (
+    <div class="bcell kpi-cell" style={{ "animation-delay": `${props.delay}ms` }}>
+      <h3>{props.label}</h3>
+      <div class="dash-stat">
+        <span class={`big-num ${props.tone || ""}`}>{props.value}</span>
+        <Show when={props.pill}>
+          <span class="dash-pill" style={{ color: `var(${props.pillVar})`, background: `color-mix(in srgb, var(${props.pillVar}) 16%, transparent)` }}>{props.pill}</span>
+        </Show>
+      </div>
+      <div class="sub">{props.sub}</div>
+    </div>
   );
 }
 
 function Overview(props) {
   const d = props.data;
+  const count = st => d.reports.statuses.find(s => s.status === st)?.count || 0;
   const segments = d.reports.statuses.map(s => ({
     label: s.label, count: s.count, colorVar: STATUS_COLOR_VAR[s.status] || "--s-draft",
   }));
-  const activeTotal = d.reports.total
-    - (d.reports.statuses.find(s => s.status === "completed")?.count || 0)
-    - (d.reports.statuses.find(s => s.status === "cancelled")?.count || 0);
-
-  let donutRoot;
-  onMount(() => { playDonutIntro(donutRoot); playRingIntro(donutRoot); playSegBarIntro(donutRoot); });
-
-  // Спарклайн под «Всего активных» — тренд входящих (created) за то же
-  // окно, что и большой график динамики ниже: показывает, разгоняется
-  // или затихает поток новых серий, не только текущий снимок числа.
-  // .some(v => v > 0) — спарклайн из одних нулей рисовался плоской
-  // линией фиксированной ширины (100px), которая при малом количестве
-  // отчётов не помещалась в узкую плитку и вылезала за её правый
-  // край поверх соседней карточки: график "нулевого тренда" всё
-  // равно бессмысленен, честнее просто не показывать его.
-  const createdSeriesRaw = props.trend?.days?.map(x => x.created) || null;
-  const createdSeries = createdSeriesRaw && createdSeriesRaw.some(v => v > 0) ? createdSeriesRaw : null;
-  const overdueFrac = activeTotal ? d.reports.overdue / activeTotal : 0;
+  const activeTotal = d.reports.total - count("completed") - count("cancelled");
   const activeDelta = periodDeltaPct(props.trend?.days);
+  const maxAssigned = Math.max(1, ...d.performers.map(x => x.assigned));
 
   // «Требует внимания» — отчёты со статусом stuck (3+ дня без смены
-  // статуса, см. _attach_stuck на сервере), уже вложенные в борд
-  // /api/dashboard/phoenix отдельным запросом ниже: тот же смысл, что
-  // и раздел на Xentra-референсе, только на реальных отчётах, не на
-  // выдуманных карточках.
+  // статуса, см. _attach_stuck на сервере) из /api/dashboard/phoenix.
   const stuckReports = (props.dash?.board?.columns || [])
     .flatMap(c => c.reports || [])
     .filter(r => r.stuck)
-    .slice(0, 6);
+    .slice(0, 5);
+  const activity = (props.feed?.events || []).slice(0, 4);
+
+  let root;
+  onMount(() => { playDonutIntro(root); });
 
   return (
     <>
     <div class="page-header">
-      <h1>Обзор</h1>
-      <div class="sub">Нагрузка студии одним взглядом: что в работе, что горит, кто ведёт.</div>
+      <div>
+        <h1>Обзор студии</h1>
+        <div class="sub">Где сейчас находится конвейер дубляжа.</div>
+      </div>
     </div>
-    <div class="bento" ref={donutRoot}>
-      <div class="bcell wide bcell-hero" style={{ "animation-delay": "0ms" }}>
-        <h3>Структура загрузки</h3>
-        <div class="donut-wrap">
-          <div innerHTML={donutHtml(segments)} />
-          <div class="donut-legend" innerHTML={donutLegendHtml(segments)} />
-        </div>
+    <div ref={root}>
+      <div class="an-metrics">
+        <StatCard delay={0} label="Активные серии" value={activeTotal} sub={`из ${d.reports.total} всего`}
+          pill={activeDelta !== null ? `${activeDelta >= 0 ? "+" : ""}${activeDelta}%` : null}
+          pillVar={activeDelta !== null && activeDelta < 0 ? "--s-stop" : "--s-done"} />
+        <StatCard delay={40} label="В работе" value={count("working")} sub={`${count("review") + count("revision")} на проверке и правках`} />
+        <StatCard delay={80} label="Завершено" value={count("completed")} sub="за всё время" />
+        <StatCard delay={120} label="Просрочено" value={d.reports.overdue} tone={d.reports.overdue > 0 ? "danger" : ""}
+          sub={`${d.reports.important} важных (высокий/срочный)`} />
       </div>
-      <div class="bcell kpi-cell" style={{ "animation-delay": "60ms" }}>
-        <h3>Всего активных</h3>
-        <div class="kpi-row">
-          <span class="kpi-icon" style={{ background: "color-mix(in srgb, var(--fire) 20%, var(--surface-2))", color: "var(--fire)" }}>📁</span>
-          <div class="big-num">{activeTotal}</div>
-          <Show when={activeDelta !== null}><span innerHTML={deltaPillHtml(activeDelta)} /></Show>
-          <Show when={createdSeries}>
-            <div class="kpi-spark" innerHTML={sparklineHtml(createdSeries, { colorVar: "--ember" })} />
-          </Show>
-        </div>
-        <div class="sub">из {d.reports.total} всего</div>
-        <div class="seg-badges" innerHTML={segBadgesHtml(segments)} />
-        <div innerHTML={segmentedBarHtml(segments)} />
-        <div class="seg-legend" innerHTML={segLegendHtml(segments)} />
-      </div>
-      <div class="bcell kpi-cell" style={{ "animation-delay": "100ms" }}>
-        <h3>Просрочено</h3>
-        <div class="kpi-row">
-          <span class="kpi-icon" style={{ background: `color-mix(in srgb, var(${d.reports.overdue > 0 ? "--s-stop" : "--s-done"}) 20%, var(--surface-2))`, color: `var(${d.reports.overdue > 0 ? "--s-stop" : "--s-done"})` }}>⏰</span>
-          <div class={`big-num ${d.reports.overdue > 0 ? "danger" : ""}`}>{d.reports.overdue}</div>
-          <Show when={activeTotal > 0}>
-            <div class="kpi-ring-wrap" innerHTML={kpiRingHtml(overdueFrac, { colorVar: d.reports.overdue > 0 ? "--s-stop" : "--s-done" })} />
-          </Show>
-        </div>
-        <div class="sub">{d.reports.important} важных (высокий/срочный)</div>
-      </div>
-      <div class="bcell" style={{ "animation-delay": "140ms" }}>
-        <h3>Доступ</h3>
-        <div class="kpi-row">
-          <span class="kpi-icon" style={{ background: "color-mix(in srgb, var(--s-done) 20%, var(--surface-2))", color: "var(--s-done)" }}>🔓</span>
-          <div class="big-num">{d.access.allowed}</div>
-        </div>
-        <div class="sub">{d.access.pending_requests ? `${d.access.pending_requests} заявок ждут решения` : "заявок нет"}</div>
-      </div>
-      <div class="bcell" style={{ "animation-delay": "180ms" }}>
-        <h3>Тикеты в поддержку</h3>
-        <div class="kpi-row">
-          <span class="kpi-icon" style={{ background: `color-mix(in srgb, var(${d.open_tickets > 0 ? "--s-work" : "--ink-dim"}) 20%, var(--surface-2))`, color: `var(${d.open_tickets > 0 ? "--s-work" : "--ink-dim"})` }}>🎫</span>
-          <div class={`big-num ${d.open_tickets > 0 ? "warn" : ""}`}>{d.open_tickets}</div>
-        </div>
-        <div class="sub">открыто сейчас</div>
-      </div>
-      <TrendChart trend={props.trend} />
-      <Show when={stuckReports.length}>
-        <div class="bcell wide" style={{ "animation-delay": "210ms" }}>
-          <h3>Требует внимания</h3>
-          <div class="mini-list">
-            <For each={stuckReports}>
-              {r => (
-                <div class="mini-row" style={{ cursor: "pointer" }} onClick={() => openReportDetail(r.public_id)}>
-                  <span class="name">{r.title}</span>
-                  <span class="val" style={{ color: "var(--s-stop)" }}>{r.status_label} · без движения</span>
-                </div>
-              )}
-            </For>
+
+      <div class="dash-main-row">
+        <TrendChart trend={props.trend} />
+        <div class="dash-side">
+          <div class="bcell dash-side-cell" style={{ "animation-delay": "200ms" }}>
+            <div class="dash-cell-head">
+              <span class="dash-cell-title">Требует внимания</span>
+              <Show when={stuckReports.length}>
+                <span class="dash-pill" style={{ color: "var(--s-stop)", background: "color-mix(in srgb, var(--s-stop) 16%, transparent)" }}>{stuckReports.length} без движения</span>
+              </Show>
+            </div>
+            <div class="dash-list">
+              <Show when={stuckReports.length} fallback={<div class="no-assignee">Всё движется</div>}>
+                <For each={stuckReports}>
+                  {r => (
+                    <button type="button" class="dash-stuck-row" onClick={() => openReportDetail(r.public_id)}>
+                      <span class="dash-stuck-dot" />
+                      <span class="dash-stuck-text">
+                        <span class="dash-stuck-title">{r.title}</span>
+                        <span class="dash-stuck-sub">{r.status_label} · без движения</span>
+                      </span>
+                    </button>
+                  )}
+                </For>
+              </Show>
+            </div>
+          </div>
+          <div class="bcell dash-side-cell" style={{ "animation-delay": "240ms" }}>
+            <div class="dash-cell-head">
+              <span class="dash-cell-title">Недавняя активность</span>
+              <button type="button" class="dash-link" onClick={() => switchTab("feed")}>вся лента</button>
+            </div>
+            <div class="dash-list">
+              <Show when={activity.length} fallback={<div class="no-assignee">Пока тихо</div>}>
+                <For each={activity}>
+                  {ev => (
+                    <div class="dash-activity-row">
+                      <span class="avatar-bubble" style={{ "margin-left": "0" }} data-avatar-for={ev.actor_telegram_id || ""}>{initials(ev.actor || "?")}</span>
+                      <span class="dash-activity-text">
+                        <span><b>{ev.actor}</b> {ev.action}{ev.title ? ` · ${ev.title}` : ""}</span>
+                        <span class="dash-activity-time">{relTime(ev.created_at)}</span>
+                      </span>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </div>
           </div>
         </div>
-      </Show>
-      <Show when={props.dash?.board?.columns?.length}>
-        <KanbanPreview dash={props.dash} />
-      </Show>
-      <div class="bcell wide" style={{ "animation-delay": "220ms" }}>
-        <h3>Топ исполнителей</h3>
-        <div class="mini-list">
-          <Show when={d.performers.length} fallback={<div class="no-assignee">Пока нет данных</div>}>
-            <For each={d.performers}>
-              {(p, i) => (
-                <div class="mini-row">
-                  <span class="rank">{i() + 1}</span>
-                  <span class="avatar-bubble" style={{ "margin-left": "0" }}>{initials(p.name)}</span>
-                  <span class="name">{p.name}</span>
-                  <span class="val">{p.assigned} назначено{p.overdue ? ` · ⏰${p.overdue}` : ""}</span>
-                </div>
-              )}
-            </For>
+      </div>
+
+      <div class="bento dash-secondary">
+        <div class="bcell wide" style={{ "animation-delay": "280ms" }}>
+          <h3>Структура загрузки</h3>
+          <div class="donut-wrap">
+            <div innerHTML={donutHtml(segments)} />
+            <div class="donut-legend" innerHTML={donutLegendHtml(segments)} />
+          </div>
+        </div>
+        <div class="bcell wide" style={{ "animation-delay": "300ms" }}>
+          <h3>Топ исполнителей</h3>
+          <div class="an-perf-list">
+            <Show when={d.performers.length} fallback={<div class="no-assignee">Пока нет данных</div>}>
+              <For each={d.performers}>
+                {p => (
+                  <div class="an-perf">
+                    <div class="an-perf-head">
+                      <span>{p.name}</span>
+                      <span>{p.assigned} назначено{p.overdue ? ` · просрочено ${p.overdue}` : ""}</span>
+                    </div>
+                    <div class="an-perf-track">
+                      <div class="an-perf-fill" style={{ width: `${Math.round((p.assigned / maxAssigned) * 100)}%` }} />
+                    </div>
+                  </div>
+                )}
+              </For>
+            </Show>
+          </div>
+          <Show when={d.performers.length}>
+            <button class="btn" style={{ "margin-top": "14px", width: "100%", "justify-content": "center" }} onClick={openMonthlyTopSheet}>
+              Рейтинг месяца
+            </button>
           </Show>
         </div>
-        <Show when={d.performers.length}>
-          <button
-            class="btn"
-            style={{ "margin-top": "8px", width: "100%", "justify-content": "center" }}
-            onClick={openMonthlyTopSheet}
-          >
-            📆 Рейтинг месяца →
-          </button>
+        <div class="bcell kpi-cell" style={{ "animation-delay": "320ms" }}>
+          <h3>Доступ</h3>
+          <div class="big-num">{d.access.allowed}</div>
+          <div class="sub">{d.access.pending_requests ? `${d.access.pending_requests} заявок ждут решения` : "заявок нет"}</div>
+        </div>
+        <div class="bcell kpi-cell" style={{ "animation-delay": "340ms" }}>
+          <h3>Тикеты в поддержку</h3>
+          <div class={`big-num ${d.open_tickets > 0 ? "warn" : ""}`}>{d.open_tickets}</div>
+          <div class="sub">открыто сейчас</div>
+        </div>
+        <Show when={d.birthdays.length}>
+          <div class="bcell kpi-cell" style={{ "animation-delay": "360ms" }}>
+            <h3>Дни рождения</h3>
+            <div class="mini-list">
+              <For each={d.birthdays}>
+                {b => (
+                  <div class="mini-row">
+                    <span class="name">{b.name}</span>
+                    <span class="val">{b.day}.{String(b.month).padStart(2, "0")}</span>
+                  </div>
+                )}
+              </For>
+            </div>
+          </div>
+        </Show>
+        <Show when={props.dash?.board?.columns?.length}>
+          <KanbanPreview dash={props.dash} />
         </Show>
       </div>
-      <Show when={d.birthdays.length}>
-        <div class="bcell" style={{ "animation-delay": "260ms" }}>
-          <h3>Дни рождения</h3>
-          <div class="mini-list">
-            <For each={d.birthdays}>
-              {b => (
-                <div class="mini-row">
-                  <span class="name">🎂 {b.name}</span>
-                  <span class="val">{b.day}.{String(b.month).padStart(2, "0")}</span>
-                </div>
-              )}
-            </For>
-          </div>
-        </div>
-      </Show>
     </div>
     </>
   );
@@ -343,13 +352,13 @@ function Overview(props) {
 // одноразовый sheet поверх всего окна, а не часть дерева Обзора — Solid
 // тут не даёт ничего сверх того, что уже даёт openSheet.
 async function openMonthlyTopSheet() {
-  const overlay = openSheet(`<h2>📆 Рейтинг месяца</h2>${dialogSkeletonHtml(5)}`);
+  const overlay = openSheet(`<h2>Рейтинг месяца</h2>${dialogSkeletonHtml(5)}`);
   const sheet = overlay.querySelector(".sheet");
   let d;
   try {
     d = await apiGet("/overview/monthly-top");
   } catch (e) {
-    sheet.innerHTML = `<h2>📆 Рейтинг месяца</h2><div class="bento-empty">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+    sheet.innerHTML = `<h2>Рейтинг месяца</h2><div class="bento-empty">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
     sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
     return;
   }
@@ -363,7 +372,7 @@ async function openMonthlyTopSheet() {
     </div>
   `).join("");
   sheet.innerHTML = `
-    <h2>📆 Рейтинг месяца</h2>
+    <h2>Рейтинг месяца</h2>
     <div style="color:var(--ink-dim); font-size:12px; margin:-8px 0 12px;">по закрытым отчётам за последние 30 дней</div>
     <div class="mini-list">${rows || `<div class="no-assignee">Пока никто не закрыл ни одной серии за последние 30 дней</div>`}</div>
     <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
@@ -385,19 +394,21 @@ export async function loadOverview() {
   const root = $("#overview-body");
   if (disposePrev) { disposePrev(); disposePrev = null; }
   root.innerHTML = `<div class="skeleton-wrap"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>`;
-  let d, trend, dash;
+  let d, trend, dash, feed;
   try {
-    [d, trend, dash] = await Promise.all([
+    [d, trend, dash, feed] = await Promise.all([
       apiGet("/overview"),
       apiGet("/trend").catch(() => null),
       // Не критично для остального Обзора — если недоступно, просто не
       // покажем «Требует внимания», а не завалим всю вкладку.
       apiGet("/dashboard/phoenix").catch(() => null),
+      apiGet("/feed", { offset: 0, page_size: 4 }).catch(() => null),
     ]);
   } catch (e) {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить обзор: ${esc(e.message)}</div>`;
     return false;
   }
   root.innerHTML = "";
-  disposePrev = render(() => <Overview data={d} trend={trend} dash={dash} />, root);
+  disposePrev = render(() => <Overview data={d} trend={trend} dash={dash} feed={feed} />, root);
+  loadAvatars(root);
 }

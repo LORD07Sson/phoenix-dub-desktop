@@ -47,7 +47,7 @@ export function userOptionsHtml(users, selectedTelegramId) {
 // ---------- Список сезонов ----------
 
 export async function openSeasonsAdminSheet(onClose) {
-  const overlay = openSheet(`<h2>🛠 Управление тайтлами</h2>${dialogSkeletonHtml(5)}`, "wide");
+  const overlay = openSheet(`<h2>Управление тайтлами</h2>${dialogSkeletonHtml(5)}`, "wide");
   const sheet = overlay.querySelector(".sheet");
 
   // Список сезонов/тайтлов на вкладке «Тайтлы» мог устареть, пока была
@@ -67,7 +67,7 @@ export async function openSeasonsAdminSheet(onClose) {
     try {
       d = await apiGet("/seasons");
     } catch (e) {
-      sheet.innerHTML = `<h2>🛠 Управление тайтлами</h2><div class="no-assignee">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+      sheet.innerHTML = `<h2>Управление тайтлами</h2><div class="no-assignee">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
       sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
       return;
     }
@@ -80,7 +80,7 @@ export async function openSeasonsAdminSheet(onClose) {
       </div>
     `).join("");
     sheet.innerHTML = `
-      <h2>🛠 Управление тайтлами</h2>
+      <h2>Управление тайтлами</h2>
       <div class="detail-section">
         <h3>Эфир-сезоны</h3>
         <div>${rows || `<div class="no-assignee">Сезонов пока нет</div>`}</div>
@@ -168,8 +168,8 @@ async function openSeasonDetailAdmin(seasonId) {
           <button class="btn" id="title-add">+</button>
         </div>
         <div class="add-row" style="margin-top:6px;">
-          <input id="title-shiki" placeholder="…или ссылка на Shikimori (shikimori.one/animes/…)">
-          <button class="btn" id="title-shiki-add">🔗 Добавить</button>
+          <input id="title-shiki" placeholder="…или ссылка на Shikimori (shikimori.one, .io, .me — /animes/…)">
+          <button class="btn" id="title-shiki-add">Добавить</button>
         </div>
       </div>
       <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
@@ -198,25 +198,53 @@ async function openSeasonDetailAdmin(seasonId) {
     // нужен именно AniList.
     sheet.querySelector("#title-shiki-add").addEventListener("click", async () => {
       const input = sheet.querySelector("#title-shiki");
-      const url = input.value.trim();
-      if (!url) return;
+      const raw = input.value.trim();
+      if (!raw) return;
+      const shikiId = parseShikimoriId(raw);
+      if (!shikiId) {
+        toast("Не похоже на ссылку Shikimori — вставьте адрес страницы тайтла (…/animes/59193-…) или его номер.", "error");
+        return;
+      }
       const btn = sheet.querySelector("#title-shiki-add");
       btn.disabled = true;
       btn.textContent = "Добавляю…";
       try {
-        const res = await apiPost(`/seasons/${seasonId}/titles/from-shikimori`, { url });
+        // На сервер уходит только номер: его разбор ссылки знает лишь
+        // домены shikimori.one/.me, а голый id принимает всегда.
+        const res = await apiPost(`/seasons/${seasonId}/titles/from-shikimori`, { url: String(shikiId) });
         input.value = "";
         toast(`Тайтл создан: ${res.name}${res.characters_count ? ` · ${res.characters_count} персонажей` : ""}`);
         await render();
       } catch (e) {
         toast(`Не удалось добавить по ссылке: ${e.message}`, "error");
         btn.disabled = false;
-        btn.textContent = "🔗 Добавить";
+        btn.textContent = "Добавить";
       }
     });
   }
 
   await render();
+}
+
+// Номер тайтла из того, что вставили: голый id («59193»), кусок адреса
+// («59193-mushoku-tensei…»), или ссылка на любом зеркале Shikimori —
+// shikimori.one/.me/.io/.org, с www и без, с префиксом архивных тайтлов
+// «z» (…/animes/z5114-…). Раньше сервер узнавал только .one и .me, и
+// ссылка с shikimori.io молча не распознавалась.
+export function parseShikimoriId(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return null;
+  const bare = /^z?(\d+)(?:-[\w-]*)?$/i.exec(raw);
+  if (bare) return Number(bare[1]);
+  let url;
+  try {
+    url = new URL(/^[a-z]+:\/\//i.test(raw) ? raw : `https://${raw}`);
+  } catch (_) {
+    return null;
+  }
+  if (!/(^|\.)shikimori\.[a-z]+$/i.test(url.hostname)) return null;
+  const m = /\/animes\/z?(\d+)/i.exec(url.pathname);
+  return m ? Number(m[1]) : null;
 }
 
 // ---------- Детальная карточка тайтла (состав, персонажи, серии) ----------
@@ -281,7 +309,7 @@ async function openTitleAdminDetail(titleId, onClose) {
         <div style="flex:1;">
           <div class="add-row">
             <input id="meta-search-q" placeholder="Название для поиска на Shikimori/AniList…" value="${esc(d.name)}">
-            <button class="btn" id="meta-search-btn">🔍 Найти</button>
+            <button class="btn" id="meta-search-btn">Найти</button>
           </div>
           <div id="meta-candidates"></div>
         </div>
@@ -314,8 +342,8 @@ async function openTitleAdminDetail(titleId, onClose) {
       </div>
 
       <div class="sheet-actions">
-        <button class="btn danger" id="btn-delete-title" style="margin-right:auto;">🗑 Удалить тайтл</button>
-        <button class="btn ghost" id="btn-rename-title">✏️ Переименовать</button>
+        <button class="btn danger" id="btn-delete-title" style="margin-right:auto;">Удалить тайтл</button>
+        <button class="btn ghost" id="btn-rename-title">Переименовать</button>
         <button class="btn" data-close>Закрыть</button>
       </div>
     `;

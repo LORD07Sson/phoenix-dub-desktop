@@ -27,7 +27,7 @@ async function loadMetaRoles() {
 
 export function devPanelHtml(d) {
   return `
-    <div class="sec-title" style="margin-top:16px;">🛠 Служебные данные</div>
+    <div class="sec-title" style="margin-top:16px;">Служебные данные</div>
     <div class="dev-bento">
       <div class="dev-bcell wide">
         <div class="h">Идентификаторы</div>

@@ -6,6 +6,7 @@ import { state } from "./state.js";
 import { apiGet, apiPost, openSheet, toast, dialogSkeletonHtml, mediaUrl } from "./api.js";
 import { $, esc } from "./utils.js";
 import { openSeasonsAdminSheet } from "./titles-admin.js";
+import { clearTitleHoverCache } from "./title-hover.js";
 
 // Сборка URL с токеном — одна на всё приложение (api.js): раньше в
 // четырёх файлах лежала своя копия, и все четыре подставляли в строку
@@ -43,6 +44,132 @@ function titleDetailMetaRowsHtml(det) {
 }
 
 function voteActivity(t) { return t.likes + t.dislikes; }
+
+// Вид вкладки: карточки (постеры) или таблица с подробностями — как
+// переключатель table/cards в мини-аппе. Личная настройка.
+function viewKey() { return `phoenix_titles_view_${state.telegramId || "anon"}`; }
+function getView() {
+  try { return localStorage.getItem(viewKey()) === "table" ? "table" : "cards"; } catch (_) { return "cards"; }
+}
+function setView(v) {
+  try { localStorage.setItem(viewKey(), v); } catch (_) { /* не критично */ }
+}
+
+// Подробности Shikimori/AniList (формат, эпизоды, студия, жанры) есть
+// только в /public/titles/{id} — в списке сезона их нет. Догружаются
+// после отрисовки, не больше 4 запросов разом, и кэшируются на сессию.
+const detailsCache = new Map();
+async function loadDetails(ids, onEach) {
+  const queue = ids.filter(id => !detailsCache.has(id));
+  ids.filter(id => detailsCache.has(id)).forEach(id => onEach(id, detailsCache.get(id)));
+  const worker = async () => {
+    while (queue.length) {
+      const id = queue.shift();
+      let det = null;
+      try {
+        const d = await apiGet(`/public/titles/${id}`);
+        det = d.details && !Array.isArray(d.details) ? d.details : null;
+      } catch (_) { /* без подробностей строка просто останется с прочерками */ }
+      detailsCache.set(id, det);
+      onEach(id, det);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker));
+}
+
+function approvalPct(t) {
+  const total = voteActivity(t);
+  return total ? Math.round((t.likes / total) * 100) : null;
+}
+
+function episodesText(det) {
+  if (!det) return "";
+  if (det.episodes_aired != null && det.episodes_total) return `${det.episodes_aired} / ${det.episodes_total}`;
+  if (det.episodes_total) return String(det.episodes_total);
+  return "";
+}
+
+function cardMetaText(det) {
+  if (!det) return "";
+  return [det.kind_label, episodesText(det) && `${episodesText(det)} эп.`, det.studio].filter(Boolean).join(" · ");
+}
+
+const LIKE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11v9H4v-9zM7 11l4-7c1.5 0 2.5 1 2.2 2.6L12.6 10H19a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 17.8 20H7"/></svg>';
+const DISLIKE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 13V4h3v9zM17 13l-4 7c-1.5 0-2.5-1-2.2-2.6l.6-3.4H5a2 2 0 0 1-2-2.3l1.2-6A2 2 0 0 1 6.2 4H17"/></svg>';
+
+const TABLE_SORTS = {
+  rank: (a, b) => (b.likes - b.dislikes) - (a.likes - a.dislikes) || voteActivity(b) - voteActivity(a),
+  name: (a, b) => a.name.localeCompare(b.name, "ru"),
+  votes: (a, b) => voteActivity(b) - voteActivity(a),
+  approval: (a, b) => (approvalPct(b) ?? -1) - (approvalPct(a) ?? -1),
+};
+let tableSort = "rank";
+
+function detailCellsHtml(det) {
+  const loading = det === undefined;
+  const dash = loading ? `<span class="tt-loading"></span>` : `<span class="tt-dim">—</span>`;
+  const kind = det && [det.kind_label, det.status_label].filter(Boolean);
+  const genres = det && det.genres && det.genres.length ? det.genres : null;
+  return `
+    <td class="tt-kind">${kind && kind.length ? `${esc(kind[0])}${kind[1] ? `<span class="tt-sub">${esc(kind[1])}</span>` : ""}` : dash}</td>
+    <td class="tt-num">${det && episodesText(det) ? esc(episodesText(det)) : dash}</td>
+    <td class="tt-studio">${det && det.studio ? esc(det.studio) : dash}</td>
+    <td class="tt-genres">${genres ? genres.slice(0, 3).map(g => `<span class="tt-genre">${esc(g)}</span>`).join("") + (genres.length > 3 ? `<span class="tt-dim">+${genres.length - 3}</span>` : "") : dash}</td>`;
+}
+
+function approvalCellHtml(t) {
+  const pct = approvalPct(t);
+  return `
+    <div class="tt-approval">
+      <div class="tt-approval-track"><i style="width:${pct ?? 0}%;"></i></div>
+      <span class="tt-approval-val">${pct == null ? "нет голосов" : `${pct}% · ${voteActivity(t)}`}</span>
+    </div>`;
+}
+
+function titleRowHtml(t, rank) {
+  const posterSrc = imgProxy(t.poster_url);
+  const det = detailsCache.has(t.id) ? detailsCache.get(t.id) : undefined;
+  return `
+    <tr data-title-row="${t.id}">
+      <td class="tt-rank">${rank}</td>
+      <td class="tt-main" data-open-title-detail="${t.id}">
+        <div class="tt-title">
+          ${posterSrc ? `<img class="tt-poster" src="${posterSrc}" alt="" loading="lazy">` : `<span class="tt-poster tt-poster-ph"></span>`}
+          <div class="tt-names">
+            <span class="tt-name">${esc(t.name)}</span>
+            <span class="tt-sub tt-original">${det && det.name_original ? esc(det.name_original) : ""}</span>
+          </div>
+        </div>
+      </td>
+      ${detailCellsHtml(det)}
+      <td class="tt-approval-cell">${approvalCellHtml(t)}</td>
+      <td class="tt-vote">
+        <div class="vote-actions tt-vote-actions">
+          <button class="vote-btn${t.my_vote === 1 ? " on-like" : ""}" data-vote-title="${t.id}" data-vote-choice="1" title="Нравится">${LIKE_ICON}<span>${t.likes}</span></button>
+          <button class="vote-btn${t.my_vote === -1 ? " on-dislike" : ""}" data-vote-title="${t.id}" data-vote-choice="-1" title="Не то">${DISLIKE_ICON}<span>${t.dislikes}</span></button>
+        </div>
+      </td>
+    </tr>`;
+}
+
+function titlesTableHtml(titles) {
+  const ranked = titles.slice().sort(TABLE_SORTS.rank);
+  const rankOf = new Map(ranked.map((t, i) => [t.id, i + 1]));
+  const rows = titles.slice().sort(TABLE_SORTS[tableSort] || TABLE_SORTS.rank);
+  const th = (key, label, cls = "") => key
+    ? `<th class="${cls}${tableSort === key ? " sorted" : ""}" data-titles-sort="${key}">${label}</th>`
+    : `<th class="${cls}">${label}</th>`;
+  return `
+    <div class="tt-wrap">
+      <table class="tt-table">
+        <thead><tr>
+          ${th("rank", "#", "tt-rank")}${th("name", "Тайтл")}${th(null, "Формат")}${th(null, "Эп.", "tt-num")}
+          ${th(null, "Студия")}${th(null, "Жанры")}${th("approval", "Одобрение")}${th("votes", "Голос")}
+        </tr></thead>
+        <tbody>${rows.map(t => titleRowHtml(t, rankOf.get(t.id))).join("")}</tbody>
+      </table>
+    </div>`;
+}
 
 // Лидер сезона — только если реально есть за что бороться (хоть один
 // голос с перевесом), иначе на свежем сезоне без голосов "лидером"
@@ -101,6 +228,7 @@ function voteCardHtml(t) {
       <div class="vote-card-tap" data-open-title-detail="${t.id}">
         ${poster}
         <div class="vote-name">${esc(t.name)}</div>
+        <div class="vote-meta" data-card-meta="${t.id}">${esc(cardMetaText(detailsCache.get(t.id)))}</div>
       </div>
       <div class="vote-actions">
         <button class="vote-btn${t.my_vote === 1 ? " on-like" : ""}" data-vote-title="${t.id}" data-vote-choice="1">👍 <span>${t.likes}</span></button>
@@ -133,6 +261,14 @@ async function castVote(titleId, choice, btn) {
     // счётчиком — числа там показывают отдельные .td-stat-pill.
     setCount(likeBtn.querySelector("span"), r.likes);
     setCount(dislikeBtn.querySelector("span"), r.dislikes);
+    const row = btn.closest("[data-title-row]");
+    if (row) {
+      const t = currentTitles.find(x => x.id === titleId);
+      if (t) {
+        t.likes = r.likes; t.dislikes = r.dislikes; t.my_vote = r.my_vote;
+        row.querySelector(".tt-approval-cell").innerHTML = approvalCellHtml(t);
+      }
+    }
     const sheet = btn.closest(".sheet");
     if (sheet) {
       setCount(sheet.querySelector(".td-stat-pill.like"), `👍 ${r.likes}`);
@@ -206,6 +342,10 @@ async function openTitleDetail(titleId) {
 }
 
 export async function loadTitlesTab() {
+  // Вкладку открыли заново или нажали «Обновить» — подробности (счётчик
+  // серий, статус) берём свежие, а не из кэша прошлого показа.
+  detailsCache.clear();
+  clearTitleHoverCache();
   const root = $("#titles-body");
   root.innerHTML = dialogSkeletonHtml(3);
   let d;
@@ -226,6 +366,36 @@ export async function loadTitlesTab() {
   renderTitlesForSeason(d.seasons);
 }
 
+let currentTitles = [];
+
+function renderTitlesBody(wrap, top) {
+  const view = getView();
+  const gridTitles = top ? currentTitles.filter(t => t.id !== top.id) : currentTitles;
+  wrap.innerHTML = voteBentoHtml(currentTitles, top) + (view === "table"
+    ? titlesTableHtml(currentTitles)
+    : `<div class="vote-grid">${gridTitles.map(voteCardHtml).join("")}</div>`);
+  wireVoteButtons(wrap);
+  wrap.querySelectorAll("[data-titles-sort]").forEach(th => {
+    th.addEventListener("click", () => {
+      tableSort = th.dataset.titlesSort;
+      renderTitlesBody(wrap, top);
+    });
+  });
+  const seq = titlesRequestSeq;
+  loadDetails(currentTitles.map(t => t.id), (id, det) => {
+    if (seq !== titlesRequestSeq || !wrap.isConnected) return;
+    const row = wrap.querySelector(`[data-title-row="${id}"]`);
+    if (row) {
+      row.querySelectorAll(".tt-kind, .tt-num, .tt-studio, .tt-genres").forEach(td => td.remove());
+      row.querySelector(".tt-main").insertAdjacentHTML("afterend", detailCellsHtml(det));
+      const orig = row.querySelector(".tt-original");
+      if (orig && det && det.name_original) orig.textContent = det.name_original;
+    }
+    const meta = wrap.querySelector(`[data-card-meta="${id}"]`);
+    if (meta) meta.textContent = cardMetaText(det);
+  });
+}
+
 // Номер последнего запрошенного сезона: ответ на предыдущий запрос
 // может прийти позже, чем на текущий (кликнули «Лето» → «Осень»), и
 // раньше он молча затирал уже отрисованную сетку чужими тайтлами.
@@ -234,11 +404,21 @@ let titlesRequestSeq = 0;
 function renderTitlesForSeason(seasons) {
   const root = $("#titles-body");
   root.innerHTML = `
-    <div class="chip-row" style="justify-content:space-between;">
-      <div class="chip-row" style="padding:0;">
-        ${seasons.map(s => `<button class="qchip${s.id === state.titleSeasonId ? " on" : ""}" data-season="${s.id}">${esc(s.name)}</button>`).join("")}
+    <div class="page-header">
+      <div>
+        <h1>Тайтлы</h1>
+        <div class="sub">Голосование за тайтлы эфир-сезона: что студия берёт в работу.</div>
       </div>
-      <button class="btn ghost" id="titles-admin-btn" style="font-size:12px; padding:6px 10px;">🛠 Управление</button>
+      <div class="page-header-actions">
+        <div class="seg-toggle" role="group" aria-label="Вид">
+          <button type="button" class="seg-btn${getView() === "cards" ? " active" : ""}" data-titles-view="cards" aria-pressed="${getView() === "cards"}">Карточки</button>
+          <button type="button" class="seg-btn${getView() === "table" ? " active" : ""}" data-titles-view="table" aria-pressed="${getView() === "table"}">Таблица</button>
+        </div>
+        <button class="btn" id="titles-admin-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.3-1a7 7 0 0 0 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z"/></svg>Управление</button>
+      </div>
+    </div>
+    <div class="chip-row" style="padding:0 0 14px;">
+      ${seasons.map(s => `<button class="qchip${s.id === state.titleSeasonId ? " on" : ""}" data-season="${s.id}">${esc(s.name)}</button>`).join("")}
     </div>
     <div id="titles-grid">${dialogSkeletonHtml(3)}</div>
   `;
@@ -246,6 +426,18 @@ function renderTitlesForSeason(seasons) {
     btn.addEventListener("click", () => {
       state.titleSeasonId = parseInt(btn.dataset.season, 10);
       renderTitlesForSeason(seasons);
+    });
+  });
+  root.querySelectorAll("[data-titles-view]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      setView(btn.dataset.titlesView);
+      root.querySelectorAll("[data-titles-view]").forEach(b => {
+        const on = b === btn;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-pressed", String(on));
+      });
+      const wrap = $("#titles-grid");
+      if (wrap && currentTitles.length) renderTitlesBody(wrap, voteSeasonTop(currentTitles));
     });
   });
   root.querySelector("#titles-admin-btn").addEventListener("click", () => {
@@ -261,10 +453,8 @@ function renderTitlesForSeason(seasons) {
       wrap.innerHTML = `<div class="empty-state"><div style="font-size:34px; margin-bottom:8px;">🎬</div>Тайтлов в этом сезоне пока нет.</div>`;
       return;
     }
-    const top = voteSeasonTop(d.titles);
-    const gridTitles = top ? d.titles.filter(t => t.id !== top.id) : d.titles;
-    wrap.innerHTML = voteBentoHtml(d.titles, top) + `<div class="vote-grid">${gridTitles.map(voteCardHtml).join("")}</div>`;
-    wireVoteButtons(wrap);
+    currentTitles = d.titles;
+    renderTitlesBody(wrap, voteSeasonTop(d.titles));
   }).catch(e => {
     const wrap = $("#titles-grid");
     if (wrap && seq === titlesRequestSeq) wrap.innerHTML = `<div class="bento-empty">Не удалось загрузить тайтлы: ${esc(e.message)}</div>`;

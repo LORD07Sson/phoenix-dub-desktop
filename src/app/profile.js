@@ -13,6 +13,7 @@ import { donutHtml, donutLegendHtml, playDonutIntro } from "./charts.js";
 import { devModeActive, devPanelHtml, wireDevPanel } from "./devmode.js";
 import { openReportDetail } from "./report-detail.js";
 import { openExternal, sendNotification } from "./tauri.js";
+import { markMyReportsSeen } from "./notifications.js";
 // Тот же маскот, что на экране загрузки (index.html) — Vite отдаёт
 // готовый URL собранного ассета. Больше ему показаться негде, хотя он
 // уже лежит в каждой сборке.
@@ -191,13 +192,15 @@ function loadStructureHtml(me) {
     // ширину экрана. Пустые руки — это повод предложить работу, а не
     // сообщить о пустоте: свободные серии дозагружаются в fillIdleSlot().
     return `
-      <div class="sec-title">📊 Структура загрузки</div>
+      <div class="bcell profile-section">
+      <h3>Структура загрузки</h3>
       <div class="idle-card" id="idle-slot">
         <img class="idle-mascot" src="${mascotUrl}" alt="">
         <div class="idle-text">
           <div class="t">На руках пусто</div>
           <div class="d">смотрю, есть ли свободные серии…</div>
         </div>
+      </div>
       </div>
     `;
   }
@@ -216,7 +219,7 @@ function loadStructureHtml(me) {
       <div class="donut-legend">${donutLegendHtml(segments)}</div>
     </div>` : "";
   const roleBlock = hasRoles ? `
-    <div style="margin-top:${hasReports ? "14px" : "0"}; font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;">Роли в пайплайне</div>
+    <div class="profile-subtitle" style="margin-top:${hasReports ? "16px" : "0"};">Роли в пайплайне</div>
     ${me.role_breakdown.map(rb => `
       <div class="role-bar-row">
         <div class="label"><span>${esc(rb.role)}</span><span>${rb.count} · ${rb.pct}%</span></div>
@@ -224,8 +227,10 @@ function loadStructureHtml(me) {
       </div>
     `).join("")}` : "";
   return `
-    <div class="sec-title">📊 Структура загрузки</div>
-    <div class="stat-donut-card">${donutBlock}${roleBlock}</div>
+    <div class="bcell profile-section">
+      <h3>Структура загрузки</h3>
+      ${donutBlock}${roleBlock}
+    </div>
   `;
 }
 
@@ -268,14 +273,14 @@ function profileHeaderHtml(d, isSelf, asParts) {
 
     ${tenureProgressHtml(d.member_since_days)}
     ${teamTeaserHtml(d)}
-    ${isSelf ? `<div style="display:flex; justify-content:flex-end;"><button class="icon-btn" id="btn-edit-profile" title="Изменить статус и о себе">✏️</button></div>` : ""}
+    ${isSelf ? `<button class="btn profile-edit-btn" id="btn-edit-profile" title="Изменить статус и о себе"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="M13.5 6.5l4 4"/></svg>Изменить профиль</button>` : ""}
   `;
 
   const right = `
-    ${d.status_text ? `<div class="status-quote">💬 ${esc(d.status_text)}</div>` : ""}
+    ${d.status_text ? `<div class="status-quote">${esc(d.status_text)}</div>` : ""}
     ${d.bio ? `<div class="profile-bio">${esc(d.bio)}</div>` : ""}
 
-    <div class="bc-meta-line">📋 ${d.assigned} на нём сейчас${d.overdue ? ` · <span class="warn">⏰ ${d.overdue} просрочено</span>` : ""}${d.avg_days != null ? ` · ⏱ в среднем ${d.avg_days.toFixed ? d.avg_days.toFixed(1) : d.avg_days} дн.` : ""}</div>
+    ${asParts ? "" : `<div class="bc-meta-line">${d.assigned} на нём сейчас${d.overdue ? ` · <span class="warn">⏰ ${d.overdue} просрочено</span>` : ""}${d.avg_days != null ? ` · ⏱ в среднем ${d.avg_days.toFixed ? d.avg_days.toFixed(1) : d.avg_days} дн.` : ""}</div>`}
 
     ${loadStructureHtml(d)}
   `;
@@ -363,6 +368,7 @@ export async function loadProfile() {
     return false;
   }
   state.isDeveloper = !!me.is_developer; // используется для показа переключателя dev-режима в Настройках
+  markMyReportsSeen((me.reports || []).map(r => r.public_id));
 
   const goalSet = me.monthly_goal != null && me.monthly_goal > 0;
   const goalDone = me.completed_month || 0;
@@ -373,40 +379,59 @@ export async function loadProfile() {
       <div class="goal-ring-wrap">${goalRingHtml(goalPct, goalOver)}
         <div class="goal-ring-label"><b>${goalDone}</b><span>из ${me.monthly_goal}</span></div>
       </div>
-      <div><div class="cap">${goalOver ? "✅ цель выполнена" : `цель месяца · <b>${goalPct}%</b>`}</div>
-      <div class="edit-hint">изменить →</div></div>
+      <div><h3 style="margin-bottom:4px;">Цель месяца</h3><div class="cap">${goalOver ? "цель выполнена" : `выполнено <b>${goalPct}%</b>`}</div>
+      <div class="edit-hint">изменить</div></div>
     </div>
   ` : `
     <div class="bcell wide goal-card" id="goal-card">
       <h3>Цель месяца</h3>
-      <div class="goal-hint" style="margin-top:4px;">🎯 Цель на месяц не задана — нажмите, чтобы поставить себе план.</div>
+      <div class="goal-hint" style="margin-top:4px;">Цель на месяц не задана — нажмите, чтобы поставить себе план.</div>
       <div class="goal-hint" id="goal-pace" hidden></div>
     </div>
   `;
 
   const header = profileHeaderHtml(me, true, true);
   root.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1>Мой профиль</h1>
+        <div class="sub">Ваша загрузка, результаты и достижения в студии.</div>
+      </div>
+    </div>
     <div class="profile-head-grid">
       <div class="profile-head-left">${header.left}</div>
       <div class="profile-head-right">
+        <div class="an-metrics">
+          <div class="bcell kpi-cell" style="animation-delay:0ms;">
+            <h3>Сейчас на мне</h3>
+            <div class="big-num">${me.assigned ?? 0}</div>
+            <div class="sub">${me.overdue ? `<span style="color:var(--s-stop);">${me.overdue} просрочено</span>` : "всё в сроках"}</div>
+          </div>
+          <div class="bcell kpi-cell" style="animation-delay:40ms;">
+            <h3>Закрыто</h3>
+            <div class="big-num">${me.completed_total ?? 0}</div>
+            <div class="sub">${me.completed_week ?? 0} за неделю · ${me.completed_month ?? 0} за месяц</div>
+          </div>
+          <div class="bcell kpi-cell" style="animation-delay:80ms;">
+            <h3>Вовремя</h3>
+            <div class="big-num">${me.on_time_pct != null ? me.on_time_pct + "%" : "—"}</div>
+            <div class="sub">${me.on_time_pct != null ? "закрыто не позже срока" : "нет отчётов со сроком"}</div>
+          </div>
+          <div class="bcell kpi-cell" style="animation-delay:120ms;">
+            <h3>Средний срок</h3>
+            <div class="big-num">${me.avg_days != null ? `${me.avg_days.toFixed(1)}д` : "—"}</div>
+            <div class="sub">на один отчёт</div>
+          </div>
+        </div>
         ${header.right}
         <div class="bento">
           ${goalCardHtml}
-          <div class="bcell" style="animation-delay:60ms;">
-            <h3>Закрыто</h3>
-            <div class="big-num">${me.completed_total}</div>
-            <div class="sub">${me.completed_week} за неделю · ${me.completed_month} за месяц</div>
-          </div>
-          <div class="bcell" style="animation-delay:100ms;">
-            <h3>Вовремя</h3>
-            <div class="big-num${me.on_time_pct == null ? " muted" : ""}">${me.on_time_pct != null ? me.on_time_pct + "%" : "—"}</div>
-            <div class="sub">${me.on_time_pct != null
-              ? (me.avg_days != null ? `в среднем ${me.avg_days.toFixed(1)} дн. на отчёт` : "")
-              : "считается по отчётам со сроком — их пока нет"}</div>
-          </div>
           ${badgesBentoHtml(me, 140)}
           <div class="bcell wide" id="activity-card" style="animation-delay:180ms; cursor:pointer;">
-            <h3>Моя активность →</h3>
+            <div class="dash-cell-head" style="margin-bottom:4px;">
+              <span class="dash-cell-title">Моя активность</span>
+              <span class="dash-link">открыть</span>
+            </div>
             <div class="sub">последние действия по отчётам</div>
           </div>
         </div>
@@ -664,7 +689,7 @@ export async function openUserProfile(telegramId) {
   }
   d.telegram_id = telegramId;
   const reportsHtml = (d.reports && d.reports.length) ? `
-    <div class="sec-title" style="margin-top:16px;">📋 Текущие отчёты</div>
+    <div class="sec-title" style="margin-top:16px;">Текущие отчёты</div>
     <div class="mini-list">
       ${d.reports.map(r => `<div class="mini-row" data-open-report="${esc(r.public_id)}" style="cursor:pointer;"><span class="name">${esc(r.public_id)} · ${esc(r.title)}</span><span class="val">${esc(r.status_label)}</span></div>`).join("")}
     </div>` : "";

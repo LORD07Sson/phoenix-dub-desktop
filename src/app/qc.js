@@ -18,6 +18,17 @@ function baseName(path) {
   return String(path).split(/[\\/]/).pop() || path;
 }
 
+// «2 файла», но «5 файлов» — раньше заголовок пакетного QC всегда
+// писал «файла», и на десятке дорожек читалось «10 файла».
+function pluralFiles(n) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "файл";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "файла";
+  return "файлов";
+}
+
+const SCISSORS_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.1 8.1L20 20M8.1 15.9L20 4"/></svg>';
+
 // path — необязателен: когда он есть (одиночный QC и раскрытая строка
 // пакетного QC — там путь файла тоже известен), рядом с находкой
 // рисуется кнопка «вырезать фрагмент», см. wireExportButtons ниже.
@@ -31,7 +42,7 @@ function findingsHtml(findings, path) {
       </div>
       ${path ? `<button type="button" class="qc-export-btn" title="Сохранить фрагмент вокруг находки как WAV"
           data-export-path="${esc(path)}" data-export-start="${f.start}" data-export-end="${f.end}"
-          data-export-kind="${esc(f.kind)}">✂ Фрагмент</button>` : ""}
+          data-export-kind="${esc(f.kind)}">${SCISSORS_ICON}Фрагмент</button>` : ""}
     </div>
   `).join("");
 }
@@ -63,17 +74,22 @@ function drawWaveform(canvas, waveform, findings) {
 
   // Диапазоны находок — полупрозрачные полосы под волной, цвет по
   // серьёзности (та же пара цветов, что .qc-finding.error/.warn).
+  const css = window.getComputedStyle(document.documentElement);
+  const token = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+
   (findings || []).forEach(f => {
     if (!waveform.duration) return;
     const x1 = (f.start / waveform.duration) * cssWidth;
     const x2 = (f.end / waveform.duration) * cssWidth;
-    ctx.fillStyle = f.severity === "error" ? "rgba(255,139,130,.28)" : "rgba(232,188,85,.24)";
+    ctx.globalAlpha = .26;
+    ctx.fillStyle = f.severity === "error" ? token("--s-stop", "#ff6b6b") : token("--s-work", "#ff9d4d");
     ctx.fillRect(x1, 0, Math.max(1.5, x2 - x1), cssHeight);
+    ctx.globalAlpha = 1;
   });
 
   const grad = ctx.createLinearGradient(0, 0, 0, cssHeight);
-  grad.addColorStop(0, "#ff7a45");
-  grad.addColorStop(1, "#ffc773");
+  grad.addColorStop(0, token("--fire", "#ff6a2b"));
+  grad.addColorStop(1, token("--gold", "#ffb444"));
   ctx.fillStyle = grad;
   for (let i = 0; i < buckets; i++) {
     const min = waveform.peaks[i * 2];
@@ -84,7 +100,7 @@ function drawWaveform(canvas, waveform, findings) {
     ctx.fillRect(x, yTop, Math.max(1, barWidth - 0.5), Math.max(1, yBottom - yTop));
   }
 
-  ctx.strokeStyle = "rgba(255,255,255,.1)";
+  ctx.strokeStyle = token("--line", "#1e212c");
   ctx.beginPath();
   ctx.moveTo(0, mid + 0.5);
   ctx.lineTo(cssWidth, mid + 0.5);
@@ -133,7 +149,7 @@ document.addEventListener("click", async e => {
   try {
     await invoke("export_audio_clip", { path, start, end, savePath });
     toast("Фрагмент сохранён.", "success", {
-      label: "📂 Показать в папке",
+      label: "Показать в папке",
       onClick: () => revealInFolder(savePath),
     });
   } catch (err) {
@@ -153,7 +169,7 @@ document.addEventListener("click", async e => {
 export async function runQcAnalysis(path, opts = {}) {
   const overlay = openSheet(`
     <h2>QC звука</h2>
-    <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-8px;">${esc(path)}</p>
+    <div class="qc-file" title="${esc(path)}">${esc(baseName(path))}</div>
     <div id="qc-body">${dialogSkeletonHtml(3)}</div>
     <div class="sheet-actions" id="qc-actions"><button class="btn" data-close>Закрыть</button></div>
   `);
@@ -162,16 +178,21 @@ export async function runQcAnalysis(path, opts = {}) {
   try {
     const report = await invoke("qc_analyze", { path });
     const body = overlay.querySelector("#qc-body");
-    const waveformHtml = `<canvas class="qc-waveform"></canvas>`;
+    const errors = report.findings.filter(f => f.severity === "error").length;
+    const statsHtml = `
+      <div class="qc-stats">
+        <div class="qc-stat"><span>Длительность</span><b>${formatTime(report.duration)}</b></div>
+        <div class="qc-stat"><span>Пик</span><b>${report.peak_dbfs.toFixed(1)} <i>дБФС</i></b></div>
+        <div class="qc-stat"><span>RMS</span><b>${report.rms_dbfs.toFixed(1)} <i>дБФС</i></b></div>
+        <div class="qc-stat"><span>Замечаний</span><b style="color:var(${errors ? "--s-stop" : report.findings.length ? "--s-work" : "--s-done"});">${report.findings.length}</b></div>
+      </div>
+      <div class="qc-wave-card"><canvas class="qc-waveform"></canvas></div>`;
     if (!report.findings.length) {
-      body.innerHTML = waveformHtml +
-        `<div style="color:var(--s-done);">✓ Замечаний не найдено. Пик ${report.peak_dbfs.toFixed(1)} дБФС, RMS ${report.rms_dbfs.toFixed(1)} дБФС, длительность ${formatTime(report.duration)}.</div>`;
+      body.innerHTML = statsHtml + `<div class="qc-clean">Замечаний не найдено — дорожка чистая.</div>`;
       loadWaveform(overlay, path, report.findings);
       return;
     }
-    body.innerHTML = waveformHtml +
-      `<div style="color:var(--ink-soft); font-size:12.5px; margin-bottom:10px;">Длительность ${formatTime(report.duration)} · Пик ${report.peak_dbfs.toFixed(1)} дБФС · RMS ${report.rms_dbfs.toFixed(1)} дБФС</div>` +
-      findingsHtml(report.findings, path);
+    body.innerHTML = statsHtml + `<div class="qc-findings">${findingsHtml(report.findings, path)}</div>`;
     loadWaveform(overlay, path, report.findings);
     if (opts.reportId) wireAddToNotes(overlay, opts.reportId, report.findings);
   } catch (e) {
@@ -186,7 +207,7 @@ function wireAddToNotes(overlay, reportId, findings) {
   const btn = document.createElement("button");
   btn.className = "btn primary";
   btn.style.marginRight = "auto";
-  btn.textContent = `📝 В заметки отчёта (${findings.length})`;
+  btn.textContent = `В заметки отчёта (${findings.length})`;
   actions.prepend(btn);
   btn.addEventListener("click", async () => {
     btn.disabled = true;
@@ -203,7 +224,7 @@ function wireAddToNotes(overlay, reportId, findings) {
     } catch (e) {
       toast(`Добавлено ${added} из ${findings.length}: ${e.message}`, "error");
       btn.disabled = false;
-      btn.textContent = `📝 В заметки отчёта (${findings.length})`;
+      btn.textContent = `В заметки отчёта (${findings.length})`;
     }
   });
 }
@@ -263,12 +284,13 @@ async function notifyBatchDoneIfHidden(total, bad, broken) {
 
 export async function runQcBatch(paths) {
   const overlay = openSheet(`
-    <h2>QC звука — ${paths.length} ${paths.length === 1 ? "файл" : "файла"}</h2>
+    <h2>QC звука — ${paths.length} ${pluralFiles(paths.length)}</h2>
     <div class="qc-batch-head">
       <span id="qc-progress">Анализирую 1 из ${paths.length}…</span>
-      <button class="btn ghost" id="qc-sort" hidden style="padding:4px 10px; font-size:12px;">Сначала проблемные</button>
+      <button class="btn" id="qc-sort" hidden>Сначала проблемные</button>
     </div>
     <div class="qc-table" id="qc-rows">
+      <div class="qc-table-head"><div class="nm">Файл</div><div class="pk">Пик</div><div class="rm">RMS</div><div class="st">Итог</div></div>
       ${paths.map((p, i) => `
         <div class="qc-row pending" data-i="${i}">
           <div class="nm" title="${esc(p)}">${esc(baseName(p))}</div>
@@ -312,7 +334,9 @@ export async function runQcBatch(paths) {
     } catch (e) {
       error = String(e);
     }
-    if (!overlay.isConnected) return;
+    // Закрыли посреди прогона — сбрасываем и индикатор на панели задач,
+    // иначе он так и оставался висеть на последнем проценте.
+    if (!overlay.isConnected) { setTaskbarProgress(null); return; }
 
     const severity = rowSeverity(report);
     results[i] = { path: paths[i], report, error, severity };
@@ -326,14 +350,18 @@ export async function runQcBatch(paths) {
       if (report.findings.length) {
         box.innerHTML = findingsHtml(report.findings, paths[i]);
         row.classList.add("expandable");
-        row.addEventListener("click", () => { box.hidden = !box.hidden; });
+        row.addEventListener("click", e => {
+          if (e.target.closest(".qc-row-findings")) return;
+          box.hidden = !box.hidden;
+        });
       }
       row.querySelector(".nm").title = `${paths[i]}\nДлительность ${formatTime(report.duration)}`;
     } else {
       row.querySelector(".st").innerHTML = `<span style="color:var(--s-stop);">не прочитан</span>`;
       row.querySelector(".qc-row-findings").innerHTML = `<div style="color:var(--s-stop); font-size:12px;">${esc(error)}</div>`;
       row.classList.add("expandable");
-      row.addEventListener("click", () => {
+      row.addEventListener("click", e => {
+        if (e.target.closest(".qc-row-findings")) return;
         const box = row.querySelector(".qc-row-findings");
         box.hidden = !box.hidden;
       });

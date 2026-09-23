@@ -28,7 +28,7 @@ export function isFocusModeOn() { return active; }
 // состояние на неё накладывает не apply() сам по себе, а отдельный
 // syncFocusButton(), который report-detail.js зовёт после каждого
 // render() уже на новый DOM-узел.
-function buttonLabel() { return active ? "🧘 Фокус: вкл" : "🧘 Фокус"; }
+function buttonLabel() { return active ? "Фокус: вкл" : "Фокус"; }
 function buttonTitle() { return `${active ? "Выйти из фокус-режима" : "Фокус-режим"} (Ctrl+Shift+F)`; }
 
 export function syncFocusButton(btn) {
