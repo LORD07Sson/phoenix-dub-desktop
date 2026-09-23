@@ -16,6 +16,7 @@ import { openBirthdaysSheet } from "./birthdays.js";
 import { openRolesSheet } from "./roles.js";
 import { openAdminLogSheet } from "./admin-log.js";
 import { openChannelPostSheet } from "./channel-post.js";
+import { openMentionsSheet } from "./mentions.js";
 import { esc } from "./utils.js";
 import { avatarHtml, loadAvatars } from "./profile.js";
 
@@ -99,11 +100,13 @@ export async function openAdminPanel() {
         reqSlot.innerHTML = `
           <button class="btn" id="btn-open-tickets" style="width:100%; justify-content:center; margin-bottom:8px;">Тикеты поддержки</button>
           <button class="btn" id="btn-open-access-requests" style="width:100%; justify-content:center;">Заявки на доступ${s.pending_access_requests ? ` · ${s.pending_access_requests}` : ""}</button>
+          <button class="btn" id="btn-open-mentions" style="width:100%; justify-content:center; margin-top:8px;">Список на упоминание</button>
           ${s.is_owner ? `<button class="btn" id="btn-open-owner-requests" style="width:100%; justify-content:center; margin-top:8px;">На подтверждении${s.pending_owner_requests ? ` · ${s.pending_owner_requests}` : ""}</button>` : ""}
           ${s.is_owner ? `<button class="btn" id="btn-open-admin-log" style="width:100%; justify-content:center; margin-top:8px;">Журнал действий</button>` : ""}
         `;
         reqSlot.querySelector("#btn-open-tickets").addEventListener("click", () => openTicketsSheet());
         reqSlot.querySelector("#btn-open-access-requests").addEventListener("click", openAccessRequestsSheet);
+        reqSlot.querySelector("#btn-open-mentions").addEventListener("click", () => openMentionsSheet());
         const ownerBtn = reqSlot.querySelector("#btn-open-owner-requests");
         if (ownerBtn) ownerBtn.addEventListener("click", openOwnerRequestsSheet);
         const logBtn = reqSlot.querySelector("#btn-open-admin-log");

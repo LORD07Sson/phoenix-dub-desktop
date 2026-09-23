@@ -5,6 +5,8 @@
 // и /api/user/{id} (совместимая форма ответа — общая разметка на двоих).
 
 import { state } from "./state.js";
+import { fillRemindersCard } from "./reminders.js";
+import { fetchPerson, workSectionHtml, wireWorkSection, fillPauseCard } from "./people.js";
 import { apiGet, apiPost, apiDelete, openSheet, toast, dialogSkeletonHtml, mediaUrl } from "./api.js";
 import { $, esc, isOverdue, MONTHS_RU, STATUS_COLOR_VAR, BADGE_RARITY_ORDER, pluralColleagues, showContextMenu } from "./utils.js";
 import { setQuickFilter, loadReports } from "./reports.js";
@@ -434,6 +436,8 @@ export async function loadProfile() {
             </div>
             <div class="sub">последние действия по отчётам</div>
           </div>
+          <div class="bcell wide" id="reminders-card" style="animation-delay:190ms; cursor:pointer;" role="button" tabindex="0"></div>
+          <div class="bcell wide" id="pause-card" style="animation-delay:200ms; cursor:pointer;" role="button" tabindex="0"></div>
         </div>
         ${devModeActive() ? devPanelHtml(me) : ""}
       </div>
@@ -444,6 +448,8 @@ export async function loadProfile() {
   // подсказки в одном блоке незачем (иначе на них ждала бы и кнопка
   // «Обновить», которая дожидается loadProfile).
   fillIdleSlot(root);
+  fillPauseCard(root, me.telegram_id);
+  fillRemindersCard(root);
   let suggested = null;
   if (!goalSet) suggestGoal(root).then(v => { suggested = v; });
   root.querySelector("#goal-card").addEventListener("click", () => monthlyGoalDialog(me.monthly_goal || suggested));
@@ -680,8 +686,11 @@ async function openTelegramProfile(username) {
 export async function openUserProfile(telegramId) {
   const overlay = openSheet(dialogSkeletonHtml(6), "wide");
   let d;
+  let person = null;
   try {
-    d = await apiGet(`/user/${telegramId}`);
+    // Карточка «Работа» (загрузка, пауза, передача дел) — отдельным
+    // запросом; на старом сервере без /people профиль просто без неё.
+    [d, person] = await Promise.all([apiGet(`/user/${telegramId}`), fetchPerson(telegramId)]);
   } catch (e) {
     overlay.querySelector(".sheet").innerHTML = `<div class="bento-empty">Не удалось загрузить профиль: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
     overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
@@ -697,8 +706,9 @@ export async function openUserProfile(telegramId) {
   const sheet = overlay.querySelector(".sheet");
   sheet.innerHTML = `
     ${profileHeaderHtml(d)}
+    ${person ? workSectionHtml(person) : ""}
     <div class="bento">${badgesBentoHtml(d, 0)}</div>
-    ${reportsHtml}
+    ${person ? "" : reportsHtml}
     ${devModeActive() ? devPanelHtml(d) : ""}
     <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
   `;
@@ -707,5 +717,6 @@ export async function openUserProfile(telegramId) {
   sheet.querySelectorAll("[data-open-report]").forEach(row => {
     row.addEventListener("click", () => openReportDetail(row.dataset.openReport));
   });
+  if (person) wireWorkSection(sheet, person, async () => { await openUserProfile(telegramId); overlay.remove(); });
   if (devModeActive()) wireDevPanel(sheet, telegramId, async () => { await openUserProfile(telegramId); overlay.remove(); }, d.role);
 }
