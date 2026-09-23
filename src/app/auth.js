@@ -131,6 +131,31 @@ async function submitCode() {
 $("#submit-code").addEventListener("click", submitCode);
 $("#code-input").addEventListener("keydown", e => { if (e.key === "Enter") submitCode(); });
 
+// Шесть ячеек — только картинка поверх одного настоящего поля ввода:
+// вставка из буфера, автозаполнение и ввод работают как обычно, а
+// ячейки просто показывают цифры. Шестая цифра — сразу вход.
+function renderCodeCells() {
+  const input = $("#code-input");
+  const digits = input.value.replace(/\D/g, "");
+  if (digits !== input.value) input.value = digits;
+  const cells = document.querySelectorAll(".code-cell");
+  const focused = document.activeElement === input;
+  cells.forEach((c, i) => {
+    c.textContent = digits[i] || "";
+    c.classList.toggle("filled", !!digits[i]);
+    c.classList.toggle("active", focused && i === Math.min(digits.length, cells.length - 1));
+  });
+  return digits;
+}
+$("#code-input").addEventListener("input", () => {
+  $("#auth-error").textContent = "";
+  const digits = renderCodeCells();
+  if (digits.length === 6 && !$("#submit-code").disabled) submitCode();
+});
+$("#code-input").addEventListener("focus", renderCodeCells);
+$("#code-input").addEventListener("blur", renderCodeCells);
+renderCodeCells();
+
 // Полный выход: и состояние, и уже отрисованные данные на вкладках, и
 // точки отсчёта фоновых опросов. Без сброса последних следующий
 // вошедший на этой машине получал системное уведомление «вам назначено
@@ -143,6 +168,7 @@ function logout() {
   clearTabDom();
   armSessionExpiry();
   $("#code-input").value = "";
+  renderCodeCells();
   showAuth();
 }
 

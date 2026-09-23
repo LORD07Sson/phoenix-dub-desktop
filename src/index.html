@@ -79,14 +79,37 @@
 
 <!-- ===================== Экран входа ===================== -->
 <div id="auth-screen">
-  <div class="auth-card">
-    <div class="auth-flame">🔥</div>
-    <h1>Вход в студию</h1>
-    <p>Напишите боту в Telegram команду <b>/desktop</b> — он пришлёт одноразовый
-      6-значный код. Введите его сюда.</p>
-    <input id="code-input" class="code-input" inputmode="numeric" maxlength="8" placeholder="000000" autofocus>
-    <button id="submit-code" class="btn primary" style="width:100%; justify-content:center;">Войти</button>
-    <div id="auth-error" class="auth-error"></div>
+  <div class="auth-split">
+    <section class="auth-brand" aria-hidden="true">
+      <div class="auth-beam"></div>
+      <div class="auth-logo brand-logo"><svg class="brand-mark" viewBox="0 0 24 24"><path class="bm-a" d="M5 5L19 19"/><path class="bm-b" d="M19 5L5 19"/></svg></div>
+      <div class="auth-word">PHOENIX <span>DUB</span></div>
+      <div class="auth-tag">студия дубляжа аниме</div>
+      <ul class="auth-points">
+        <li><i><svg viewBox="0 0 24 24"><path d="M3 7l2-3h7l2 3h7v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg></i><span><b>Доска и отчёты</b>весь конвейер серий в одном окне</span></li>
+        <li><i><svg viewBox="0 0 24 24"><path d="M4 12h3l2-6 4 12 2-6h5"/></svg></i><span><b>QC звука и ffmpeg</b>проверка и сборка дорожек локально</span></li>
+        <li><i><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="M3.5 9.5h17M8 2.5v4M16 2.5v4"/></svg></i><span><b>Календарь и тайтлы</b>выход серий, сроки и голосование</span></li>
+      </ul>
+    </section>
+
+    <section class="auth-card">
+      <h1>Вход в студию</h1>
+      <p class="auth-sub">Вход по одноразовому коду из Telegram — без паролей.</p>
+      <ol class="auth-steps">
+        <li><b>1</b><span>Откройте бота студии в Telegram</span></li>
+        <li><b>2</b><span>Отправьте команду <code>/desktop</code></span></li>
+        <li><b>3</b><span>Введите 6 цифр из ответа</span></li>
+      </ol>
+      <label class="code-boxes" for="code-input">
+        <input id="code-input" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="8" aria-label="Код из Telegram" autofocus>
+        <span class="code-cell"></span><span class="code-cell"></span><span class="code-cell"></span>
+        <span class="code-gap"></span>
+        <span class="code-cell"></span><span class="code-cell"></span><span class="code-cell"></span>
+      </label>
+      <button id="submit-code" class="btn primary auth-go">Войти</button>
+      <div id="auth-error" class="auth-error" role="alert"></div>
+      <div class="auth-foot">Код живёт несколько минут и работает один раз. Можно вставить его целиком — Ctrl+V.</div>
+    </section>
   </div>
 </div>
 
