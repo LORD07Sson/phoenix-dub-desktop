@@ -73,7 +73,33 @@ export async function tryRestoreSession() {
   }
 }
 
+// Искры над «DUB» — случайные позиция, размер, скорость и снос, чтобы
+// не шли строем. Создаются один раз, дальше крутятся на CSS.
+function spawnEmbers() {
+  const host = document.querySelector(".aw-embers");
+  if (!host || host.childElementCount) return;
+  for (let i = 0; i < 22; i++) {
+    const b = document.createElement("b");
+    b.style.setProperty("--x", `${Math.round(Math.random() * 100)}%`);
+    b.style.setProperty("--s", `${(3 + Math.random() * 5).toFixed(1)}px`);
+    b.style.setProperty("--d", `${(1.8 + Math.random() * 2).toFixed(2)}s`);
+    b.style.setProperty("--w", `${(0.9 + Math.random() * 2.6).toFixed(2)}s`);
+    b.style.setProperty("--dx", `${Math.round(Math.random() * 40 - 20)}px`);
+    host.appendChild(b);
+  }
+}
+
+// Надпись влетает заново при каждом показе экрана входа (после выхода
+// тоже), а не только при первой загрузке окна.
+function replayWordmark() {
+  const word = document.querySelector(".auth-word");
+  if (!word) return;
+  word.querySelectorAll(".aw-part i").forEach(i => { i.style.animation = "none"; void i.offsetWidth; i.style.animation = ""; });
+}
+
 export function showAuth(err) {
+  spawnEmbers();
+  replayWordmark();
   $("#auth-screen").hidden = false;
   $("#app-screen").hidden = true;
   // Полоса заголовка теперь общая для всех экранов (окно без системных
