@@ -21,6 +21,8 @@ function lastSeenKey() {
 function getLastSeen() {
   try { return localStorage.getItem(lastSeenKey()) || ""; } catch (_) { return ""; }
 }
+// Для подсветки новых событий в самой ленте (feed.js).
+export function getFeedLastSeen() { return getLastSeen(); }
 function setLastSeen(ts) {
   try { localStorage.setItem(lastSeenKey(), ts); } catch (_) { /* приватный режим — не критично, просто без запоминания */ }
 }

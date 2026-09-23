@@ -171,49 +171,103 @@ function titlesTableHtml(titles) {
     </div>`;
 }
 
-// Лидер сезона — только если реально есть за что бороться (хоть один
-// голос с перевесом), иначе на свежем сезоне без голосов "лидером"
-// стал бы случайный первый по порядку тайтл.
-function voteSeasonTop(titles) {
-  const ranked = titles.filter(t => t.likes > t.dislikes)
-    .sort((a, b) => (b.likes - b.dislikes) - (a.likes - a.dislikes));
-  return ranked[0] || null;
+// Баннер сезона (по мотивам AniVerse): крупный постер на размытом фоне,
+// описание с Shikimori, голосование и лента «В тренде» — клик по постеру
+// в ленте переключает баннер, без клика он сам листается раз в 9 секунд.
+const HERO_COUNT = 5;
+const HERO_ICONS = {
+  heart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z"/></svg>',
+  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M10 9.3v5.4l4.6-2.7z" fill="currentColor" stroke="none"/></svg>',
+  flame: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5.3 1.5 1 2.5 2 3-.5-3 0-6 1-8.5Z"/></svg>',
+  info: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/></svg>',
+};
+let heroTimer = null;
+let heroIndex = 0;
+
+function heroTitles(titles) {
+  return titles.slice().sort(TABLE_SORTS.rank).slice(0, HERO_COUNT);
 }
 
-function voteBentoHtml(titles, top) {
-  const totalVotes = titles.reduce((s, t) => s + voteActivity(t), 0);
-
-  const statsHtml = `
-    <div class="bcell"><h3>Тайтлов в сезоне</h3><div class="big-num">${titles.length}</div></div>
-    <div class="bcell"><h3>Голосов подано</h3><div class="big-num">${totalVotes}</div></div>
-  `;
-
-  if (!top) return `<div class="bento">${statsHtml}</div>`;
-
-  // Проверяем СОБРАННЫЙ адрес, а не только наличие poster_url: без
-  // токена mediaUrl() вернёт пустую строку, а <img src=""> — это
-  // запрос самой страницы и битая картинка вместо заглушки.
-  const posterSrc = imgProxy(top.poster_url);
-  const poster = posterSrc
-    ? `<img class="vote-hero-poster" src="${posterSrc}" alt="" data-open-title-detail="${top.id}">`
-    : `<div class="vote-hero-poster vote-poster-ph" data-open-title-detail="${top.id}">🎬</div>`;
-
-  const heroHtml = `
-    <div class="bcell wide vote-hero">
-      ${poster}
-      <div class="vote-hero-body">
-        <div data-open-title-detail="${top.id}" style="cursor:pointer;">
-          <span class="vote-hero-tag">🏆 Топ сезона</span>
-          <div class="vote-hero-name">${esc(top.name)}</div>
-        </div>
-        <div class="vote-actions">
-          <button class="vote-btn${top.my_vote === 1 ? " on-like" : ""}" data-vote-title="${top.id}" data-vote-choice="1">👍 <span>${top.likes}</span></button>
-          <button class="vote-btn${top.my_vote === -1 ? " on-dislike" : ""}" data-vote-title="${top.id}" data-vote-choice="-1">👎 <span>${top.dislikes}</span></button>
-        </div>
+function heroBodyHtml(t, rank, seasonName) {
+  const det = detailsCache.get(t.id);
+  const posterSrc = imgProxy(t.poster_url);
+  const pct = approvalPct(t);
+  const meta = [seasonName, det && det.kind_label, det && det.aired_on && det.aired_on.slice(0, 4)].filter(Boolean);
+  const eps = episodesText(det);
+  const leader = rank === 1 && t.likes > t.dislikes;
+  return `
+    <div class="tl-hero-bg"${posterSrc ? ` style="background-image:url('${posterSrc}')"` : ""}></div>
+    ${posterSrc ? `<img class="tl-hero-poster" src="${posterSrc}" alt="" data-open-title-detail="${t.id}">` : ""}
+    <div class="tl-hero-body">
+      <span class="tl-hero-eyebrow">${leader ? "Лидер голосования" : `№${rank} в сезоне`}</span>
+      <h2 class="tl-hero-name">${esc(t.name)}</h2>
+      ${meta.length ? `<div class="tl-hero-meta">${meta.map(esc).join("<i></i>")}</div>` : ""}
+      ${det && det.description ? `<p class="tl-hero-desc">${esc(det.description)}</p>` : (det === undefined ? `<p class="tl-hero-desc"><span class="tt-loading"></span></p>` : "")}
+      <div class="tl-hero-stats">
+        <span>${HERO_ICONS.heart}${pct == null ? "Нет голосов" : `${pct}% одобрения`}</span>
+        ${eps ? `<span>${HERO_ICONS.play}${esc(eps)} эп.</span>` : ""}
+        ${det && det.status_label ? `<span>${HERO_ICONS.flame}${esc(det.status_label)}</span>` : ""}
+      </div>
+      <div class="tl-hero-actions vote-actions">
+        <button class="btn primary tl-hero-like${t.my_vote === 1 ? " on-like" : ""}" data-vote-title="${t.id}" data-vote-choice="1">${LIKE_ICON}Нравится <span>${t.likes}</span></button>
+        <button class="btn tl-hero-dislike${t.my_vote === -1 ? " on-dislike" : ""}" data-vote-title="${t.id}" data-vote-choice="-1" title="Не то">${DISLIKE_ICON}<span>${t.dislikes}</span></button>
+        <button class="btn tl-hero-more" data-open-title-detail="${t.id}">${HERO_ICONS.info}Подробнее</button>
       </div>
     </div>`;
+}
 
-  return `<div class="bento">${statsHtml}${heroHtml}</div>`;
+function voteHeroHtml(titles, seasonName) {
+  const list = heroTitles(titles);
+  if (!list.length) return "";
+  heroIndex = Math.min(heroIndex, list.length - 1);
+  const totalVotes = titles.reduce((s, t) => s + voteActivity(t), 0);
+  return `
+    <section class="tl-hero" data-hero>
+      <div class="tl-hero-stage in" data-hero-stage>${heroBodyHtml(list[heroIndex], heroIndex + 1, seasonName)}</div>
+      <div class="tl-hero-dots">${list.map((t, i) => `<button type="button" class="tl-hero-dot${i === heroIndex ? " on" : ""}" data-hero-go="${i}" aria-label="${esc(t.name)}"></button>`).join("")}</div>
+      <div class="tl-hero-strip">
+        <div class="tl-hero-strip-head"><b>В тренде</b><span>${titles.length} тайтлов · ${totalVotes} голосов</span></div>
+        <div class="tl-hero-strip-row">
+          ${list.map((t, i) => {
+            const src = imgProxy(t.poster_url);
+            return `<button type="button" class="tl-hero-thumb${i === heroIndex ? " on" : ""}" data-hero-go="${i}" title="${esc(t.name)}">
+              ${src ? `<img src="${src}" alt="" loading="lazy">` : `<span class="tt-poster-ph"></span>`}
+              <span class="tl-hero-thumb-name">${esc(t.name)}</span>
+            </button>`;
+          }).join("")}
+        </div>
+      </div>
+    </section>`;
+}
+
+function wireHero(wrap, titles, seasonName) {
+  const hero = wrap.querySelector("[data-hero]");
+  window.clearInterval(heroTimer);
+  if (!hero) return;
+  const list = heroTitles(titles);
+  const show = i => {
+    heroIndex = (i + list.length) % list.length;
+    const stage = hero.querySelector("[data-hero-stage]");
+    stage.classList.remove("in");
+    stage.innerHTML = heroBodyHtml(list[heroIndex], heroIndex + 1, seasonName);
+    void stage.offsetWidth;
+    stage.classList.add("in");
+    hero.querySelectorAll("[data-hero-go]").forEach(b => b.classList.toggle("on", Number(b.dataset.heroGo) === heroIndex));
+    wireVoteButtons(stage);
+  };
+  hero.querySelectorAll("[data-hero-go]").forEach(b => b.addEventListener("click", () => show(Number(b.dataset.heroGo))));
+  let paused = false;
+  hero.addEventListener("mouseenter", () => { paused = true; });
+  hero.addEventListener("mouseleave", () => { paused = false; });
+  if (list.length > 1 && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    heroTimer = window.setInterval(() => {
+      if (!hero.isConnected) { window.clearInterval(heroTimer); return; }
+      if (!paused && !document.hidden) show(heroIndex + 1);
+    }, 9000);
+  }
+  // Подробности (описание, серии) догружаются после отрисовки —
+  // перерисовываем баннер, когда пришли данные для показанного тайтла.
+  hero._refresh = id => { if (list[heroIndex] && list[heroIndex].id === id) show(heroIndex); };
 }
 
 function voteCardHtml(t) {
@@ -367,22 +421,25 @@ export async function loadTitlesTab() {
 }
 
 let currentTitles = [];
+let currentSeasonName = "";
 
-function renderTitlesBody(wrap, top) {
+function renderTitlesBody(wrap) {
   const view = getView();
-  const gridTitles = top ? currentTitles.filter(t => t.id !== top.id) : currentTitles;
-  wrap.innerHTML = voteBentoHtml(currentTitles, top) + (view === "table"
+  wrap.innerHTML = voteHeroHtml(currentTitles, currentSeasonName) + (view === "table"
     ? titlesTableHtml(currentTitles)
-    : `<div class="vote-grid">${gridTitles.map(voteCardHtml).join("")}</div>`);
+    : `<div class="vote-grid">${currentTitles.map(voteCardHtml).join("")}</div>`);
   wireVoteButtons(wrap);
+  wireHero(wrap, currentTitles, currentSeasonName);
   wrap.querySelectorAll("[data-titles-sort]").forEach(th => {
     th.addEventListener("click", () => {
       tableSort = th.dataset.titlesSort;
-      renderTitlesBody(wrap, top);
+      renderTitlesBody(wrap);
     });
   });
   const seq = titlesRequestSeq;
-  loadDetails(currentTitles.map(t => t.id), (id, det) => {
+  // Сначала подробности тайтлов баннера — их описание видно сразу.
+  const heroIds = heroTitles(currentTitles).map(t => t.id);
+  loadDetails([...heroIds, ...currentTitles.map(t => t.id).filter(id => !heroIds.includes(id))], (id, det) => {
     if (seq !== titlesRequestSeq || !wrap.isConnected) return;
     const row = wrap.querySelector(`[data-title-row="${id}"]`);
     if (row) {
@@ -393,6 +450,8 @@ function renderTitlesBody(wrap, top) {
     }
     const meta = wrap.querySelector(`[data-card-meta="${id}"]`);
     if (meta) meta.textContent = cardMetaText(det);
+    const hero = wrap.querySelector("[data-hero]");
+    if (hero && hero._refresh) hero._refresh(id);
   });
 }
 
@@ -437,7 +496,7 @@ function renderTitlesForSeason(seasons) {
         b.setAttribute("aria-pressed", String(on));
       });
       const wrap = $("#titles-grid");
-      if (wrap && currentTitles.length) renderTitlesBody(wrap, voteSeasonTop(currentTitles));
+      if (wrap && currentTitles.length) renderTitlesBody(wrap);
     });
   });
   root.querySelector("#titles-admin-btn").addEventListener("click", () => {
@@ -454,7 +513,9 @@ function renderTitlesForSeason(seasons) {
       return;
     }
     currentTitles = d.titles;
-    renderTitlesBody(wrap, voteSeasonTop(d.titles));
+    currentSeasonName = (seasons.find(x => x.id === seasonId) || {}).name || "";
+    heroIndex = 0;
+    renderTitlesBody(wrap);
   }).catch(e => {
     const wrap = $("#titles-grid");
     if (wrap && seq === titlesRequestSeq) wrap.innerHTML = `<div class="bento-empty">Не удалось загрузить тайтлы: ${esc(e.message)}</div>`;
