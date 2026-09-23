@@ -75,7 +75,11 @@ export async function api(method, path, body) {
     // /desktop/pair — единственный запрос без токена: там 401 значит
     // «неверный код», а не «сессия протухла», выкидывать со входа на
     // вход незачем.
-    if ((resp.status === 401 || resp.status === 403) && path !== "/desktop/pair") {
+    // 403 «только для админов» — не повод выкидывать: так отвечают
+    // админские ручки рядовому участнику. Выходим только при 401 и при
+    // 403 «только для участников студии» — это значит, доступ отозван.
+    const revoked = resp.status === 403 && /участник/i.test(String(detail));
+    if ((resp.status === 401 || revoked) && path !== "/desktop/pair") {
       notifySessionExpired(String(detail));
     }
     throw new Error(String(detail));

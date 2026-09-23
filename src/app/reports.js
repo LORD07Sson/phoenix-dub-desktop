@@ -7,6 +7,7 @@
 // инициализации модуля (только позже, из обработчиков событий).
 
 import { state } from "./state.js";
+import { pauseSuffix } from "./people.js";
 import { apiGet, apiPost, openSheet, toast } from "./api.js";
 import { $, $all, esc, initials, isOverdue, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS, showContextMenu } from "./utils.js";
 import { openReportDetail } from "./report-detail.js";
@@ -569,7 +570,7 @@ function statusOptionsHtml(selected) {
 
 function usersOptionsHtml() {
   if (!state.users.length) return `<option value="">Нет доступных исполнителей</option>`;
-  return state.users.map(u => `<option value="${u.telegram_id}">${esc(u.name)}</option>`).join("");
+  return state.users.map(u => `<option value="${u.telegram_id}">${esc(u.name)}${esc(pauseSuffix(u))}</option>`).join("");
 }
 
 export function changeStatusDialog(publicIds, onDone, currentStatus) {

@@ -57,7 +57,7 @@ export function resetFeedBadge() {
 }
 
 async function pollFeed() {
-  if (!state.token) return;
+  if (!state.token || !state.isAdmin) return;
   if (state.activeTab === "feed") return; // сама вкладка и так открыта
   try {
     const r = await apiGet("/feed", { offset: 0, page_size: 30 });

@@ -26,6 +26,9 @@ export const state = {
   loadedTabs: new Set(),
   titleSeasonId: null,
   isDeveloper: null, // null = ещё не запрашивали /api/me
+  // Админ студии или рядовой участник (/api/whoami). Участнику десктоп
+  // показывает только «Тайтлы», «Сообщения», «Команду» и «Я».
+  isAdmin: true,
 };
 
 // Выход из аккаунта. Раньше logout чистил только token и selected —
@@ -37,6 +40,7 @@ export const state = {
 // интерфейса, они переживают смену пользователя).
 export function resetSessionState() {
   state.token = null;
+  state.isAdmin = true;
   state.telegramId = null;
   state.name = null;
   state.mediaToken = null;

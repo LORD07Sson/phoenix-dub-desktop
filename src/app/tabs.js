@@ -8,12 +8,14 @@ import { loadReports } from "./reports.js";
 import { loadBoard } from "./board.js";
 import { loadTitlesTab } from "./titles.js";
 import { loadCalendar } from "./calendar.js";
+import { loadMessages } from "./messages.js";
 import { loadFeed } from "./feed.js";
 import { loadProfile } from "./profile.js";
 import { loadAnalytics } from "./analytics.js";
 import { loadServices } from "./services.js";
 import { loadTeam } from "./team.js";
 import { clearDirectoryCache } from "./titles-admin.js";
+import { refreshTeamNotice, clearTeamNotice } from "./team-notice.js";
 
 // Загрузчики возвращают false, если данные взять не удалось (сеть/сервер)
 // — см. loadActiveTab ниже.
@@ -23,6 +25,7 @@ const LOADERS = {
   board: loadBoard,
   titles: loadTitlesTab,
   calendar: loadCalendar,
+  messages: loadMessages,
   feed: loadFeed,
   analytics: loadAnalytics,
   services: loadServices,
@@ -32,7 +35,7 @@ const LOADERS = {
 
 // Контейнеры вкладок — чистятся при выходе из аккаунта, чтобы данные
 // предыдущего пользователя не остались висеть в DOM.
-const TAB_BODIES = ["#overview-body", "#board-body", "#titles-body", "#calendar-body", "#feed-body", "#analytics-body", "#services-body", "#team-body", "#profile-body", "#reports-body"];
+const TAB_BODIES = ["#overview-body", "#board-body", "#titles-body", "#calendar-body", "#messages-body", "#feed-body", "#analytics-body", "#services-body", "#team-body", "#profile-body", "#reports-body"];
 
 // Последняя открытая вкладка переживает не только смену пользователя
 // (см. комментарий у state.activeTab в state.js — это настройка
@@ -42,7 +45,11 @@ const TAB_BODIES = ["#overview-body", "#board-body", "#titles-body", "#calendar-
 // который набегает десятки раз в день.
 const LAST_TAB_KEY = "phoenix-last-tab";
 
+// Вкладки, которые видит рядовой участник студии.
+export const MEMBER_TABS = new Set(["titles", "messages", "team", "profile"]);
+
 export function switchTab(name) {
+  if (!state.isAdmin && !MEMBER_TABS.has(name)) name = "messages";
   state.activeTab = name;
   try { localStorage.setItem(LAST_TAB_KEY, name); } catch (_) { /* не критично */ }
   $all(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
@@ -85,8 +92,10 @@ export async function loadActiveTab(force) {
 // и state.activeTab, саму загрузку данных всё ещё делает
 // loadActiveTab()/refreshAll() ниже по цепочке вызовов в auth.js.
 export function restoreLastTab() {
+  refreshTeamNotice();
   let saved = null;
   try { saved = localStorage.getItem(LAST_TAB_KEY); } catch (_) { /* не критично */ }
+  if (!state.isAdmin && (!saved || !MEMBER_TABS.has(saved))) saved = "messages";
   if (!saved || !LOADERS[saved]) return;
   state.activeTab = saved;
   $all(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === saved));
@@ -94,6 +103,7 @@ export function restoreLastTab() {
 }
 
 export function clearTabDom() {
+  clearTeamNotice();
   for (const sel of TAB_BODIES) {
     const el = $(sel);
     if (el) el.innerHTML = "";
@@ -130,7 +140,8 @@ export async function refreshAll() {
   label.textContent = "Обновляю…";
   try {
     clearDirectoryCache();
-    await loadUsers();
+    refreshTeamNotice();
+    if (state.isAdmin) await loadUsers();
     await loadActiveTab(true);
   } finally {
     refreshInFlight = false;
@@ -160,6 +171,7 @@ $("#refresh-btn").addEventListener("click", refreshAll);
 export async function loadSidebarStatusCounts() {
   const el = $("#sidebar-board-sub");
   if (!el) return;
+  if (!state.isAdmin) { el.hidden = true; return; }
   try {
     const d = await apiGet("/overview");
     const statuses = (d.reports && d.reports.statuses) || [];

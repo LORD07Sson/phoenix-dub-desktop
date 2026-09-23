@@ -4,7 +4,7 @@ import { invoke, listen } from "./tauri.js";
 import { state } from "./state.js";
 import { apiGet, openSheet, toast, dismissSheet } from "./api.js";
 import { $, esc } from "./utils.js";
-import { applyTheme } from "./theme.js";
+import { applyTheme, applyLook } from "./theme.js";
 import { applyDensity, currentDensity } from "./density.js";
 import { focusModePreferred, setFocusModePreferred } from "./focus-mode.js";
 import { isDevModeOn, setDevModeOn } from "./devmode.js";
@@ -44,94 +44,126 @@ async function openSettings() {
     try { state.isDeveloper = !!(await apiGet("/me")).is_developer; } catch (_) { state.isDeveloper = false; }
   }
 
+  const ic = d => `<span class="st-ic"><svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg></span>`;
+  const ICONS = {
+    look: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M12 3.5a8.5 8.5 0 0 1 0 17" fill="currentColor" stroke="none" opacity=".35"/>',
+    behave: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+    update: '<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/>',
+    studio: '<path d="M4 20V9l8-5 8 5v11M9 20v-6h6v6"/>',
+    diag: '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
+    power: '<path d="M12 3v8M6.3 7.3a8 8 0 1 0 11.4 0"/>',
+    focus: '<path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/><circle cx="12" cy="12" r="2.5"/>',
+    dev: '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>',
+    density: '<path d="M4 6h16M4 10h16M4 14h16M4 18h16"/>',
+    logs: '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7"/>',
+  };
+  const TILES = [
+    ["s-open-admin", "Админ-панель", "Доступ, заявки, система", '<circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c0-4 3.4-6.5 7.5-6.5s7.5 2.5 7.5 6.5"/>'],
+    ["s-tile-notice", "Объявление", "Строка для всей команды", '<path d="M9 4h6l-1 5 3 3v2H7v-2l3-3zM12 14v6"/>'],
+    ["s-tile-tickets", "Тикеты", "Поддержка, переписка", '<path d="M4 6h16v9H9l-5 4z"/>'],
+    ["s-tile-roles", "Роли", "Пайплайны и люди", '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M16 11l2 2 4-4"/>'],
+    ["s-tile-bdays", "Дни рождения", "Бот поздравит сам", '<path d="M4 21h16M5 21v-7h14v7M12 14V9M9 5c0 1.7 1.3 3 3 3s3-1.3 3-3c0-1.2-3-3-3-3S9 3.8 9 5Z"/>'],
+    ["s-tile-post", "Пост в канал", "Конструктор с превью", '<path d="M3 12l18-8-8 18-2-8-8-2Z"/>'],
+    ["s-tile-mentions", "Упоминания", "Кого поднять в чате", '<circle cx="12" cy="12" r="4"/><path d="M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1"/>'],
+    ...(state.isDeveloper ? [["s-tile-log", "Журнал действий", "Надзор за админами", '<path d="M6 3h9l4 4v14H6zM9 12h7M9 16h5"/>']] : []),
+  ];
+  const theme = document.documentElement.dataset.theme || "dark";
+  const look = document.documentElement.dataset.look || "glow";
+  const density = currentDensity();
+  const sw = (id, on, extra = "") => `<label class="mn-switch st-switch"><input type="checkbox" id="${id}" ${on ? "checked" : ""} ${extra}><span></span></label>`;
+
   const overlay = openSheet(`
-    <h2>Настройки</h2>
+    <div class="st-head">
+      <h2>Настройки</h2>
+      <button type="button" class="icon-btn" data-close aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="st-layout">
+      <nav class="st-nav" aria-label="Разделы настроек">
+        ${[["st-look", "Внешний вид", ICONS.look], ["st-behave", "Поведение", ICONS.behave], ["st-update", "Обновления", ICONS.update], ["st-studio", "Студия", ICONS.studio], ["st-diag", "Диагностика", ICONS.diag]]
+          .map(([id, label, i], n) => `<button type="button" class="st-nav-btn${n === 0 ? " on" : ""}" data-st-go="${id}">${ic(i)}<span>${label}</span></button>`).join("")}
+      </nav>
+      <div class="st-body" id="st-body">
 
-    <div class="settings-group">
-      <div class="settings-group-title">Внешний вид</div>
-      <div class="settings-row">
-        <span>Тема</span>
-        <select id="s-theme">
-          <option value="dark">Тёмная</option>
-          <option value="light">Светлая</option>
-        </select>
-      </div>
-      <div class="settings-row">
-        <span>Плотность таблиц</span>
-        <select id="s-density">
-          <option value="comfortable">Обычная</option>
-          <option value="compact">Компактная</option>
-        </select>
+        <section class="st-sec" id="st-look">
+          <h3>Внешний вид</h3>
+          <div class="st-label">Тема</div>
+          <div class="st-cards">
+            <button type="button" class="st-card${theme === "dark" ? " on" : ""}" data-st-theme="dark"><span class="st-prev st-prev-dark"><i></i><i></i><i></i></span><b>Тёмная</b></button>
+            <button type="button" class="st-card${theme === "light" ? " on" : ""}" data-st-theme="light"><span class="st-prev st-prev-light"><i></i><i></i><i></i></span><b>Светлая</b></button>
+          </div>
+          <div class="st-label">Стиль тёмной темы</div>
+          <div class="st-cards">
+            <button type="button" class="st-card${look === "glow" ? " on" : ""}" data-st-look="glow"><span class="st-prev st-prev-glow"><i></i><i></i><i></i></span><b>Золотое свечение</b><em>луч света и золотые кромки</em></button>
+            <button type="button" class="st-card${look === "fire" ? " on" : ""}" data-st-look="fire"><span class="st-prev st-prev-fire"><i></i><i></i><i></i></span><b>Огонь</b><em>огненное свечение снизу</em></button>
+          </div>
+          <div class="st-row">
+            ${ic(ICONS.density)}
+            <div class="st-text"><b>Плотность таблиц</b><span>Сколько строк влезает в «Список»</span></div>
+            <div class="seg-toggle" role="group" aria-label="Плотность">
+              <button type="button" class="seg-btn${density === "comfortable" ? " active" : ""}" data-st-density="comfortable">Обычная</button>
+              <button type="button" class="seg-btn${density === "compact" ? " active" : ""}" data-st-density="compact">Компактная</button>
+            </div>
+          </div>
+          <select id="s-theme" hidden><option value="dark">Тёмная</option><option value="light">Светлая</option></select>
+          <select id="s-density" hidden><option value="comfortable">Обычная</option><option value="compact">Компактная</option></select>
+        </section>
+
+        <section class="st-sec" id="st-behave">
+          <h3>Поведение</h3>
+          <div class="st-row">${ic(ICONS.power)}<div class="st-text"><b>Запускать при старте системы</b><span>Окно сразу уходит в трей и следит за назначениями</span></div>${sw("s-autostart", autostartOn)}</div>
+          <div class="st-row">${ic(ICONS.focus)}<div class="st-text"><b>Фокус-режим при открытии отчёта</b><span>Карточка отчёта на весь экран, остальное прячется</span></div>${sw("s-focus-mode", focusModePreferred())}</div>
+          ${state.isDeveloper ? `<div class="st-row dev-pill-toggle">${ic(ICONS.dev)}<div class="st-text"><b>Режим разработчика</b><span>Правка чужих ролей, профиля, даты вступления и наград — на карточке коллеги</span></div>${sw("s-dev-mode", isDevModeOn())}</div>` : ""}
+        </section>
+
+        <section class="st-sec" id="st-update">
+          <h3>Обновления</h3>
+          <div class="st-version">
+            <div class="st-version-logo">${ic('<path d="M5 5L19 19M19 5L5 19"/>')}</div>
+            <div class="st-text"><b>PHOENIX DUB Desktop</b><span>версия ${esc(APP_VERSION)}</span></div>
+            <button class="btn primary" id="s-check-update">Проверить обновления</button>
+          </div>
+          <div class="st-row">
+            ${ic(ICONS.update)}
+            <div class="st-text"><b>Канал обновлений</b><span>Альфа — сборка на каждый коммит, для проверки нового</span></div>
+            <div class="seg-toggle" role="group" aria-label="Канал">
+              <button type="button" class="seg-btn${updateChannel === "stable" ? " active" : ""}" data-st-channel="stable">Стабильный</button>
+              <button type="button" class="seg-btn${updateChannel === "alpha" ? " active" : ""}" data-st-channel="alpha">Альфа</button>
+            </div>
+          </div>
+          <select id="s-update-channel" hidden>
+            <option value="stable" ${updateChannel === "stable" ? "selected" : ""}>Стабильный</option>
+            <option value="alpha" ${updateChannel === "alpha" ? "selected" : ""}>Альфа</option>
+          </select>
+          <div id="s-alpha-block" hidden>
+            <div class="alpha-warn">Альфа-сборки собираются на каждый коммит в main и не являются стабильными релизами — автоматического отката нет.</div>
+            <div class="st-commits">
+              <div><span>Текущий коммит</span><code id="s-commit-current">—</code></div>
+              <div><span>Последний коммит</span><code id="s-commit-latest">—</code></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="st-sec" id="st-studio">
+          <h3>Студия</h3>
+          <div class="st-tiles">
+            ${TILES.map(([id, title, sub, path]) => `<button type="button" class="st-tile" id="${id}">${ic(path)}<b>${title}</b><span>${sub}</span></button>`).join("")}
+          </div>
+        </section>
+
+        <section class="st-sec" id="st-diag">
+          <h3>Диагностика</h3>
+          <div class="st-row">${ic(ICONS.logs)}<div class="st-text"><b>Файловые логи приложения</b><span>Обновления, QC звука, инструменты ffmpeg, плеер</span></div><button class="btn" id="s-open-logs">Открыть логи</button></div>
+          <div class="st-keys">
+            <div><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd><span>показать или скрыть окно откуда угодно, даже из трея</span></div>
+            <div><kbd>?</kbd><span>все горячие клавиши</span></div>
+            <div><kbd>Ctrl</kbd><kbd>K</kbd><span>поиск по отчётам, тайтлам и людям</span></div>
+            <div><kbd>✕</kbd><span>у окна — свернуть в трей, назначения продолжают отслеживаться</span></div>
+          </div>
+        </section>
       </div>
     </div>
-
-    <div class="settings-group">
-      <div class="settings-group-title">Поведение</div>
-      <div class="settings-row">
-        <span>Запускать при старте системы</span>
-        <input type="checkbox" id="s-autostart" ${autostartOn ? "checked" : ""}>
-      </div>
-      <div class="settings-row">
-        <span>Фокус-режим при открытии отчёта</span>
-        <input type="checkbox" id="s-focus-mode" ${focusModePreferred() ? "checked" : ""}>
-      </div>
-      ${state.isDeveloper ? `
-      <div class="settings-row dev-pill-toggle">
-        <span>Режим разработчика</span>
-        <input type="checkbox" id="s-dev-mode" ${isDevModeOn() ? "checked" : ""}>
-      </div>` : ""}
-    </div>
-
-    <div class="settings-group">
-      <div class="settings-group-title">Обновления</div>
-      <div class="settings-row">
-        <span>Версия ${esc(APP_VERSION)}</span>
-        <button class="btn" id="s-check-update">Проверить обновления</button>
-      </div>
-      <div class="settings-row">
-        <span>Канал обновлений</span>
-        <select id="s-update-channel">
-          <option value="stable" ${updateChannel === "stable" ? "selected" : ""}>Стабильный</option>
-          <option value="alpha" ${updateChannel === "alpha" ? "selected" : ""}>Альфа (тестовые сборки)</option>
-        </select>
-      </div>
-      <div id="s-alpha-block" hidden>
-        <div class="alpha-warn">⚠️ Альфа-сборки собираются на каждый коммит в main и не являются стабильными релизами — автоматического отката нет.</div>
-        <div class="settings-row">
-          <span>Текущий коммит</span>
-          <code id="s-commit-current">—</code>
-        </div>
-        <div class="settings-row">
-          <span>Последний коммит</span>
-          <code id="s-commit-latest">—</code>
-        </div>
-      </div>
-    </div>
-
-    <div class="settings-group">
-      <div class="settings-group-title">Доступ и система</div>
-      <div class="settings-row">
-        <span>Доступ участников и состояние системы</span>
-        <button class="btn" id="s-open-admin">Админ-панель</button>
-      </div>
-    </div>
-
-    <div class="settings-group">
-      <div class="settings-group-title">Диагностика</div>
-      <div class="settings-row">
-        <span>Файловые логи приложения (обновления, QC звука, инструменты ffmpeg, плеер)</span>
-        <button class="btn" id="s-open-logs">Открыть логи</button>
-      </div>
-    </div>
-
-    <div class="settings-hint">
-      <b>Ctrl+Shift+P</b> — показать/скрыть окно из любого места, даже когда оно свёрнуто в трей.<br>
-      <b>⌨️</b> в шапке (или клавиша «?») — полный список горячих клавиш.<br>
-      Крестик у окна сворачивает в трей — опрос новых назначений продолжает идти в фоне.
-      ${state.isDeveloper ? "<br>Режим разработчика открывает правку чужих ролей/профиля/даты вступления/наград — на карточке коллеги (клик по тизеру команды)." : ""}
-    </div>
-    <div class="sheet-actions"><button class="btn primary" data-close>Готово</button></div>
-  `);
+  `, "wide");
+  overlay.querySelector(".sheet").classList.add("st-sheet");
   overlay.querySelector("#s-theme").value = document.documentElement.dataset.theme || "dark";
   overlay.querySelector("#s-theme").addEventListener("change", e => applyTheme(e.target.value));
   overlay.querySelector("#s-density").value = currentDensity();
@@ -204,6 +236,41 @@ async function openSettings() {
     }
   });
   overlay.querySelector("[data-close]").addEventListener("click", () => dismissSheet(overlay));
+
+  // Плитки и сегменты — поверх тех же скрытых <select>, что и раньше:
+  // обработчики выше не поменялись.
+  const pick = (attr, sel, value) => {
+    overlay.querySelectorAll(`[${attr}]`).forEach(b => b.classList.toggle(b.classList.contains("seg-btn") ? "active" : "on", b.getAttribute(attr) === value));
+    if (sel) { const el = overlay.querySelector(sel); el.value = value; el.dispatchEvent(new window.Event("change")); }
+  };
+  overlay.querySelectorAll("[data-st-theme]").forEach(b => b.addEventListener("click", () => pick("data-st-theme", "#s-theme", b.dataset.stTheme)));
+  overlay.querySelectorAll("[data-st-density]").forEach(b => b.addEventListener("click", () => pick("data-st-density", "#s-density", b.dataset.stDensity)));
+  overlay.querySelectorAll("[data-st-channel]").forEach(b => b.addEventListener("click", () => pick("data-st-channel", "#s-update-channel", b.dataset.stChannel)));
+  overlay.querySelectorAll("[data-st-look]").forEach(b => b.addEventListener("click", () => {
+    pick("data-st-look", null, b.dataset.stLook);
+    applyLook(b.dataset.stLook);
+    if (document.documentElement.dataset.theme === "light") toast("Стиль применяется в тёмной теме.");
+  }));
+  const tile = (id, fn) => { const el = overlay.querySelector(`#${id}`); if (el) el.addEventListener("click", fn); };
+  tile("s-tile-notice", () => import("./team-notice.js").then(m => m.openNoticeEditor()));
+  tile("s-tile-tickets", () => import("./tickets.js").then(m => m.openTicketsSheet()));
+  tile("s-tile-roles", () => import("./roles.js").then(m => m.openRolesSheet()));
+  tile("s-tile-bdays", () => import("./birthdays.js").then(m => m.openBirthdaysSheet()));
+  tile("s-tile-post", () => { dismissSheet(overlay); import("./channel-post.js").then(m => m.openChannelPostSheet()); });
+  tile("s-tile-mentions", () => import("./mentions.js").then(m => m.openMentionsSheet()));
+  tile("s-tile-log", () => import("./admin-log.js").then(m => m.openAdminLogSheet()));
+
+  // Навигация слева: клик — прокрутка к разделу, подсветка — по прокрутке.
+  const body = overlay.querySelector("#st-body");
+  overlay.querySelectorAll("[data-st-go]").forEach(b => b.addEventListener("click", () => {
+    body.scrollTo({ top: overlay.querySelector(`#${b.dataset.stGo}`).offsetTop - body.offsetTop - 8, behavior: "smooth" });
+  }));
+  body.addEventListener("scroll", () => {
+    let current = "st-look";
+    overlay.querySelectorAll(".st-sec").forEach(sec => { if (sec.offsetTop - body.offsetTop - 40 <= body.scrollTop) current = sec.id; });
+    if (body.scrollTop + body.clientHeight >= body.scrollHeight - 4) current = "st-diag";
+    overlay.querySelectorAll("[data-st-go]").forEach(b => b.classList.toggle("on", b.dataset.stGo === current));
+  });
 }
 $("#open-settings").addEventListener("click", openSettings);
 

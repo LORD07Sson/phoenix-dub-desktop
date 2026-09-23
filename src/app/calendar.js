@@ -8,10 +8,12 @@
 //  • дни рождения из /overview — тоже «Весь день».
 
 import { state } from "./state.js";
+import { fetchReminders, openRemindersSheet } from "./reminders.js";
 import { apiGet, dialogSkeletonHtml, mediaUrl } from "./api.js";
 import { $, esc, STATUS_COLOR_VAR } from "./utils.js";
 import { openReportDetail } from "./report-detail.js";
 import { switchTab } from "./tabs.js";
+import { openBirthdaysSheet } from "./birthdays.js";
 
 const HOUR_PX = 52;
 const DAY_MS = 86400000;
@@ -21,7 +23,7 @@ const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн"
 const TITLE_HUES = ["#3b5bdb", "#9c36b5", "#c2255c", "#e8590c", "#2b8a3e", "#1098ad", "#5f3dc4", "#d9480f"];
 
 const FILTER_KEY = () => `phoenix_calendar_filters_${state.telegramId || "anon"}`;
-const LAYERS = { episodes: "Серии", deadlines: "Дедлайны", birthdays: "Дни рождения" };
+const LAYERS = { episodes: "Серии", deadlines: "Дедлайны", birthdays: "Дни рождения", reminders: "Мои напоминания" };
 
 let weekStart = startOfWeek(new Date());
 let nowTimer = null;
@@ -42,9 +44,9 @@ function hueFor(id) { return TITLE_HUES[Math.abs(Number(id) || 0) % TITLE_HUES.l
 function getFilters() {
   try {
     const v = JSON.parse(localStorage.getItem(FILTER_KEY()) || "null");
-    if (v && typeof v === "object") return { episodes: v.episodes !== false, deadlines: v.deadlines !== false, birthdays: v.birthdays !== false };
+    if (v && typeof v === "object") return { episodes: v.episodes !== false, deadlines: v.deadlines !== false, birthdays: v.birthdays !== false, reminders: v.reminders !== false };
   } catch (_) { /* по умолчанию всё включено */ }
-  return { episodes: true, deadlines: true, birthdays: true };
+  return { episodes: true, deadlines: true, birthdays: true, reminders: true };
 }
 function setFilters(f) {
   try { localStorage.setItem(FILTER_KEY(), JSON.stringify(f)); } catch (_) { /* не критично */ }
@@ -93,7 +95,10 @@ async function fetchDeadlines(from, to) {
   return out;
 }
 
+// Полный список (/birthdays); на старом сервере без него — 5 ближайших
+// из /overview.
 async function fetchBirthdays() {
+  try { return (await apiGet("/birthdays")).birthdays || []; } catch (_) { /* старый сервер */ }
   try { return (await apiGet("/overview")).birthdays || []; } catch (_) { return []; }
 }
 
@@ -170,6 +175,12 @@ function gridHtml(start, data) {
       if (i >= 0) allDay[i].push({ kind: "deadline", r });
     }
   }
+  if (f.reminders) {
+    for (const r of data.reminders || []) {
+      const i = days.findIndex(d => ymd(d) === r.date);
+      if (i >= 0) allDay[i].push({ kind: "reminder", r });
+    }
+  }
   if (f.birthdays) {
     for (const b of data.birthdays) {
       const i = days.findIndex(d => d.getMonth() + 1 === b.month && d.getDate() === b.day);
@@ -186,9 +197,11 @@ function gridHtml(start, data) {
   const allDayRow = hasAllDay ? `
     <div class="cal-allday">
       <div class="cal-gutter-lbl">Весь день</div>
-      ${allDay.map(items => `<div class="cal-allday-cell">${items.map(it => it.kind === "deadline"
+      ${allDay.map(items => `<div class="cal-allday-cell">${items.map(it => it.kind === "reminder"
+        ? `<div class="cal-chip cal-chip-rem" role="button" tabindex="0" data-cal-rem title="${esc(it.r.text)}"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/></svg><span>${esc(it.r.text)}</span></div>`
+        : it.kind === "deadline"
         ? `<button type="button" class="cal-chip cal-chip-deadline" data-cal-report="${esc(it.r.public_id)}" style="--c: var(${STATUS_COLOR_VAR[it.r.status] || "--s-draft"})" title="${esc(it.r.title)}"><i></i><span>${esc(it.r.title)}</span></button>`
-        : `<div class="cal-chip cal-chip-bday" title="День рождения"><svg viewBox="0 0 24 24"><path d="M4 21h16M5 21v-7h14v7M12 14V9M9 5c0 1.7 1.3 3 3 3s3-1.3 3-3c0-1.2-3-3-3-3S9 3.8 9 5Z"/></svg><span>${esc(it.b.name)}</span></div>`).join("")}</div>`).join("")}
+        : `<div class="cal-chip cal-chip-bday" title="День рождения" role="button" tabindex="0" data-cal-bday><svg viewBox="0 0 24 24"><path d="M4 21h16M5 21v-7h14v7M12 14V9M9 5c0 1.7 1.3 3 3 3s3-1.3 3-3c0-1.2-3-3-3-3S9 3.8 9 5Z"/></svg><span>${esc(it.b.name)}</span></div>`).join("")}</div>`).join("")}
     </div>` : "";
 
   const hours = Array.from({ length: 24 }, (_, h) => `<div class="cal-hour"><span>${h ? `${String(h).padStart(2, "0")}:00` : ""}</span></div>`).join("");
@@ -255,8 +268,8 @@ async function renderWeek() {
   const from = ymd(weekStart);
   const to = ymd(addDays(weekStart, 6));
   if (!cache) {
-    const [airings, birthdays] = await Promise.all([fetchAirings(), fetchBirthdays()]);
-    cache = { airings, birthdays, deadlines: [], from: null, to: null };
+    const [airings, birthdays, rem] = await Promise.all([fetchAirings(), fetchBirthdays(), fetchReminders()]);
+    cache = { airings, birthdays, reminders: rem ? rem.reminders : [], deadlines: [], from: null, to: null };
   }
   if (cache.from !== from) {
     cache.deadlines = await fetchDeadlines(from, to);
@@ -265,6 +278,8 @@ async function renderWeek() {
   if (seq !== requestSeq || !body.isConnected) return;
   body.innerHTML = gridHtml(weekStart, cache);
   body.querySelectorAll("[data-cal-report]").forEach(b => b.addEventListener("click", () => openReportDetail(b.dataset.calReport)));
+  body.querySelectorAll("[data-cal-rem]").forEach(b => b.addEventListener("click", () => openRemindersSheet(() => { cache = null; renderWeek(); })));
+  body.querySelectorAll("[data-cal-bday]").forEach(b => b.addEventListener("click", () => openBirthdaysSheet(() => { cache = null; renderWeek(); })));
   body.querySelectorAll("[data-cal-title]").forEach(b => b.addEventListener("click", () => {
     switchTab("titles");
   }));

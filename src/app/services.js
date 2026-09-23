@@ -157,5 +157,52 @@ export async function loadServices() {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить статус сервисов: ${esc(e.message)}</div>`;
     return false;
   }
-  root.innerHTML = servicesHtml(d);
+  root.innerHTML = servicesHtml(d) + `<div id="bot-status-slot"></div>`;
+  fillBotStatus(root);
+}
+
+// «Бот изнутри» — то же, что /status в боте: версия, аптайм бота и
+// мини-аппа, отклик Telegram, база, лог, счётчики, последние ошибки
+// из лога. Отдельным запросом — внешний статус выше не ждёт его.
+function fmtBytes(n) {
+  if (n == null) return "—";
+  const u = ["Б", "КБ", "МБ", "ГБ"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${i ? n.toFixed(1) : n} ${u[i]}`;
+}
+
+async function fillBotStatus(root) {
+  const slot = root.querySelector("#bot-status-slot");
+  if (!slot) return;
+  let b;
+  try { b = await apiGet("/admin/bot-status"); } catch (_) { slot.remove(); return; }
+  if (!slot.isConnected) return;
+  const c = b.counts || {};
+  const cell = (label, value, sub, tone) => `
+    <div class="bs-cell"><span>${esc(label)}</span><b class="${tone || ""}">${esc(String(value))}</b>${sub ? `<em>${esc(sub)}</em>` : ""}</div>`;
+  const svc = b.services.map(x => cell(x.name, x.active ? (x.uptime_seconds != null ? formatUptime(x.uptime_seconds) : "работает") : "остановлен",
+    x.active ? "без перезапуска" : (x.state || ""), x.active ? "" : "danger")).join("");
+  const errors = b.errors || [];
+  slot.innerHTML = `
+    <div class="bcell bs-card" style="animation-delay:120ms;">
+      <div class="dash-cell-head">
+        <span class="dash-cell-title">Бот изнутри</span>
+        <span class="dash-cell-hint">версия ${esc(b.version)} · то же, что /status</span>
+      </div>
+      <div class="bs-grid">
+        ${svc}
+        ${cell("Отклик Telegram", b.telegram_ping_ms != null ? `${b.telegram_ping_ms} мс` : "нет ответа", b.telegram_error || "getMe", b.telegram_ping_ms == null ? "danger" : (b.telegram_ping_ms > 1500 ? "warn" : ""))}
+        ${cell("Схема базы", `${b.schema.version} из ${b.schema.total}`, b.schema.ok ? "актуальна" : "нужна миграция", b.schema.ok ? "" : "warn")}
+        ${cell("База", fmtBytes(b.db_size_bytes), `лог ${fmtBytes(b.log_size_bytes)}`)}
+        ${cell("Люди", c.users ?? "—", c.paused ? `${c.paused} на паузе` : "никто не на паузе")}
+        ${cell("Отчёты", c.reports ?? "—", `${c.active ?? 0} активных`)}
+        ${cell("Тикеты", c.tickets ?? "—", "открыто")}
+      </div>
+      <div class="bs-errors-head">Последние ошибки и предупреждения из лога${errors.length ? ` · ${errors.length}` : ""}</div>
+      ${errors.length ? `<div class="bs-errors">${errors.slice().reverse().map(e => {
+        const warn = / WARNING /.test(e);
+        return `<div class="bs-err ${warn ? "warn" : "err"}">${esc(e)}</div>`;
+      }).join("")}</div>` : `<div class="no-assignee">Чисто — ошибок в логе нет</div>`}
+    </div>`;
 }

@@ -33,6 +33,8 @@ function periodDeltaPct(days) {
 }
 import { avatarHtml, loadAvatars } from "./profile.js";
 import { openReportDetail } from "./report-detail.js";
+import { openTicketsSheet } from "./tickets.js";
+import { openBirthdaysSheet } from "./birthdays.js";
 import { boardCardHtml } from "./board.js";
 import { timelineHtml, playTimelineIntro } from "./charts.js";
 import { switchTab } from "./tabs.js";
@@ -318,13 +320,15 @@ function Overview(props) {
           <div class="big-num">{d.access.allowed}</div>
           <div class="sub">{d.access.pending_requests ? `${d.access.pending_requests} заявок ждут решения` : "заявок нет"}</div>
         </div>
-        <div class="bcell kpi-cell" style={{ "animation-delay": "340ms" }}>
+        <div class="bcell kpi-cell dash-clickable" style={{ "animation-delay": "340ms" }} role="button" tabindex="0" title="Открыть тикеты"
+          onClick={() => openTicketsSheet()} onKeyDown={e => { if (e.key === "Enter") openTicketsSheet(); }}>
           <h3>Тикеты в поддержку</h3>
           <div class={`big-num ${d.open_tickets > 0 ? "warn" : ""}`}>{d.open_tickets}</div>
           <div class="sub">открыто сейчас</div>
         </div>
         <Show when={d.birthdays.length}>
-          <div class="bcell kpi-cell" style={{ "animation-delay": "360ms" }}>
+          <div class="bcell kpi-cell dash-clickable" style={{ "animation-delay": "360ms" }} role="button" tabindex="0" title="Все дни рождения"
+            onClick={() => openBirthdaysSheet(loadOverview)} onKeyDown={e => { if (e.key === "Enter") openBirthdaysSheet(loadOverview); }}>
             <h3>Дни рождения</h3>
             <div class="mini-list">
               <For each={d.birthdays}>

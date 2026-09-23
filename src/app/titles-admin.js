@@ -7,6 +7,7 @@
 // _require_admin на каждый вызов), отдельного gate на кнопку не нужно.
 
 import { apiGet, apiPost, openSheet, toast, dialogSkeletonHtml, mediaUrl } from "./api.js";
+import { pauseSuffix } from "./people.js";
 import { esc } from "./utils.js";
 
 function imgProxy(url) {
@@ -40,7 +41,7 @@ export function clearDirectoryCache() {
 
 export function userOptionsHtml(users, selectedTelegramId) {
   return `<option value="">— не назначен —</option>` + users.map(u =>
-    `<option value="${u.telegram_id}" ${String(u.telegram_id) === String(selectedTelegramId) ? "selected" : ""}>${esc(u.username ? "@" + u.username : u.name)}</option>`
+    `<option value="${u.telegram_id}" ${String(u.telegram_id) === String(selectedTelegramId) ? "selected" : ""}>${esc(u.username ? "@" + u.username : u.name)}${esc(pauseSuffix(u))}</option>`
   ).join("");
 }
 
