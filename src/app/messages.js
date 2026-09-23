@@ -382,6 +382,14 @@ function renderPicker() {
   list.querySelectorAll("[data-dm]").forEach(b => b.addEventListener("click", () => startDm(Number(b.dataset.dm))));
 }
 
+// «Написать» с других экранов (Команда): вкладка может быть ещё не
+// загружена — тогда переписку откроет loadMessages после списков.
+let pendingDm = null;
+export function openDmWith(telegramId) {
+  if ($("#ms-list") && chats.length) startDm(telegramId);
+  else pendingDm = telegramId;
+}
+
 async function startDm(telegramId) {
   $("#ms-picker").hidden = true;
   try {
@@ -552,7 +560,8 @@ export async function loadMessages() {
     return false;
   }
   if (!activeId || !findChat(activeId)) activeId = chats[0] ? chats[0].id : null;
-  if (activeId) await openChat(activeId); else renderThread();
+  if (pendingDm) { const tid = pendingDm; pendingDm = null; await startDm(tid); }
+  else if (activeId) await openChat(activeId); else renderThread();
   window.clearInterval(pollTimer);
   pollTimer = window.setInterval(poll, POLL_MS);
 }
