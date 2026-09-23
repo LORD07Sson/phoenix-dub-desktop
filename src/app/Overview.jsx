@@ -12,7 +12,6 @@
 
 import { render } from "solid-js/web";
 import { For, Show, onMount } from "solid-js";
-import { state } from "./state.js";
 import { apiGet, openSheet, dialogSkeletonHtml } from "./api.js";
 import { $, esc, initials, relTime, STATUS_COLOR_VAR } from "./utils.js";
 // esc() нужен только в строковых шаблонах (openMonthlyTopSheet ниже,

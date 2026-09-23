@@ -3392,3 +3392,82 @@ body.focus-mode .report-detail-overlay .sheet {
   background: linear-gradient(180deg, rgba(255, 220, 170, .05), rgba(255, 255, 255, 0) 55%), rgba(14, 10, 8, .55);
   backdrop-filter: blur(6px);
 }
+
+/* ================================================================
+   Лента — компактная активность по дням.
+   ================================================================ */
+.fd-search {
+  display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; min-width: 260px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; color: var(--ink-dim);
+}
+.fd-search:focus-within { border-color: var(--fire); }
+.fd-search svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; flex: none; }
+.fd-search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: var(--ink); font: inherit; font-size: 12.5px; }
+.fd-filters { padding: 0 0 14px; }
+
+.fd-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.6fr); gap: 10px; margin-bottom: 18px; }
+.fd-sum-cell { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.fd-sum-cell b { font-size: 20px; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.fd-sum-cell span { font-size: 11.5px; color: var(--ink-dim); }
+.fd-sum-people { flex-direction: row; align-items: center; gap: 12px; }
+.fd-stack { display: flex; }
+.fd-stack .avatar-bubble { width: 28px; height: 28px; margin-left: -8px; border: 2px solid var(--surface); font-size: 11px; }
+.fd-stack .avatar-bubble:first-child { margin-left: 0; }
+.fd-dim { color: var(--ink-dim); font-size: 12px; }
+
+.fd-day { margin-bottom: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.fd-day-head {
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: baseline; gap: 8px;
+  padding: 10px 16px; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+.fd-day-head b { font-size: 13px; }
+.fd-day-head span { font-size: 11.5px; color: var(--ink-dim); }
+
+.fd-row {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 10px 16px; border-bottom: 1px solid var(--line-soft); position: relative;
+  animation: row-in .25s ease both;
+}
+.fd-row:last-child { border-bottom: none; }
+.fd-row.linkable { cursor: pointer; transition: background .12s ease; }
+.fd-row.linkable:hover, .fd-row.linkable:focus-visible { background: var(--surface-2); outline: none; }
+.fd-row.is-new::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-grad); }
+.fd-row.admin { background: color-mix(in srgb, var(--s-stop) 4%, transparent); }
+
+.fd-av { position: relative; width: 32px; height: 32px; }
+.fd-av > .avatar-bubble { width: 32px; height: 32px; margin: 0; font-size: 12px; }
+.fd-badge {
+  position: absolute; right: -4px; bottom: -3px; width: 17px; height: 17px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--c) 22%, var(--surface)); border: 2px solid var(--surface); color: var(--c);
+}
+.fd-badge svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
+.fd-main { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.fd-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 13px; flex-wrap: nowrap; }
+.fd-actor { color: var(--ink); white-space: nowrap; }
+.fd-verb { color: var(--ink-soft); white-space: nowrap; }
+.fd-verb::before { content: "·"; margin-right: 6px; color: var(--ink-dim); }
+.fd-rid { color: var(--fire); font-weight: 700; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fd-title { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.fd-title::before { content: "«"; color: var(--ink-dim); }
+.fd-title::after { content: "»"; color: var(--ink-dim); }
+.fd-tag { font-size: 10px; font-weight: 600; color: var(--ink-dim); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; line-height: 17px; white-space: nowrap; flex: none; }
+.fd-tag.owner { color: var(--s-stop); border-color: color-mix(in srgb, var(--s-stop) 40%, transparent); }
+
+.fd-result { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.fd-pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 7px; border-radius: 999px; font-weight: 600; font-size: 11.5px;
+  color: color-mix(in srgb, var(--c) 80%, var(--ink)); background: color-mix(in srgb, var(--c) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+}
+.fd-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.fd-arrow { color: var(--ink-dim); font-size: 12px; }
+.fd-person { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px 2px 2px; }
+.fd-mini-av { width: 20px !important; height: 20px !important; font-size: 9.5px !important; margin: 0 !important; }
+.fd-detail { color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
+.fd-time { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fd-new-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fire); box-shadow: 0 0 8px var(--fire); }
+@media (max-width: 1000px) { .fd-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
