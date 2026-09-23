@@ -94,7 +94,7 @@ export async function api(method, path, body) {
 // статусов (status_label и label объектов со статусом), остальной текст
 // ответа не трогаем.
 const LEADING_EMOJI_RE = /^(?:[\p{Extended_Pictographic}️‍]\s*)+/u;
-const STATUS_LABEL_KEYS = ["status_label", "new_status_label", "old_status_label"];
+const STATUS_LABEL_KEYS = ["status_label", "new_status_label", "old_status_label", "priority_label"];
 function cleanLabel(value) {
   const cleaned = value.replace(LEADING_EMOJI_RE, "");
   return cleaned.trim() ? cleaned : value;

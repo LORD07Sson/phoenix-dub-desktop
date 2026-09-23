@@ -8,7 +8,7 @@
 
 import { state } from "./state.js";
 import { pauseSuffix } from "./people.js";
-import { apiGet, apiPost, openSheet, toast } from "./api.js";
+import { apiGet, apiPost, openSheet, toast, mediaUrl } from "./api.js";
 import { $, $all, esc, initials, isOverdue, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS, showContextMenu } from "./utils.js";
 import { openReportDetail } from "./report-detail.js";
 import { isFavorite, toggleFavorite, favoriteIds } from "./favorites.js";
@@ -199,16 +199,58 @@ export function listNeighbors(publicId) {
   };
 }
 
-// «сегодня / завтра / через 2 дн.» рядом со сроком — то, что горит,
-// видно без подсчёта дат в уме (deadlineCountdown в мини-аппе).
-function deadlineHint(r) {
-  if (!r.deadline || r.status === "completed" || r.status === "cancelled" || isOverdue(r)) return "";
+// «Фрирен 2, серия 7» → имя тайтла + «серия 7» отдельно. Если отчёт
+// привязан к тайтлу (title_name), имя берём оттуда, а свободный текст
+// отчёта остаётся подписью — у старых отчётов он бывает любым.
+export function seriesParts(r) {
+  const raw = String(r.title || "").trim();
+  const m = raw.match(/^(.*?)[,\s—-]+(серия|эп\.?|ep\.?)\s*(\d+)\s*$/i);
+  if (r.title_name) {
+    const ep = r.episode ? `серия ${r.episode}` : m ? `серия ${m[3]}` : "";
+    const sub = m && m[1].trim() === r.title_name ? "" : (m ? "" : raw);
+    return { name: r.title_name, ep, sub: sub && sub !== r.title_name ? sub : "" };
+  }
+  if (m && m[1].trim()) return { name: m[1].trim(), ep: `серия ${m[3]}`, sub: "" };
+  return { name: raw || r.public_id, ep: "", sub: "" };
+}
+
+// Постеры — через /img_proxy: к <img>/background заголовок с токеном
+// не приделать, а внешний сайт постеров из webview может не открыться.
+export function posterSrc(url) {
+  return url ? mediaUrl("/img_proxy", { url }) : "";
+}
+
+export function priorityFlagHtml(p) {
+  if (p === "urgent") return `<span class="ls-prio urgent" title="Срочный">🔥 срочно</span>`;
+  if (p === "high") return `<span class="ls-prio high" title="Высокий приоритет">🔥</span>`;
+  if (p === "low") return `<span class="ls-prio low" title="Низкий приоритет">низкий</span>`;
+  return "";
+}
+
+// Этапы пайплайна точками: пройденные закрашены, текущий светится.
+// pipeline_roles/pipeline_stage — прямо из отчёта; нет цепочки — прочерк.
+export function pipelineDotsHtml(r) {
+  const roles = r.pipeline_roles || [];
+  if (!roles.length) return `<span class="ls-nopipe">—</span>`;
+  const stage = r.status === "completed" ? roles.length : (r.pipeline_stage ?? 0);
+  const dots = roles.map((role, i) =>
+    `<i class="${i < stage ? "done" : i === stage ? "cur" : ""}" title="${esc(role)}${i < stage ? " — готово" : i === stage ? " — сейчас" : ""}"></i>`).join("");
+  const cur = stage < roles.length ? roles[stage] : "готово";
+  return `<span class="ls-pipe"><span class="dots">${dots}</span><span class="lbl">${esc(cur)}</span></span>`;
+}
+
+// Срок пилюлей с отсчётом («завтра», «просрочено 2 дн.») и цветом —
+// то, что горит, видно без подсчёта дат в уме; сама дата мельче рядом.
+export function deadlineCellHtml(r, overdue) {
+  if (!r.deadline) return `<span class="ls-dl-none">без срока</span>`;
   const d = new Date();
   const today = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
   const days = Math.round((Date.parse(`${r.deadline}T00:00:00Z`) - today) / 86400000);
-  if (days >= 3) return "";
-  const [text, colorVar] = days <= 0 ? ["сегодня", "--s-stop"] : days === 1 ? ["завтра", "--s-fix"] : [`через ${days} дн.`, "--s-work"];
-  return `<span class="deadline-hint" style="color:var(${colorVar});">${text}</span>`;
+  const date = `${r.deadline.slice(8, 10)}.${r.deadline.slice(5, 7)}`;
+  if (r.status === "completed" || r.status === "cancelled") return `<span class="ls-dl-none">${date}</span>`;
+  const [txt, cls] = overdue ? [`просрочено ${-days} дн.`, "late"]
+    : days === 0 ? ["сегодня", "late"] : days === 1 ? ["завтра", "soon"] : days <= 3 ? [`через ${days} дн.`, "soon"] : [`через ${days} дн.`, "ok"];
+  return `<span class="ls-dl-pill ${cls}">${txt}</span><span class="ls-dl-date">${date}</span>`;
 }
 
 export async function loadReports() {
@@ -351,16 +393,21 @@ export function renderReports() {
     const dotClass = STATUS_DOT_CLASS[r.status] || "draft";
     const overdue = isOverdue(r);
     const fav = isFavorite(r.public_id);
+    const t = seriesParts(r);
     tr.innerHTML = `
       <td class="col-check"><input type="checkbox" class="row-check" ${state.selected.has(r.public_id) ? "checked" : ""}></td>
-      <td class="num">
-        <button class="fav-star ${fav ? "on" : ""}" data-fav title="${fav ? "Убрать из избранного" : "В избранное"}">${fav ? "★" : "☆"}</button>
-        ${esc(r.public_id)}
+      <td class="ls-series">
+        <div class="ls-series-in">
+          <span class="ls-poster"${posterSrc(r.poster_url) ? ` style="background-image:url('${esc(posterSrc(r.poster_url))}')"` : ""}>${posterSrc(r.poster_url) ? "" : esc(initials(t.name))}</span>
+          <div class="ls-names">
+            <div class="ls-name">${esc(t.name)}${t.ep ? `<span class="ls-ep">${esc(t.ep)}</span>` : ""}${priorityFlagHtml(r.priority)}</div>
+            <div class="ls-id"><button class="fav-star ${fav ? "on" : ""}" data-fav title="${fav ? "Убрать из избранного" : "В избранное"}">${fav ? "★" : "☆"}</button>${esc(r.public_id)}${t.sub ? ` · ${esc(t.sub)}` : ""}${r.files_count ? ` · 📎${r.files_count}` : ""}${r.notes_count ? ` · 💬${r.notes_count}` : ""}</div>
+          </div>
+        </div>
       </td>
-      <td>${esc(r.title)}</td>
-      <td><span class="chip status-chip" style="--chip-accent: var(${STATUS_COLOR_VAR[r.status] || "--s-draft"})"><span class="dot ${dotClass}"></span>${esc(r.status_label)}</span></td>
-      <td><span class="priority-chip ${esc(r.priority)}"><span class="dot"></span>${esc(r.priority_label)}</span></td>
-      <td class="deadline ${overdue ? "overdue" : ""}">${overdue ? "⏰ " : ""}${esc(r.deadline || "без срока")}${deadlineHint(r)}</td>
+      <td><span class="chip status-chip" style="--chip-accent: var(${STATUS_COLOR_VAR[r.status] || "--s-draft"})"><span class="dot ${dotClass}"></span>${esc(r.status_label)}</span>${r.stuck ? `<span class="ls-stuck" title="Статус не менялся 3+ дня">застряло</span>` : ""}</td>
+      <td>${pipelineDotsHtml(r)}</td>
+      <td class="ls-dl">${deadlineCellHtml(r, overdue)}</td>
       <td>${assigneesHtml(r.assignees)}</td>
       <td class="row-actions">
         <button class="icon-btn" data-quick-assign title="Назначить">👤</button>

@@ -125,13 +125,13 @@ check("стаж: тир и остаток до следующего кольца
 const fill = profile.querySelector(".tenure-track i");
 check("полоска стажа — 60% между 30 и 180", fill && fill.style.width === "60%", fill ? fill.style.width : "нет полоски");
 
-const chips = Array.from(profile.querySelectorAll(".badge-chip")).map(el => el.textContent.trim());
-check("полученные награды — чипами", chips.length === 2 && chips.some(t => t.includes("Феникс недели")), chips.join(" | "));
+const chips = Array.from(profile.querySelectorAll(".pf-badge.won")).map(el => el.textContent.replace(/\s+/g, " ").trim());
+check("полученные награды — золотыми плитками", chips.length === 2 && chips.some(t => t.includes("Феникс недели")), chips.join(" | "));
 
-const todos = Array.from(profile.querySelectorAll(".badge-todo")).map(el => el.textContent.replace(/\s+/g, " ").trim());
+const todos = Array.from(profile.querySelectorAll(".pf-badge:not(.won)")).map(el => el.textContent.replace(/\s+/g, " ").trim());
 check("неполученная награда с прогрессом", todos.some(t => t.includes("50+ закрыто") && t.includes("1 / 50")), todos.join(" | "));
 check("награда без target — «нет данных»", todos.some(t => t.includes("90%+ вовремя") && t.includes("нет данных")), todos.join(" | "));
-const todoFill = profile.querySelector(".badge-todo .badge-track i");
+const todoFill = Array.from(profile.querySelectorAll(".pf-badge:not(.won)")).find(el => el.textContent.includes("50+ закрыто"))?.querySelector(".tr i");
 check("полоска награды — 2% (1 из 50)", todoFill && todoFill.style.width === "2%", todoFill ? todoFill.style.width : "нет полоски");
 
 const idle = profile.querySelector("#idle-slot");
@@ -145,8 +145,8 @@ check("цель не задана: подсказан темп студии",
   pace && !pace.hidden && /4 серий на человека/.test(pace.textContent),
   pace ? `hidden=${pace.hidden} · ${pace.textContent}` : "нет блока");
 
-const onTime = Array.from(profile.querySelectorAll(".bcell")).find(c => /Вовремя/.test(c.textContent));
-check("прочерк «вовремя» объяснён", onTime && /со сроком/.test(onTime.textContent), onTime ? onTime.textContent.replace(/\s+/g, " ").trim() : "нет карточки");
+const onTime = Array.from(profile.querySelectorAll(".pf-kpi")).find(c => /Вовремя/.test(c.textContent));
+check("пустое «вовремя» объяснено", onTime && /пока нет/.test(onTime.textContent) && /со сроком/.test(onTime.textContent), onTime ? onTime.textContent.replace(/\s+/g, " ").trim() : "нет карточки");
 
 if (idle && idle.querySelector(".idle-go")) {
   click(idle.querySelector(".idle-go"));
