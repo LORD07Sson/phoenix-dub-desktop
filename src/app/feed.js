@@ -56,6 +56,13 @@ function wireFeedList(root) {
 }
 
 const FEED_PAGE_SIZE = 60;
+const FEED_HEADER_HTML = `
+  <div class="page-header">
+    <div>
+      <h1>Лента</h1>
+      <div class="sub">История изменений по отчётам студии.</div>
+    </div>
+  </div>`;
 
 export async function loadFeed() {
   const root = $("#feed-body");
@@ -70,10 +77,10 @@ export async function loadFeed() {
   d.events = d.events || [];
   markFeedSeen(d.events[0]?.created_at);
   if (!d.events.length) {
-    root.innerHTML = `<div class="empty-state"><div style="font-size:34px; margin-bottom:8px;">🕓</div>Пока тихо<div class="sub" style="margin-top:4px;">как только кто-то что-то сделает с отчётом — появится здесь</div></div>`;
+    root.innerHTML = FEED_HEADER_HTML + `<div class="empty-state"><div style="font-size:34px; margin-bottom:8px;">🕓</div>Пока тихо<div class="sub" style="margin-top:4px;">как только кто-то что-то сделает с отчётом — появится здесь</div></div>`;
     return;
   }
-  root.innerHTML = `
+  root.innerHTML = FEED_HEADER_HTML + `
     <div class="feed-list" id="feed-list" data-count="${d.events.length}">${d.events.map(feedItemHtml).join("")}</div>
     ${d.has_more ? `<button class="btn feed-load-more" id="feed-loadmore">Показать ещё (${d.total - d.events.length})</button>` : ""}
   `;

@@ -27,6 +27,21 @@ import { tagLogger } from "./applog.js";
 
 const mpvLog = tagLogger("mpv");
 
+const svg = d => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const ICONS = {
+  play: svg('<path d="M8 5.5v13l10-6.5z"/>'),
+  pause: svg('<path d="M8 5v14M16 5v14"/>'),
+  frameBack: svg('<path d="M6 5v14M18 6l-8 6 8 6z"/>'),
+  frameFwd: svg('<path d="M18 5v14M6 6l8 6-8 6z"/>'),
+  loop: svg('<path d="M4 12a6 6 0 0 1 6-6h8M15 3l3 3-3 3M20 12a6 6 0 0 1-6 6H6M9 21l-3-3 3-3"/>'),
+  camera: svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>'),
+  volume: svg('<path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11"/>'),
+  muted: svg('<path d="M4 10v4h4l5 4V6L8 10z"/><path d="M17 9.5l5 5M22 9.5l-5 5"/>'),
+  up: svg('<path d="M12 19V5M6 11l6-6 6 6"/>'),
+  down: svg('<path d="M12 5v14M6 13l6 6 6-6"/>'),
+  close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+};
+
 const VIDEO_EXTENSIONS = ["mp4", "mkv", "mov", "avi", "webm", "m4v"];
 const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "m4a", "aac", "ogg", "opus"];
 const SUBTITLE_EXTENSIONS = ["srt", "ass", "ssa", "vtt", "sub"];
@@ -105,6 +120,20 @@ function removeFromPool(index) {
   if (audioState.path === removedPath) { audioState.path = null; audioState.info = null; audioState.poolIndex = null; }
   else audioState.poolIndex = reindex(audioState.poolIndex);
 
+  // Вкладки, которые хранят только номер в пуле (Дубляж, Субтитры), —
+  // раньше не пересчитывались вовсе, и после удаления файла «Дубляж»
+  // молча указывал на СОСЕДНИЙ файл. Вкладки с путём (Кадры, Скорость)
+  // сбрасываются, если удалили именно их файл, — иначе операция ушла бы
+  // на файл, которого в пуле уже нет.
+  dubState.videoIndex = reindex(dubState.videoIndex);
+  dubState.dubIndex = reindex(dubState.dubIndex);
+  subsState.videoIndex = reindex(subsState.videoIndex);
+  subsState.subsIndex = reindex(subsState.subsIndex);
+  if (framesState.path === removedPath) { framesState.path = null; framesState.info = null; framesState.poolIndex = null; }
+  else framesState.poolIndex = reindex(framesState.poolIndex);
+  if (speedState.path === removedPath) { speedState.path = null; speedState.info = null; speedState.poolIndex = null; }
+  else speedState.poolIndex = reindex(speedState.poolIndex);
+
   concatState.paths = concatState.paths.filter(p => p !== removedPath);
   MUX_SECTIONS.forEach(section => {
     muxState[section.key] = muxState[section.key].filter(t => t.path !== removedPath);
@@ -116,10 +145,10 @@ function poolBarHtml() {
     <div class="mt-pool-bar">
       <div class="mt-pool-chips" id="mt-pool-chips">
         ${filePool.length
-          ? filePool.map((f, i) => `<span class="mt-pool-chip" title="${esc(f.path)}">${esc(baseName(f.path))}<button class="mt-pool-chip-remove" data-pool-remove="${i}" title="Убрать из пула">✕</button></span>`).join("")
+          ? filePool.map((f, i) => `<span class="mt-pool-chip" title="${esc(f.path)}">${esc(baseName(f.path))}<button class="mt-pool-chip-remove" data-pool-remove="${i}" title="Убрать из пула" aria-label="Убрать из пула">${ICONS.close}</button></span>`).join("")
           : `<span class="mt-info-line">Файлов пока нет — добавьте, они станут доступны во всех вкладках.</span>`}
       </div>
-      <button class="btn ghost" id="mt-pool-add">📂 Добавить файлы</button>
+      <button class="btn ghost" id="mt-pool-add">Добавить файлы</button>
     </div>`;
 }
 
@@ -158,12 +187,12 @@ function poolSelectHtml(selectId, selectedIndex, filterFn) {
 }
 
 function infoLineHtml(info) {
-  const parts = [`⏱ ${formatTime(info.duration)}`];
+  const parts = [formatTime(info.duration)];
   if (info.video) {
-    parts.push(`🎞 ${esc(info.video.codec)}${info.video.width ? ` ${info.video.width}×${info.video.height}` : ""}${info.video.fps ? ` · ${info.video.fps.toFixed(2)} fps` : ""}`);
+    parts.push(`${esc(info.video.codec)}${info.video.width ? ` ${info.video.width}×${info.video.height}` : ""}${info.video.fps ? ` · ${info.video.fps.toFixed(2)} fps` : ""}`);
   }
   if (info.audio) {
-    parts.push(`🔊 ${esc(info.audio.codec)}${info.audio.channels ? ` · ${info.audio.channels}ch` : ""}${info.audio.sampleRate ? ` · ${Math.round(info.audio.sampleRate / 1000)} кГц` : ""}`);
+    parts.push(`${esc(info.audio.codec)}${info.audio.channels ? ` · ${info.audio.channels}ch` : ""}${info.audio.sampleRate ? ` · ${Math.round(info.audio.sampleRate / 1000)} кГц` : ""}`);
   }
   return `<div class="mt-info-line">${parts.join(" · ")}</div>`;
 }
@@ -191,7 +220,7 @@ function jobHtml() {
         <span class="mt-job-pct" id="mt-job-pct">0%</span>
       </div>
       <div class="update-progress-track"><div class="update-progress-fill" id="mt-job-fill"></div></div>
-      <button class="btn ghost mt-job-cancel" id="mt-job-cancel" type="button">✕ Отмена</button>
+      <button class="btn ghost mt-job-cancel" id="mt-job-cancel" type="button">Отмена</button>
     </div>`;
 }
 
@@ -254,7 +283,7 @@ async function runJob(overlay, { button, busyLabel, run }) {
 // Успешный результат — с кнопкой «показать в папке», один хелпер на все
 // операции вместо пяти одинаковых блоков.
 function toastDone(text, path) {
-  toast(text, "success", { label: "📂 Показать в папке", onClick: () => revealInFolder(path) });
+  toast(text, "success", { label: "Показать в папке", onClick: () => revealInFolder(path) });
 }
 
 // ============================================================
@@ -495,7 +524,9 @@ function warnAboutDeadOutputs() {
 
 function updatePlayButton(root) {
   const btn = root.querySelector("#mt-cut-playpause");
-  if (btn) btn.textContent = cutState.mpvPaused ? "▶" : "⏸";
+  if (!btn) return;
+  btn.innerHTML = cutState.mpvPaused ? ICONS.play : ICONS.pause;
+  btn.setAttribute("aria-label", cutState.mpvPaused ? "Воспроизвести" : "Пауза");
 }
 
 async function mpvTogglePlay(root) {
@@ -579,8 +610,8 @@ function renderTrackPickers(root) {
     }),
   ].join("");
   mount.innerHTML = `
-    ${audio.length > 1 ? `<label class="mt-track-pick">🔊 <select data-track-kind="audio">${optionsFor(audio, false)}</select></label>` : ""}
-    ${subs.length ? `<label class="mt-track-pick">💬 <select data-track-kind="subtitle">${optionsFor(subs, true)}</select></label>` : ""}`;
+    ${audio.length > 1 ? `<label class="mt-track-pick">Звук <select data-track-kind="audio">${optionsFor(audio, false)}</select></label>` : ""}
+    ${subs.length ? `<label class="mt-track-pick">Субтитры <select data-track-kind="subtitle">${optionsFor(subs, true)}</select></label>` : ""}`;
   mount.querySelectorAll("[data-track-kind]").forEach(sel => {
     sel.addEventListener("change", async () => {
       try { await invoke("mpv_set_track", { kind: sel.dataset.trackKind, id: Number(sel.value) }); }
@@ -607,15 +638,15 @@ const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 function playerBarHtml() {
   return `
     <div class="mt-player-bar">
-      <button class="icon-btn" id="mt-cut-frame-back" title="Кадр назад (,)">⯇|</button>
-      <button class="icon-btn mt-play" id="mt-cut-playpause" title="Play/pause (пробел)">${cutState.mpvPaused ? "▶" : "⏸"}</button>
-      <button class="icon-btn" id="mt-cut-frame-fwd" title="Кадр вперёд (.)">|⯈</button>
+      <button class="icon-btn" id="mt-cut-frame-back" title="Кадр назад (,)" aria-label="Кадр назад">${ICONS.frameBack}</button>
+      <button class="icon-btn mt-play" id="mt-cut-playpause" title="Play/pause (пробел)" aria-label="${cutState.mpvPaused ? "Воспроизвести" : "Пауза"}">${cutState.mpvPaused ? ICONS.play : ICONS.pause}</button>
+      <button class="icon-btn" id="mt-cut-frame-fwd" title="Кадр вперёд (.)" aria-label="Кадр вперёд">${ICONS.frameFwd}</button>
       <span class="mt-time" id="mt-cut-time">0:00.0 / 0:00.0</span>
-      <button class="icon-btn" id="mt-cut-ab" title="Повторять между метками I и O">🔁 A-B</button>
-      <button class="icon-btn" id="mt-cut-shot" title="Сохранить текущий кадр">📸</button>
+      <button class="icon-btn" id="mt-cut-ab" title="Повторять между метками I и O">${ICONS.loop}A-B</button>
+      <button class="icon-btn" id="mt-cut-shot" title="Сохранить текущий кадр" aria-label="Сохранить кадр">${ICONS.camera}</button>
       <span class="mt-player-spacer"></span>
       <span class="mt-track-picks" id="mt-cut-tracks"></span>
-      <button class="icon-btn" id="mt-cut-mute" title="Без звука (m)">${cutState.muted ? "🔇" : "🔊"}</button>
+      <button class="icon-btn" id="mt-cut-mute" title="Без звука (m)" aria-label="Без звука">${cutState.muted ? ICONS.muted : ICONS.volume}</button>
       <input type="range" id="mt-cut-volume" class="mt-volume" min="0" max="130" step="1" value="${cutState.volume}" title="Громкость">
       <select id="mt-cut-speed" class="mt-speed" title="Скорость воспроизведения">
         ${SPEED_OPTIONS.map(v => `<option value="${v}" ${v === cutState.speed ? "selected" : ""}>${v}×</option>`).join("")}
@@ -633,8 +664,8 @@ function segmentListHtml() {
       <span>${i + 1}.</span>
       <span>${formatTimePrecise(s.start)} – ${formatTimePrecise(s.end)}</span>
       <span class="mt-segment-dur">(${formatTimePrecise(s.end - s.start)})</span>
-      <button class="icon-btn" data-seek-segment="${i}" title="Перейти">▶</button>
-      <button class="icon-btn" data-remove-segment="${i}" title="Удалить">✕</button>
+      <button class="icon-btn" data-seek-segment="${i}" title="Перейти" aria-label="Перейти к сегменту">${ICONS.play}</button>
+      <button class="icon-btn" data-remove-segment="${i}" title="Удалить" aria-label="Удалить сегмент">${ICONS.close}</button>
     </div>`).join("")
     + `<div class="mt-info-line">Итого к экспорту: ${formatTimePrecise(total)}</div>`;
 }
@@ -657,9 +688,9 @@ function cutPanelHtml() {
       : `<audio id="mt-cut-audio" src="${esc(convertFileSrc(cutState.path))}" controls style="width:100%;"></audio>`}
     <canvas class="mt-timeline" id="mt-cut-timeline"></canvas>
     <div class="mt-io-row">
-      <button class="btn" id="mt-mark-in">⏮ I — начало</button>
+      <button class="btn" id="mt-mark-in">I — начало</button>
       <span id="mt-mark-in-val">—</span>
-      <button class="btn" id="mt-mark-out">⏭ O — конец</button>
+      <button class="btn" id="mt-mark-out">O — конец</button>
       <span id="mt-mark-out-val">—</span>
       <button class="btn primary" id="mt-add-segment">+ Добавить сегмент</button>
     </div>
@@ -667,7 +698,7 @@ function cutPanelHtml() {
     <div class="mt-export-row">
       <label><input type="checkbox" id="mt-keep-separate" checked> Экспортировать сегменты отдельно</label>
       <label><input type="checkbox" id="mt-merge"> Склеить всё в один файл</label>
-      <button class="btn primary" id="mt-cut-export">✂ Экспортировать</button>
+      <button class="btn primary" id="mt-cut-export">Экспортировать</button>
     </div>
     <label class="mt-precise" title="Голова сегмента перекодируется, остальное копируется — начало получается ровно на отмеченной секунде">
       <input type="checkbox" id="mt-precise" ${cutState.precise ? "checked" : ""}>
@@ -691,16 +722,25 @@ function drawCutTimeline(canvas) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssWidth, cssHeight);
 
+  const css = window.getComputedStyle(document.documentElement);
+  const token = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+  const accent = token("--fire", "#ff6a2b");
+  const inColor = token("--s-done", "#33d17a");
+  const outColor = token("--s-stop", "#ff6b6b");
+  const inkDim = token("--ink-dim", "#565b6e");
+
   const trackTop = cssHeight / 2 - 3;
-  ctx.fillStyle = "#251a20";
+  ctx.fillStyle = token("--surface-3", "#1e212c");
   ctx.fillRect(0, trackTop, cssWidth, 6);
 
   // Сегменты — заливка полосой во всю высоту.
   cutState.segments.forEach(s => {
     const x1 = (s.start / duration) * cssWidth;
     const x2 = (s.end / duration) * cssWidth;
-    ctx.fillStyle = "rgba(255, 106, 77, .35)";
+    ctx.globalAlpha = .35;
+    ctx.fillStyle = accent;
     ctx.fillRect(x1, 4, Math.max(1.5, x2 - x1), cssHeight - 20);
+    ctx.globalAlpha = 1;
   });
 
   // Незакоммиченный интервал между метками — видно, что именно уедет в
@@ -708,14 +748,16 @@ function drawCutTimeline(canvas) {
   if (cutState.markIn != null && cutState.markOut != null) {
     const a = Math.min(cutState.markIn, cutState.markOut);
     const b = Math.max(cutState.markIn, cutState.markOut);
-    ctx.fillStyle = "rgba(107, 198, 148, .18)";
+    ctx.globalAlpha = .18;
+    ctx.fillStyle = inColor;
     ctx.fillRect((a / duration) * cssWidth, 4, Math.max(1.5, ((b - a) / duration) * cssWidth), cssHeight - 20);
+    ctx.globalAlpha = 1;
   }
 
   // Засечки опорных кадров — тонкие вертикальные штрихи. На длинном
   // видео их тысячи; рисуем не больше одной на пиксель, иначе нижняя
   // полоса превращается в сплошную заливку и перестаёт что-либо значить.
-  ctx.strokeStyle = "rgba(255,255,255,.25)";
+  ctx.strokeStyle = inkDim;
   ctx.lineWidth = 1;
   let lastX = -2;
   cutState.keyframes.forEach(k => {
@@ -731,7 +773,7 @@ function drawCutTimeline(canvas) {
   // Шкала времени — раньше таймлайн был безразмерной полосой без единой
   // подписи, и понять, где на ней 3 минуты, было нельзя.
   const stepSec = niceTimeStep(duration, cssWidth);
-  ctx.fillStyle = "rgba(255,255,255,.45)";
+  ctx.fillStyle = token("--ink-soft", "#9aa0b4");
   ctx.font = "10px ui-monospace, monospace";
   ctx.textBaseline = "bottom";
   for (let t = 0; t <= duration; t += stepSec) {
@@ -750,8 +792,8 @@ function drawCutTimeline(canvas) {
     ctx.lineTo(x, cssHeight - 12);
     ctx.stroke();
   };
-  drawMark(cutState.markIn, "#6bc694");
-  drawMark(cutState.markOut, "#ff8b82");
+  drawMark(cutState.markIn, inColor);
+  drawMark(cutState.markOut, outColor);
 
   // Плейхед — текущая позиция. Для видео это cutState.lastKnownTime
   // (обновляется по событию mpv-state/time-pos и оптимистично при сике —
@@ -760,7 +802,7 @@ function drawCutTimeline(canvas) {
   const audioEl = $("#mt-cut-audio");
   const t = audioEl ? audioEl.currentTime : cutState.lastKnownTime;
   const x = (t / duration) * cssWidth;
-  ctx.strokeStyle = "#ffc773";
+  ctx.strokeStyle = accent;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(x, 0);
@@ -895,7 +937,7 @@ function wireCutPanel(root) {
     });
     root.querySelector("#mt-cut-mute").addEventListener("click", async e => {
       cutState.muted = !cutState.muted;
-      e.currentTarget.textContent = cutState.muted ? "🔇" : "🔊";
+      e.currentTarget.innerHTML = cutState.muted ? ICONS.muted : ICONS.volume;
       try { await invoke("mpv_set_mute", { mute: cutState.muted }); } catch { /* плеер мог закрыться */ }
     });
     const speed = root.querySelector("#mt-cut-speed");
@@ -1001,6 +1043,15 @@ function isTypingTarget(el) {
 
 function handleCutHotkey(root, e) {
   if (activeOp !== "cut" || !cutState.path || isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+  // Горячие клавиши работают только в своей модалке: поверх неё может
+  // лежать другое окно (подтверждение, выбор файла), и пробел в нём не
+  // должен запускать плеер под ним.
+  const overlays = document.querySelectorAll(".overlay");
+  if (overlays.length && overlays[overlays.length - 1] !== root) return;
+  // Раньше Enter на сфокусированной «Экспортировать» добавлял сегмент
+  // вместо экспорта, а пробел на любой кнопке запускал плеер — нажатие
+  // кнопки с клавиатуры перехватывалось глобальной клавишей.
+  if ((e.code === "Space" || e.code === "Enter") && e.target.closest?.("button, a, label, summary")) return;
   const step = e.shiftKey ? 10 : 1;
   // Раскладка: клавиша, а не символ — «i»/«ш» и «o»/«щ» это одна и та же
   // физическая клавиша, а в студии печатают по-русски.
@@ -1133,7 +1184,7 @@ function convertPanelHtml() {
         ${CONTAINERS.map(x => `<option value="${x}" ${x === convertContainer() ? "selected" : ""}>${x}</option>`).join("")}
       </select>
     </div>
-    <button class="btn primary" id="mt-convert-run">🔄 Конвертировать</button>
+    <button class="btn primary" id="mt-convert-run">Конвертировать</button>
   `;
 }
 
@@ -1177,13 +1228,13 @@ function wireConvertPanel(root) {
     const opts = convertState.preset === "custom" ? {
       videoCodec: c.videoCodec || null,
       audioCodec: c.audioCodec || null,
-      width: Number(c.width) || null,
-      height: Number(c.height) || null,
+      width: Math.round(Number(c.width)) || null,
+      height: Math.round(Number(c.height)) || null,
       videoBitrate: c.videoBitrate.trim() || null,
       audioBitrate: c.audioBitrate.trim() || null,
       // Number(...)||null съедал бы CRF 0 (визуально «без потерь») —
       // проверяем именно на пустую строку.
-      crf: c.crf === "" ? null : Number(c.crf),
+      crf: c.crf === "" ? null : Math.round(Number(c.crf)),
     } : CONVERT_PRESETS[convertState.preset].opts;
     const container = convertContainer();
     const outPath = await pickOutputFile(`${stemOf(convertState.path)}.${container}`, [
@@ -1244,7 +1295,7 @@ function audioPanelHtml() {
     <div class="mt-form-row">
       <label><input type="checkbox" id="mt-audio-normalize" ${audioState.normalize ? "checked" : ""}> Нормализовать громкость (loudnorm, −16 LUFS)</label>
     </div>
-    <button class="btn primary" id="mt-audio-run">🎵 Извлечь / конвертировать</button>
+    <button class="btn primary" id="mt-audio-run">Извлечь / конвертировать</button>
   `;
 }
 
@@ -1318,12 +1369,12 @@ function concatPanelHtml() {
         <div class="mt-segment-row" data-i="${i}">
           <span>${i + 1}.</span>
           <span title="${esc(p)}" style="flex:1; overflow:hidden; text-overflow:ellipsis;">${esc(baseName(p))}</span>
-          <button class="icon-btn" data-move-up="${i}" title="Выше" ${i === 0 ? "disabled" : ""}>↑</button>
-          <button class="icon-btn" data-move-down="${i}" title="Ниже" ${i === concatState.paths.length - 1 ? "disabled" : ""}>↓</button>
-          <button class="icon-btn" data-remove-concat="${i}" title="Убрать">✕</button>
+          <button class="icon-btn" data-move-up="${i}" title="Выше" aria-label="Выше" ${i === 0 ? "disabled" : ""}>${ICONS.up}</button>
+          <button class="icon-btn" data-move-down="${i}" title="Ниже" aria-label="Ниже" ${i === concatState.paths.length - 1 ? "disabled" : ""}>${ICONS.down}</button>
+          <button class="icon-btn" data-remove-concat="${i}" title="Убрать" aria-label="Убрать">${ICONS.close}</button>
         </div>`).join("") : `<div class="no-assignee">Добавьте хотя бы два файла — порядок в списке и есть порядок склейки.</div>`}
     </div>
-    <button class="btn primary" id="mt-concat-run" ${concatState.paths.length >= 2 ? "" : "disabled"}>🧩 Склеить</button>
+    <button class="btn primary" id="mt-concat-run" ${concatState.paths.length >= 2 ? "" : "disabled"}>Склеить</button>
   `;
 }
 
@@ -1417,7 +1468,7 @@ function muxTrackRowHtml(section, track, i) {
       </select>
       <input type="text" data-mux-title data-section="${section.key}" data-i="${i}" value="${esc(track.title)}" placeholder="Имя дорожки">
       <label class="mt-mux-default-toggle"><input type="checkbox" data-mux-default data-section="${section.key}" data-i="${i}" ${track.isDefault ? "checked" : ""}> По умолч.</label>
-      <button class="icon-btn" data-mux-remove data-section="${section.key}" data-i="${i}" title="Убрать">✕</button>
+      <button class="icon-btn" data-mux-remove data-section="${section.key}" data-i="${i}" title="Убрать" aria-label="Убрать дорожку">${ICONS.close}</button>
     </div>`;
 }
 
@@ -1428,7 +1479,7 @@ function muxSectionHtml(section) {
       <div class="mt-mux-section-head">
         <b>${esc(section.label)}</b>
         <div class="mt-mux-section-add">
-          ${poolSelectHtml(`mt-mux-pick-${section.key}`, null)}
+          ${poolSelectHtml(`mt-mux-pick-${section.key}`, null, f => section.extensions.includes(extOf(f.path)))}
           <button class="btn ghost" data-mux-add="${section.key}">+ Добавить</button>
         </div>
       </div>
@@ -1443,7 +1494,7 @@ function totalMuxTracks() {
 function muxPanelHtml() {
   return `
     ${MUX_SECTIONS.map(muxSectionHtml).join("")}
-    <button class="btn primary" id="mt-mux-run" ${totalMuxTracks() ? "" : "disabled"}>🧩 Смуксить</button>
+    <button class="btn primary" id="mt-mux-run" ${totalMuxTracks() ? "" : "disabled"}>Смуксить</button>
   `;
 }
 
@@ -1566,7 +1617,7 @@ function dubPanelHtml() {
       <input id="mt-dub-bitrate" type="text" style="width:90px;" placeholder="192k" value="${esc(dubState.bitrate)}">
     </div>
     <div class="mt-info-line">Картинка копируется без перекодирования — качество видео не меняется.</div>
-    <button class="btn primary" id="mt-dub-run" ${video && dub ? "" : "disabled"}>🎙 Свести</button>
+    <button class="btn primary" id="mt-dub-run" ${video && dub ? "" : "disabled"}>Свести</button>
   `;
 }
 
@@ -1599,7 +1650,11 @@ function wireDubPanel(root) {
     const video = filePool[dubState.videoIndex];
     const dub = filePool[dubState.dubIndex];
     if (!video || !dub) return;
-    const outPath = await pickOutputFile(`${stemOf(video.path)}_dub.${extOf(video.path) || "mkv"}`);
+    // mp4 не принимает PCM и капризничает с FLAC — ffmpeg падал уже на
+    // записи, после долгого прохода. Такой звук сразу кладём в mkv.
+    let outExt = extOf(video.path) || "mkv";
+    if (["pcm_s16le", "flac"].includes(dubState.codec) && ["mp4", "m4v"].includes(outExt)) outExt = "mkv";
+    const outPath = await pickOutputFile(`${stemOf(video.path)}_dub.${outExt}`, [{ name: outExt.toUpperCase(), extensions: [outExt] }]);
     if (!outPath) return;
     const ok = await runJob(root, {
       button: runBtn,
@@ -1672,7 +1727,7 @@ function framesPanelHtml() {
         <input id="mt-gif-width" type="number" min="1" style="width:100px;" value="${esc(framesState.gifWidth)}">
       </div>
       <div class="mt-info-line">Палитра подбирается под этот фрагмент отдельным проходом — без этого GIF выходит грязным на любом градиенте.</div>` : ""}
-    <button class="btn primary" id="mt-frames-run">${framesState.kind === "gif" ? "🎞 Собрать GIF" : "🖼 Снять"}</button>
+    <button class="btn primary" id="mt-frames-run">${framesState.kind === "gif" ? "Собрать GIF" : "Снять"}</button>
   `;
 }
 
@@ -1759,13 +1814,18 @@ function wireFramesPanel(root) {
 const SPEED_PRESETS = [0.5, 0.9, 0.95, 1, 1.05, 1.1, 1.25, 1.5, 2];
 const speedState = { poolIndex: null, path: null, info: null, speed: "1", keepPitch: true };
 
+function speedDurationHtml() {
+  const speed = Number(speedState.speed) || 1;
+  const before = speedState.info ? speedState.info.duration : 0;
+  return `Длительность: ${formatTime(before)} → <b>${formatTime(speed > 0 ? before / speed : before)}</b>`;
+}
+
 function speedPanelHtml() {
   const picker = `<div class="mt-file-row">${poolSelectHtml("mt-speed-pick", speedState.poolIndex, f => f.info && (f.info.video || f.info.audio))}${speedState.path ? infoLineHtml(speedState.info) : ""}</div>`;
   if (!speedState.path) {
     return `${picker}<div class="mt-empty"><p>Выберите файл из пула выше — изменить скорость и картинки, и звука разом.</p></div>`;
   }
   const speed = Number(speedState.speed) || 1;
-  const before = speedState.info ? speedState.info.duration : 0;
   return `
     ${picker}
     <div class="mt-form-row">
@@ -1779,8 +1839,8 @@ function speedPanelHtml() {
       <label><input type="checkbox" id="mt-speed-pitch" ${speedState.keepPitch ? "checked" : ""}> Сохранять высоту голоса</label>
       <span class="mt-info-line">без этого голос поедет вверх или вниз, как плёнка не той скорости</span>
     </div>
-    <div class="mt-info-line">Длительность: ${formatTime(before)} → <b>${formatTime(speed > 0 ? before / speed : before)}</b></div>
-    <button class="btn primary" id="mt-speed-run">⏩ Применить</button>
+    <div class="mt-info-line" id="mt-speed-duration">${speedDurationHtml()}</div>
+    <button class="btn primary" id="mt-speed-run">Применить</button>
   `;
 }
 
@@ -1797,16 +1857,23 @@ function wireSpeedPanel(root) {
   if (!speedState.path) return;
 
   const value = root.querySelector("#mt-speed-value");
+  // Пересчитываем только строку длительности и подсветку пресета: полная
+  // перерисовка на каждый символ пересоздавала само поле, и фокус из
+  // него пропадал — «1.05» было не набрать, только по одной цифре.
+  const syncSpeedUi = () => {
+    const current = Number(speedState.speed);
+    root.querySelector("#mt-speed-duration").innerHTML = speedDurationHtml();
+    root.querySelectorAll("[data-speed]").forEach(b => b.classList.toggle("active", Math.abs(Number(b.dataset.speed) - current) < 1e-6));
+  };
   value.addEventListener("input", () => {
     speedState.speed = value.value;
-    // Пересчитать «во что превратится длительность» надо сразу — это и
-    // есть главный ответ на вопрос «а сколько ставить».
-    renderActivePanel(root);
+    syncSpeedUi();
   });
   root.querySelectorAll("[data-speed]").forEach(btn => {
     btn.addEventListener("click", () => {
       speedState.speed = btn.dataset.speed;
-      renderActivePanel(root);
+      value.value = btn.dataset.speed;
+      syncSpeedUi();
     });
   });
   root.querySelector("#mt-speed-pitch").addEventListener("change", e => {
@@ -1874,7 +1941,7 @@ function subsPanelHtml() {
         <span class="mt-info-line">0 — первая дорожка субтитров в файле</span>
       </div>
     `}
-    <button class="btn primary" id="mt-subs-run" ${video ? "" : "disabled"}>${burning ? "💬 Вшить" : "💬 Вытащить"}</button>
+    <button class="btn primary" id="mt-subs-run" ${video ? "" : "disabled"}>${burning ? "Вшить" : "Вытащить"}</button>
   `;
 }
 
@@ -1939,15 +2006,15 @@ function wireSubsPanel(root) {
 // ============================================================
 
 const OPERATIONS = {
-  cut: { label: "✂️ Обрезка", html: cutPanelHtml, wire: wireCutPanel },
-  convert: { label: "🔄 Конвертация", html: convertPanelHtml, wire: wireConvertPanel },
-  audio: { label: "🎵 Аудио", html: audioPanelHtml, wire: wireAudioPanel },
-  dub: { label: "🎙 Дубляж", html: dubPanelHtml, wire: wireDubPanel },
-  speed: { label: "⏩ Скорость", html: speedPanelHtml, wire: wireSpeedPanel },
-  frames: { label: "🖼 Кадры", html: framesPanelHtml, wire: wireFramesPanel },
-  subs: { label: "💬 Субтитры", html: subsPanelHtml, wire: wireSubsPanel },
-  concat: { label: "🧩 Склейка", html: concatPanelHtml, wire: wireConcatPanel },
-  mux: { label: "🎛 Муксинг", html: muxPanelHtml, wire: wireMuxPanel },
+  cut: { label: "Обрезка", html: cutPanelHtml, wire: wireCutPanel },
+  convert: { label: "Конвертация", html: convertPanelHtml, wire: wireConvertPanel },
+  audio: { label: "Аудио", html: audioPanelHtml, wire: wireAudioPanel },
+  dub: { label: "Дубляж", html: dubPanelHtml, wire: wireDubPanel },
+  speed: { label: "Скорость", html: speedPanelHtml, wire: wireSpeedPanel },
+  frames: { label: "Кадры", html: framesPanelHtml, wire: wireFramesPanel },
+  subs: { label: "Субтитры", html: subsPanelHtml, wire: wireSubsPanel },
+  concat: { label: "Склейка", html: concatPanelHtml, wire: wireConcatPanel },
+  mux: { label: "Муксинг", html: muxPanelHtml, wire: wireMuxPanel },
 };
 
 let activeOp = "cut";
@@ -1960,7 +2027,7 @@ function renderActivePanel(overlay) {
 
 export function openMediaTools() {
   const overlay = openSheet(`
-    <h2>🎬 Инструменты ffmpeg</h2>
+    <h2>Инструменты ffmpeg</h2>
     <div id="mt-pool-bar-mount"></div>
     <div class="mt-op-tabs">
       ${Object.entries(OPERATIONS).map(([key, op]) => `<button class="mt-op-tab ${key === activeOp ? "active" : ""}" data-op="${key}">${op.label}</button>`).join("")}
@@ -1969,6 +2036,7 @@ export function openMediaTools() {
     ${jobHtml()}
     <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
   `, "wide");
+  overlay.querySelector(".sheet").classList.add("mt-sheet");
 
   // Закрытие модалки ЛЮБЫМ способом должно убирать нативное окно mpv.
   // Раньше это висело только на кнопке «Закрыть», а Escape и клик по

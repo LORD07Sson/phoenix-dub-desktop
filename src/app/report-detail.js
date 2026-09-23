@@ -7,12 +7,13 @@ import { state } from "./state.js";
 import { invoke, pickOutputFile, pickInputFile, revealInFolder, pinReportWindow } from "./tauri.js";
 import { esc, initials, STATUS_DOT_CLASS, STATUS_COLOR_VAR, isOverdue, parseNoteTime, secondsFromTimeInput, noteTimePrefix, formatRange } from "./utils.js";
 import { runQcAnalysis, QC_EXTENSIONS } from "./qc.js";
-import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports } from "./reports.js";
+import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports, listNeighbors } from "./reports.js";
 import { loadSidebarStatusCounts } from "./tabs.js";
 import { loadRoles, loadAssignable, userOptionsHtml } from "./titles-admin.js";
 import { setDropTarget } from "./file-drop.js";
 import { recordRecentReport } from "./recent-reports.js";
 import { toggleFocusMode, syncFocusButton } from "./focus-mode.js";
+import { loadAvatars } from "./profile.js";
 
 // Ключи "kind" — ровно те, что отдаёт серверный audio_qc.py (miniapp/audio_qc.py):
 // "clip"/"noise"/"silence"/"silence_long"/"no_speech". Раньше здесь жил набор
@@ -51,6 +52,25 @@ export async function openReportDetail(publicId) {
   // вызывается на каждое действие, и сбрасывать выбор на каждом было бы
   // неприятно.
   let notesByTime = false;
+
+  // Переход к соседнему отчёту выборки «Списка», не закрывая карточку
+  // (как стрелки в шторке мини-аппа). Соседи считаются заново на каждый
+  // переход — список могли пересортировать или отфильтровать.
+  const goTo = targetId => {
+    if (!targetId) return;
+    overlay.remove();
+    openReportDetail(targetId);
+  };
+  const onNavKey = e => {
+    if (!e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+    const overlays = document.querySelectorAll(".overlay");
+    if (overlays[overlays.length - 1] !== overlay) return;
+    const nb = listNeighbors(publicId);
+    if (!nb) return;
+    e.preventDefault();
+    goTo(e.key === "ArrowLeft" ? nb.prev : nb.next);
+  };
+  document.addEventListener("keydown", onNavKey, true);
   let recentRecorded = false; // пишем в MRU один раз за открытие, не на каждый render()
   new MutationObserver((_muts, obs) => {
     if (!overlay.isConnected) {
@@ -58,6 +78,7 @@ export async function openReportDetail(publicId) {
       setDropTarget(null);
       document.removeEventListener("report-file-uploaded", onFileUploaded);
       document.removeEventListener("report-notes-added", onFileUploaded);
+      document.removeEventListener("keydown", onNavKey, true);
       document.dispatchEvent(new CustomEvent("report-detail-closed", { detail: { publicId } }));
     }
   }).observe(document.body, { childList: true });
@@ -92,6 +113,7 @@ export async function openReportDetail(publicId) {
 
     const dotClass = STATUS_DOT_CLASS[detail.status] || "draft";
     const overdue = isOverdue(detail);
+    const nav = listNeighbors(publicId);
 
     // Заметки с тайм-кодом — это список правок по дорожке, и читать его
     // удобнее по времени, а не по времени написания.
@@ -110,8 +132,11 @@ export async function openReportDetail(publicId) {
       <div class="detail-head">
         <h2>${esc(detail.title)}</h2>
         <div class="detail-head-actions">
+          ${nav ? `
+            <button class="icon-btn" data-nav="prev" title="Предыдущий в списке (Alt+←)" aria-label="Предыдущий отчёт" ${nav.prev ? "" : "disabled"}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+            <button class="icon-btn" data-nav="next" title="Следующий в списке (Alt+→)" aria-label="Следующий отчёт" ${nav.next ? "" : "disabled"}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>` : ""}
           <button class="icon-btn" id="btn-focus-toggle" data-focus-toggle style="flex:none;"></button>
-          <button class="icon-btn" data-close style="flex:none;">✕</button>
+          <button class="icon-btn" data-close style="flex:none;" title="Закрыть" aria-label="Закрыть"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         </div>
       </div>
       <div class="detail-id">${esc(detail.public_id)} · от ${esc((detail.author && (detail.author.first_name || detail.author.username)) || "?")} · ${esc(detail.created_at || "")}</div>
@@ -124,10 +149,10 @@ export async function openReportDetail(publicId) {
       </div>
 
       <div class="detail-section">
-        <h3>👤 Исполнители</h3>
+        <h3>Исполнители</h3>
         ${(detail.assignees && detail.assignees.length)
           ? detail.assignees.map(a => `<div class="assignee-row" data-assignee="${a.telegram_id}">
-              <span class="avatar-bubble">${esc(initials(a.first_name || a.username))}</span>
+              <span class="avatar-bubble" data-avatar-for="${a.telegram_id}">${esc(initials(a.first_name || a.username))}</span>
               <span style="flex:1;">${esc(a.first_name || a.username || `ID ${a.telegram_id}`)}</span>
               <button class="icon-btn" data-unassign="${a.telegram_id}" title="Снять">✕</button>
             </div>`).join("")
@@ -135,7 +160,7 @@ export async function openReportDetail(publicId) {
       </div>
 
       <div class="detail-section">
-        <h3>✅ Чек-лист ${checklist.items.length ? `(${checklist.items.filter(i => i.done).length}/${checklist.items.length})` : ""}</h3>
+        <h3>Чек-лист ${checklist.items.length ? `(${checklist.items.filter(i => i.done).length}/${checklist.items.length})` : ""}</h3>
         <div id="checklist-list">${checklist.items.map(checklistItemHtml).join("") || `<div class="no-assignee">Пусто</div>`}</div>
         <div class="add-row">
           <input id="checklist-new" placeholder="Новый пункт…">
@@ -144,7 +169,7 @@ export async function openReportDetail(publicId) {
       </div>
 
       <div class="detail-section">
-        <h3>📝 Заметки ${notes.notes.length ? `(${notes.notes.length})` : ""}
+        <h3>Заметки ${notes.notes.length ? `(${notes.notes.length})` : ""}
           ${timedCount >= 2 ? `<button class="btn ghost notes-sort" id="notes-sort">${notesByTime ? "По времени добавления" : "По тайм-коду"}</button>` : ""}
         </h3>
         <div id="notes-list">${orderedNotes.map(noteHtml).join("") || `<div class="no-assignee">Пока нет заметок</div>`}</div>
@@ -157,12 +182,12 @@ export async function openReportDetail(publicId) {
 
       ${files.files.length ? `
       <div class="detail-section">
-        <h3>📎 Файлы (${files.files.length})</h3>
+        <h3>Файлы (${files.files.length})</h3>
         <div id="files-list">${files.files.map(fileHtml).join("")}</div>
       </div>` : ""}
 
       <div class="detail-section">
-        <h3>🔗 Пайплайн ${detail.pipeline && detail.pipeline.length ? `<span class="pipeline-summary">${detail.pipeline.map(s => esc(s.role)).join(" → ")}</span>` : ""}</h3>
+        <h3>Пайплайн ${detail.pipeline && detail.pipeline.length ? `<span class="pipeline-summary">${detail.pipeline.map(s => esc(s.role)).join(" → ")}</span>` : ""}</h3>
         ${pipelineChainHtml(detail.pipeline, assignable)}
         <div id="pipeline-draft-list"></div>
         <div class="add-row">
@@ -171,28 +196,33 @@ export async function openReportDetail(publicId) {
           <button class="btn" id="pipeline-add-step">+</button>
         </div>
         <div class="sheet-actions" style="margin-top:8px;">
-          <button class="btn primary" id="btn-pipeline-save">🔗 Сохранить пайплайн</button>
-          ${detail.pipeline && detail.pipeline.length ? `<button class="btn danger" id="btn-pipeline-clear">✕ Снять</button>` : ""}
+          <button class="btn primary" id="btn-pipeline-save">Сохранить пайплайн</button>
+          ${detail.pipeline && detail.pipeline.length ? `<button class="btn danger" id="btn-pipeline-clear">Снять</button>` : ""}
         </div>
       </div>
 
       <div class="detail-section">
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button class="btn ghost" id="btn-qc-track" style="flex:1;">🎧 QC дорожки</button>
-          <button class="btn ghost" id="btn-history" style="flex:1;">🕓 История</button>
-          <button class="btn ghost" id="btn-activity" style="flex:1;">📜 Активность</button>
-          <button class="btn ghost" id="btn-pin-window" style="flex:1;">📌 Открепить в окне</button>
+          <button class="btn ghost" id="btn-qc-track" style="flex:1;">QC дорожки</button>
+          <button class="btn ghost" id="btn-history" style="flex:1;">История</button>
+          <button class="btn ghost" id="btn-activity" style="flex:1;">Активность</button>
+          <button class="btn ghost" id="btn-pin-window" style="flex:1;">Открепить в окне</button>
         </div>
       </div>
 
       <div class="sheet-actions">
-        <button class="btn danger" id="btn-delete-report" style="margin-right:auto;">🗑 Удалить отчёт</button>
+        <button class="btn danger" id="btn-delete-report" style="margin-right:auto;">Удалить отчёт</button>
         <button class="btn" data-close>Закрыть</button>
       </div>
     `;
 
     const sheet = overlay.querySelector(".sheet");
     sheet.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => overlay.remove()));
+    loadAvatars(sheet);
+    sheet.querySelectorAll("[data-nav]").forEach(b => b.addEventListener("click", () => {
+      const nb = listNeighbors(publicId);
+      if (nb) goTo(b.dataset.nav === "prev" ? nb.prev : nb.next);
+    }));
     syncFocusButton(sheet.querySelector("#btn-focus-toggle"));
     sheet.querySelector("#btn-focus-toggle").addEventListener("click", toggleFocusMode);
     sheet.querySelector("#btn-pin-window").addEventListener("click", async () => {
@@ -252,12 +282,12 @@ export async function openReportDetail(publicId) {
         } else {
           toast("Не удалось удалить.", "error");
           btn.disabled = false;
-          btn.textContent = "🗑 Удалить отчёт";
+          btn.textContent = "Удалить отчёт";
         }
       } catch (e) {
         toast(`Не удалось удалить: ${e.message}`, "error");
         btn.disabled = false;
-        btn.textContent = "🗑 Удалить отчёт";
+        btn.textContent = "Удалить отчёт";
       }
     });
     sheet.querySelector("#btn-history").addEventListener("click", () => openReportLogSheet(publicId, "history"));
@@ -414,7 +444,7 @@ export async function openReportDetail(publicId) {
           toast(`AI-проверка не удалась: ${e.message}`, "error");
         } finally {
           btn.disabled = false;
-          btn.textContent = "🤖 AI-проверка";
+          btn.textContent = "AI-проверка";
         }
       });
     });
@@ -455,7 +485,7 @@ function pipelineChainHtml(pipeline, assignable) {
   const advanceRow = hasNext
     ? `<div class="add-row" style="margin-bottom:8px;">
         <select id="pipeline-next-user" class="field-input">${userOptionsHtml(assignable, null)}</select>
-        <button class="btn" id="btn-pipeline-advance">🔥 Передать дальше</button>
+        <button class="btn" id="btn-pipeline-advance">Передать дальше</button>
       </div>`
     : "";
   return chain + advanceRow;
@@ -475,7 +505,7 @@ function fileHtml(f) {
   const isAudio = audioRe.test(f.file_type || "") || audioRe.test(f.file_name || "");
   return `<div class="file-item">
     <div>${esc(FILE_ICONS[f.file_type] || "📎")} ${esc(f.file_name || f.file_type)} <span class="meta">${esc(f.file_size_label || "")}</span></div>
-    ${isAudio ? `<button class="btn" style="padding:4px 10px; font-size:12px;" data-qc-file="${f.id}">🤖 AI-проверка</button>` : ""}
+    ${isAudio ? `<button class="btn" style="padding:4px 10px; font-size:12px;" data-qc-file="${f.id}">AI-проверка</button>` : ""}
     <button class="icon-btn" data-download-file="${f.id}" data-file-name="${esc(f.file_name || "")}" title="Скачать">⬇️</button>
     <div id="qc-result-${f.id}" style="width:100%;"></div>
   </div>`;

@@ -48,7 +48,7 @@ const GROUPS = [
 
 function shortcutsHtml() {
   return `
-    <h2>⌨️ Горячие клавиши</h2>
+    <h2>Горячие клавиши</h2>
     <div class="shortcuts-list">
       ${GROUPS.map(g => `
         <div class="shortcuts-group">

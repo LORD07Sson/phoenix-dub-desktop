@@ -100,6 +100,16 @@ export function clearTabDom() {
   if (bulk) bulk.hidden = true;
   const statusbar = $("#statusbar");
   if (statusbar) statusbar.textContent = "";
+  // Фильтры списка и сохранённые пресеты — личные: следующий вошедший на
+  // общей машине не должен начинать с выборки предыдущего.
+  for (const sel of ["#search-input", "#status-filter", "#priority-filter", "#assignee-filter", "#season-filter", "#title-filter"]) {
+    const el = $(sel);
+    if (el) el.value = "";
+  }
+  const presets = $("#preset-chips");
+  if (presets) presets.innerHTML = "";
+  const more = $("#list-more");
+  if (more) more.hidden = true;
 }
 
 let refreshInFlight = false;
@@ -112,9 +122,10 @@ export async function refreshAll() {
   if (refreshInFlight) return;
   refreshInFlight = true;
   const btn = $("#refresh-btn");
+  const label = btn.querySelector(".btn-lbl") || btn;
   btn.disabled = true;
-  const originalText = btn.textContent;
-  btn.textContent = "⏳ Обновляю…";
+  const originalText = label.textContent;
+  label.textContent = "Обновляю…";
   try {
     clearDirectoryCache();
     await loadUsers();
@@ -122,7 +133,7 @@ export async function refreshAll() {
   } finally {
     refreshInFlight = false;
     btn.disabled = false;
-    btn.textContent = originalText;
+    label.textContent = originalText;
   }
 }
 

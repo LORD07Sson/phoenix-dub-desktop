@@ -48,7 +48,7 @@ async function openSettings() {
     <h2>Настройки</h2>
 
     <div class="settings-group">
-      <div class="settings-group-title">🎨 Внешний вид</div>
+      <div class="settings-group-title">Внешний вид</div>
       <div class="settings-row">
         <span>Тема</span>
         <select id="s-theme">
@@ -66,30 +66,30 @@ async function openSettings() {
     </div>
 
     <div class="settings-group">
-      <div class="settings-group-title">🧭 Поведение</div>
+      <div class="settings-group-title">Поведение</div>
       <div class="settings-row">
         <span>Запускать при старте системы</span>
         <input type="checkbox" id="s-autostart" ${autostartOn ? "checked" : ""}>
       </div>
       <div class="settings-row">
-        <span>🧘 Фокус-режим при открытии отчёта</span>
+        <span>Фокус-режим при открытии отчёта</span>
         <input type="checkbox" id="s-focus-mode" ${focusModePreferred() ? "checked" : ""}>
       </div>
       ${state.isDeveloper ? `
       <div class="settings-row dev-pill-toggle">
-        <span>🛠 Режим разработчика</span>
+        <span>Режим разработчика</span>
         <input type="checkbox" id="s-dev-mode" ${isDevModeOn() ? "checked" : ""}>
       </div>` : ""}
     </div>
 
     <div class="settings-group">
-      <div class="settings-group-title">🔄 Обновления</div>
+      <div class="settings-group-title">Обновления</div>
       <div class="settings-row">
         <span>Версия ${esc(APP_VERSION)}</span>
         <button class="btn" id="s-check-update">Проверить обновления</button>
       </div>
       <div class="settings-row">
-        <span>🧪 Канал обновлений</span>
+        <span>Канал обновлений</span>
         <select id="s-update-channel">
           <option value="stable" ${updateChannel === "stable" ? "selected" : ""}>Стабильный</option>
           <option value="alpha" ${updateChannel === "alpha" ? "selected" : ""}>Альфа (тестовые сборки)</option>
@@ -109,18 +109,18 @@ async function openSettings() {
     </div>
 
     <div class="settings-group">
-      <div class="settings-group-title">🔐 Доступ и система</div>
+      <div class="settings-group-title">Доступ и система</div>
       <div class="settings-row">
         <span>Доступ участников и состояние системы</span>
-        <button class="btn" id="s-open-admin">🔐 Админ-панель</button>
+        <button class="btn" id="s-open-admin">Админ-панель</button>
       </div>
     </div>
 
     <div class="settings-group">
-      <div class="settings-group-title">🩺 Диагностика</div>
+      <div class="settings-group-title">Диагностика</div>
       <div class="settings-row">
         <span>Файловые логи приложения (обновления, QC звука, инструменты ffmpeg, плеер)</span>
-        <button class="btn" id="s-open-logs">📂 Открыть логи</button>
+        <button class="btn" id="s-open-logs">Открыть логи</button>
       </div>
     </div>
 

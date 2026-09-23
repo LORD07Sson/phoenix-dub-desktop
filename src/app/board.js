@@ -24,12 +24,13 @@
 import { apiGet, apiPost, toast, dialogSkeletonHtml, openSheet } from "./api.js";
 import { invoke, pickInputFile } from "./tauri.js";
 import { $, esc, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS } from "./utils.js";
-import { timelineHtml, playTimelineIntro, segmentedBarHtml, segBadgesHtml, segLegendHtml, playSegBarIntro } from "./charts.js";
+import { timelineHtml, playTimelineIntro } from "./charts.js";
 import { assigneesHtml } from "./reports.js";
 import { openReportDetail } from "./report-detail.js";
 import { state } from "./state.js";
 import { loadSidebarStatusCounts } from "./tabs.js";
 import { ATTACH_EXTENSIONS } from "./file-drop.js";
+import { loadAvatars } from "./profile.js";
 
 // Свёрнутые колонки — узкая студия часто держит "Завершено"/"Отменено"
 // сложенными: сами по себе они редко нужны, но занимают на широкой
@@ -541,15 +542,23 @@ function statCardsHtml(stats) {
 
 function performanceHtml(stats) {
   const total = stats.reduce((sum, s) => sum + s.count, 0);
-  const segments = stats.map(s => ({ label: s.label, count: s.count, colorVar: STATUS_COLOR_VAR[s.statuses[0]] || "--s-draft" }));
+  const peak = Math.max(1, ...stats.map(s => s.count));
+  const colorOf = s => `var(${STATUS_COLOR_VAR[s.statuses[0]] || "--s-draft"})`;
   return `
     <div class="bcell board-performance-cell">
       <h3>Производительность</h3>
       <div class="big-num" style="font-size:30px;">${total}</div>
-      <div class="sub" style="margin:-4px 0 12px;">Активных серий всего</div>
-      <div class="seg-badges">${segBadgesHtml(segments)}</div>
-      ${segmentedBarHtml(segments)}
-      <div class="seg-legend">${segLegendHtml(segments)}</div>
+      <div class="sub" style="margin:2px 0 14px;">серий на доске</div>
+      <div class="board-perf-bars">
+        ${stats.map(s => `
+          <div class="board-perf-col" title="${esc(s.label)}: ${s.count}">
+            <div class="an-bar" style="height:${Math.max(4, Math.round((s.count / peak) * 96))}px; background:${colorOf(s)};"></div>
+            <div class="an-bar-label">${s.count}</div>
+          </div>`).join("")}
+      </div>
+      <div class="dash-legend" style="margin:12px 0 0; flex-wrap:wrap;">
+        ${stats.map(s => `<span><i style="background:${colorOf(s)};"></i>${esc(s.label)}</span>`).join("")}
+      </div>
     </div>`;
 }
 
@@ -623,25 +632,26 @@ async function renderBoard(root) {
       </div>
       <div class="page-header-actions">
         <input type="month" id="board-month" class="board-sort" title="Показать серии со сроком в этом месяце" value="${esc(boardView.month)}">
-        <button class="btn ghost" id="board-import-btn">📥 Импорт</button>
-        <button class="btn primary" id="board-add-btn">＋ Добавить проект</button>
+        <button class="btn" id="board-import-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v9M8 10l4 4 4-4M5 19h14"/></svg>Импорт</button>
+        <button class="btn primary" id="board-add-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Добавить проект</button>
       </div>
     </div>
     ${statCardsHtml(stats)}
-    ${boardToolbarHtml(layout)}
     <div class="board-top-row${timelineCell ? "" : " single"}">
       ${timelineCell}
       ${performanceHtml(stats)}
     </div>
+    <div class="board-section-title">Серии студии</div>
+    ${boardToolbarHtml(layout)}
     <div class="board">${layout.columns.map(col => columnHtml(col, collapsed)).join("")}</div>
   `;
   wireBoardCards(root);
+  loadAvatars(root);
   wireBoardScroll(root.querySelector(".board"));
   wireBoardToolbar(root);
   wireColumnButtons(root);
   wireBoardHeaderActions(root);
   playTimelineIntro(root);
-  playSegBarIntro(root);
   playBoardCardsIntro(root);
 }
 

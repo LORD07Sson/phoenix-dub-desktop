@@ -11,14 +11,15 @@ import { apiGet, apiPost, openSheet, toast } from "./api.js";
 import { $, $all, esc, initials, isOverdue, STATUS_DOT_CLASS, STATUS_COLOR_VAR, PRIORITY_LABELS, showContextMenu } from "./utils.js";
 import { openReportDetail } from "./report-detail.js";
 import { isFavorite, toggleFavorite, favoriteIds } from "./favorites.js";
+import { loadAvatars } from "./profile.js";
 
-// page_size=100 — сервер отдаёт максимум одну страницу, offset для
-// /reports в API не предусмотрен (см. docs/API.md), поэтому при
-// большем числе отчётов работает фильтр, а не листание; статусбар
-// теперь говорит об этом прямо, а не рисует «100 из 350» без объяснений.
+// page_size=100 — больше сервер за раз не отдаёт, но /api/reports
+// понимает page (номер страницы, с нуля): остальное догружается кнопкой
+// «Показать ещё» под таблицей, как в мини-аппе.
 export const PAGE_SIZE = 100;
+let listPage = 0;
 
-export function currentFilters() {
+export function currentFilters(page = 0) {
   const params = {
     // Сортировку по колонкам делает sortLocally() ниже — на сервер уходит
     // только то значение, которое он точно понимает ("new", как в
@@ -31,10 +32,182 @@ export function currentFilters() {
     sort: "new",
     page_size: PAGE_SIZE,
   };
+  // «Мои» — тот же параметр assignee, поэтому быстрый фильтр главнее
+  // выбранного в списке исполнителя: оба сразу сервер всё равно не примет.
+  const assignee = $("#assignee-filter").value;
   if (state.quickFilter === "mine") params.assignee = "me";
+  else if (assignee) params.assignee = assignee;
   if (state.quickFilter === "overdue") params.overdue = 1;
   if (state.quickFilter === "unassigned") params.unassigned = 1;
+  const titleId = $("#title-filter").value;
+  const seasonId = $("#season-filter").value;
+  if (titleId) params.title_id = titleId;
+  else if (seasonId) params.season_id = seasonId;
+  if (page) params.page = page;
   return params;
+}
+
+// ---------- фильтры по исполнителю / сезону / тайтлу ----------
+// Те же фильтры, что в мини-аппе (f-assignee, f-season, f-title): сервер
+// их и так понимал, в десктопе просто не было полей.
+
+function fillAssigneeFilter() {
+  const sel = $("#assignee-filter");
+  const current = sel.value;
+  if (sel.options.length - 1 === state.users.length) return;
+  sel.innerHTML = `<option value="">Все исполнители</option>` +
+    state.users.map(u => `<option value="${u.telegram_id}">${esc(u.name)}</option>`).join("");
+  sel.value = current;
+}
+
+let seasonsLoaded = false;
+async function fillSeasonFilter() {
+  if (seasonsLoaded) return;
+  try {
+    const d = await apiGet("/public/seasons");
+    const sel = $("#season-filter");
+    const current = sel.value;
+    sel.innerHTML = `<option value="">Все сезоны</option>` +
+      (d.seasons || []).map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+    sel.value = current;
+    seasonsLoaded = true;
+  } catch (_) { /* без списка сезонов фильтр просто останется «Все сезоны» */ }
+}
+
+async function fillTitleFilter(seasonId, selectedTitleId = "") {
+  const sel = $("#title-filter");
+  sel.innerHTML = `<option value="">Все тайтлы</option>`;
+  sel.disabled = !seasonId;
+  if (!seasonId) return;
+  try {
+    const d = await apiGet(`/public/seasons/${seasonId}/titles`);
+    sel.innerHTML = `<option value="">Все тайтлы</option>` +
+      (d.titles || []).map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+    sel.value = selectedTitleId;
+  } catch (_) { /* тайтлы не подгрузились — фильтр по сезону всё равно работает */ }
+}
+
+// ---------- сохранённые фильтры (пресеты) ----------
+// Именованный снимок всех фильтров списка — как «⭐ пресеты» в мини-аппе.
+// Личная настройка, поэтому localStorage на пользователя.
+
+function presetsKey() { return `phoenix_list_presets_${state.telegramId || "anon"}`; }
+function loadPresets() {
+  try { return JSON.parse(localStorage.getItem(presetsKey()) || "[]"); } catch (_) { return []; }
+}
+function savePresets(list) {
+  try { localStorage.setItem(presetsKey(), JSON.stringify(list)); } catch (_) { /* не критично */ }
+}
+
+function filterSnapshot() {
+  return {
+    q: $("#search-input").value.trim(),
+    status: $("#status-filter").value,
+    priority: $("#priority-filter").value,
+    assignee: $("#assignee-filter").value,
+    seasonId: $("#season-filter").value,
+    titleId: $("#title-filter").value,
+    quick: state.quickFilter,
+  };
+}
+
+async function applySnapshot(f) {
+  $("#search-input").value = f.q || "";
+  $("#status-filter").value = f.status || "";
+  $("#priority-filter").value = f.priority || "";
+  $("#assignee-filter").value = f.assignee || "";
+  $("#season-filter").value = f.seasonId || "";
+  await fillTitleFilter(f.seasonId || "", f.titleId || "");
+  setQuickFilter(f.quick || null);
+  await loadReports();
+}
+
+function deletePreset(id) {
+  savePresets(loadPresets().filter(p => p.id !== id));
+  renderPresetChips();
+}
+
+export function renderPresetChips() {
+  const root = $("#preset-chips");
+  if (!root) return;
+  root.innerHTML = loadPresets().map(p => `
+    <span class="qf-chip preset-chip" data-preset="${esc(p.id)}" title="Применить фильтр «${esc(p.name)}» · правый клик — удалить">
+      <span class="preset-chip-name">${esc(p.name)}</span>
+      <button type="button" class="preset-chip-del" data-preset-del="${esc(p.id)}" title="Удалить фильтр" aria-label="Удалить фильтр «${esc(p.name)}»">×</button>
+    </span>`).join("");
+  root.querySelectorAll("[data-preset]").forEach(chip => {
+    const preset = loadPresets().find(p => p.id === chip.dataset.preset);
+    if (!preset) return;
+    chip.addEventListener("click", e => {
+      if (e.target.closest("[data-preset-del]")) return;
+      applySnapshot(preset.filters);
+      toast(`Фильтр «${preset.name}» применён.`);
+    });
+    chip.addEventListener("contextmenu", e => {
+      e.preventDefault();
+      showContextMenu(e.clientX, e.clientY, [
+        { label: "Применить", action: () => applySnapshot(preset.filters) },
+        { label: "Удалить", action: () => deletePreset(preset.id) },
+      ]);
+    });
+  });
+  root.querySelectorAll("[data-preset-del]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      deletePreset(btn.dataset.presetDel);
+    });
+  });
+}
+
+function savePresetDialog() {
+  const overlay = openSheet(`
+    <h2>Сохранить фильтр</h2>
+    <label class="field-label" for="dlg-preset-name">Название</label>
+    <div class="row"><input type="text" id="dlg-preset-name" maxlength="40" placeholder="Например: мои срочные"></div>
+    <div class="sheet-actions">
+      <button class="btn ghost" data-close>Отмена</button>
+      <button class="btn primary" id="dlg-apply">Сохранить</button>
+    </div>
+  `);
+  const input = overlay.querySelector("#dlg-preset-name");
+  input.focus();
+  const save = () => {
+    const name = input.value.trim();
+    if (!name) { toast("Введите название фильтра.", "error"); return; }
+    const list = loadPresets().filter(p => p.name !== name);
+    list.push({ id: String(Date.now()), name, filters: filterSnapshot() });
+    savePresets(list);
+    renderPresetChips();
+    overlay.remove();
+    toast(`Фильтр «${name}» сохранён.`, "success");
+  };
+  overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  overlay.querySelector("#dlg-apply").addEventListener("click", save);
+  input.addEventListener("keydown", e => { if (e.key === "Enter") save(); });
+}
+
+// Соседи отчёта в текущем порядке списка — для кнопок «‹ ›» в карточке
+// отчёта, как в мини-аппе: пролистать выборку, не закрывая карточку.
+export function listNeighbors(publicId) {
+  if (state.activeTab !== "list") return null;
+  const idx = state.reports.findIndex(r => r.public_id === publicId);
+  if (idx === -1) return null;
+  return {
+    prev: idx > 0 ? state.reports[idx - 1].public_id : null,
+    next: idx < state.reports.length - 1 ? state.reports[idx + 1].public_id : null,
+  };
+}
+
+// «сегодня / завтра / через 2 дн.» рядом со сроком — то, что горит,
+// видно без подсчёта дат в уме (deadlineCountdown в мини-аппе).
+function deadlineHint(r) {
+  if (!r.deadline || r.status === "completed" || r.status === "cancelled" || isOverdue(r)) return "";
+  const d = new Date();
+  const today = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const days = Math.round((Date.parse(`${r.deadline}T00:00:00Z`) - today) / 86400000);
+  if (days >= 3) return "";
+  const [text, colorVar] = days <= 0 ? ["сегодня", "--s-stop"] : days === 1 ? ["завтра", "--s-fix"] : [`через ${days} дн.`, "--s-work"];
+  return `<span class="deadline-hint" style="color:var(${colorVar});">${text}</span>`;
 }
 
 export async function loadReports() {
@@ -49,6 +222,10 @@ export async function loadReports() {
     requestAnimationFrame(() => skeleton.classList.add("visible"));
   }, 100);
   table.classList.add("loading");
+  fillAssigneeFilter();
+  fillSeasonFilter();
+  renderPresetChips();
+  listPage = 0;
   let ok = true;
   try {
     const r = await apiGet("/reports", currentFilters());
@@ -79,6 +256,30 @@ export async function loadReports() {
     table.classList.remove("loading");
   }
   return ok;
+}
+
+export async function loadMoreReports() {
+  const btn = $("#list-more");
+  btn.disabled = true;
+  btn.textContent = "Загрузка…";
+  try {
+    const r = await apiGet("/reports", currentFilters(listPage + 1));
+    listPage += 1;
+    const known = new Set(state.reports.map(x => x.public_id));
+    let fresh = (r.reports || []).filter(x => !known.has(x.public_id));
+    if (state.quickFilter === "favorites") {
+      const favs = favoriteIds();
+      fresh = fresh.filter(x => favs.has(x.public_id));
+    }
+    state.reports = state.reports.concat(fresh);
+    state.total = r.total || state.total;
+    sortLocally();
+    renderReports();
+  } catch (e) {
+    toast(`Не удалось догрузить список: ${e.message}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 export function sortLocally() {
@@ -158,7 +359,7 @@ export function renderReports() {
       <td>${esc(r.title)}</td>
       <td><span class="chip status-chip" style="--chip-accent: var(${STATUS_COLOR_VAR[r.status] || "--s-draft"})"><span class="dot ${dotClass}"></span>${esc(r.status_label)}</span></td>
       <td><span class="priority-chip ${esc(r.priority)}"><span class="dot"></span>${esc(r.priority_label)}</span></td>
-      <td class="deadline ${overdue ? "overdue" : ""}">${overdue ? "⏰ " : ""}${esc(r.deadline || "без срока")}</td>
+      <td class="deadline ${overdue ? "overdue" : ""}">${overdue ? "⏰ " : ""}${esc(r.deadline || "без срока")}${deadlineHint(r)}</td>
       <td>${assigneesHtml(r.assignees)}</td>
       <td class="row-actions">
         <button class="icon-btn" data-quick-assign title="Назначить">👤</button>
@@ -240,16 +441,23 @@ export function renderReports() {
     tbody.appendChild(tr);
   });
 
-  const truncated = state.total > state.reports.length;
+  const truncated = state.quickFilter !== "favorites" && state.total > state.reports.length;
+  const moreBtn = $("#list-more");
+  moreBtn.hidden = !truncated;
+  if (truncated) {
+    const left = state.total - state.reports.length;
+    moreBtn.textContent = left > PAGE_SIZE ? `Показать ещё ${PAGE_SIZE} (осталось ${left})` : `Показать оставшиеся ${left}`;
+  }
   $("#statusbar").textContent =
     (truncated
-      ? `Показаны первые ${state.reports.length} из ${state.total} — уточните фильтр или поиск, чтобы увидеть остальные · `
+      ? `Показаны ${state.reports.length} из ${state.total} · `
       : `Отчётов: ${state.reports.length} · `) +
     `клик по строке — открыть карточку, чекбоксы (Shift — диапазоном) — массовые операции · ` +
     `Ctrl+Shift+P — показать/скрыть окно из любого места`;
 
   $("#select-all").checked = state.reports.length > 0 && state.reports.every(r => state.selected.has(r.public_id));
   updateBulkBar();
+  loadAvatars(tbody);
 }
 
 export function toggleSelected(publicId, on) {
@@ -289,6 +497,15 @@ $("#search-input").addEventListener("input", () => {
 $("#search-input").addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(searchDebounce); loadReports(); } });
 $("#status-filter").addEventListener("change", loadReports);
 $("#priority-filter").addEventListener("change", loadReports);
+$("#assignee-filter").addEventListener("change", loadReports);
+$("#season-filter").addEventListener("change", async () => {
+  await fillTitleFilter($("#season-filter").value);
+  loadReports();
+});
+$("#title-filter").addEventListener("change", loadReports);
+$("#list-more").addEventListener("click", loadMoreReports);
+$("#preset-save").addEventListener("click", savePresetDialog);
+renderPresetChips();
 
 // Установка быстрого фильтра без загрузки — списку её зовёт обработчик
 // ниже, а профилю («на руках пусто → посмотреть свободные серии») важно

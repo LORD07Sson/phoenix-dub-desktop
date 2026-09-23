@@ -3,15 +3,9 @@
 // загрузка по колонкам доски и топ исполнителей. Тот же /api/analytics/phoenix,
 // что и клетка «Загрузка по статусам»/«Топ исполнителей» — один запрос
 // на весь экран, без похода за board/team по отдельности.
-//
-// Вёрстка — тот же bento, что у Обзора (bcell/kpi-row/mini-list),
-// segmentedBarHtml/segBadgesHtml/segLegendHtml из charts.js — то же,
-// чем уже рисуется «Структура загрузки» на Обзоре, здесь другой набор
-// сегментов (4 колонки доски вместо 6 статусов).
 
 import { apiGet } from "./api.js";
 import { $, esc } from "./utils.js";
-import { segmentedBarHtml, segBadgesHtml, segLegendHtml, playSegBarIntro, deltaPillHtml, kpiRingHtml, playRingIntro } from "./charts.js";
 
 const WORKLOAD_COLOR_VAR = { draft: "--s-draft", working: "--s-work", review: "--s-review", completed: "--s-done" };
 // Сервер отдаёт подписи колонок по-английски (Pending/In Progress/...,
@@ -25,70 +19,87 @@ function periodDeltaPct(current, prior) {
   return Math.round(((current - prior) / prior) * 100);
 }
 
+function trendLine(text, good) {
+  return `<div class="an-trend" style="color:var(${good ? "--s-done" : "--s-stop"});">${esc(text)}</div>`;
+}
+
 function analyticsHtml(d) {
   const workload = (d.workload || []).map(w => ({
     label: WORKLOAD_LABELS[w.key] || w.label, count: w.total, colorVar: WORKLOAD_COLOR_VAR[w.key] || "--s-draft",
   }));
+  const maxCount = Math.max(1, ...workload.map(w => w.count));
   const completedDelta = periodDeltaPct(d.completed_30d, d.completed_prior_30d);
-  const onTimeFrac = d.on_time_rate === null || d.on_time_rate === undefined ? null : d.on_time_rate / 100;
+  const performers = d.performers || [];
+  const maxCompleted = Math.max(1, ...performers.map(p => p.completed));
 
-  const performersRows = (d.performers || []).map((p, i) => `
-    <div class="mini-row">
-      <span class="rank">${i + 1}</span>
-      <span class="name">${esc(p.name)}</span>
-      <span class="val">${p.completed} завершено</span>
+  const metrics = [
+    {
+      label: "Завершено за 30 дней",
+      value: d.completed_30d,
+      trend: completedDelta !== null
+        ? trendLine(`${completedDelta >= 0 ? "+" : ""}${completedDelta}% к прошлым 30 дням`, completedDelta >= 0)
+        : `<div class="an-trend">против ${d.completed_prior_30d} за прошлые 30 дней</div>`,
+    },
+    {
+      label: "Среднее время выполнения",
+      value: d.avg_turnaround_days !== null && d.avg_turnaround_days !== undefined ? `${d.avg_turnaround_days}д` : "—",
+      trend: `<div class="an-trend">создан → завершён</div>`,
+    },
+    {
+      label: "Просрочено сейчас",
+      value: d.overdue_now,
+      trend: d.overdue_now > 0 ? trendLine("срок уже прошёл", false) : trendLine("всё в срок", true),
+    },
+    {
+      label: "Вовремя",
+      value: d.on_time_rate !== null && d.on_time_rate !== undefined ? `${d.on_time_rate}%` : "—",
+      trend: d.on_time_rate !== null && d.on_time_rate !== undefined
+        ? trendLine("закрыто не позже дедлайна", d.on_time_rate >= 80)
+        : `<div class="an-trend">нет отчётов со сроком</div>`,
+    },
+  ];
+
+  const metricCards = metrics.map((m, i) => `
+    <div class="bcell kpi-cell" style="animation-delay:${i * 40}ms;">
+      <h3>${esc(m.label)}</h3>
+      <div class="big-num">${esc(String(m.value))}</div>
+      ${m.trend}
+    </div>
+  `).join("");
+
+  const workloadBars = workload.map(w => `
+    <div class="an-bar-col">
+      <div class="an-bar-count">${w.count}</div>
+      <div class="an-bar" style="height:${Math.round((w.count / maxCount) * 130)}px; background:var(${w.colorVar});"></div>
+      <div class="an-bar-label">${esc(w.label)}</div>
+    </div>
+  `).join("");
+
+  const performerRows = performers.map(p => `
+    <div class="an-perf">
+      <div class="an-perf-head"><span>${esc(p.name)}</span><span>${p.completed}</span></div>
+      <div class="an-perf-track"><div class="an-perf-fill" style="width:${Math.round((p.completed / maxCompleted) * 100)}%;"></div></div>
     </div>
   `).join("");
 
   return `
     <div class="page-header">
-      <h1>Аналитика</h1>
-      <div class="sub">Оборачиваемость студии за последние 30 дней: сколько закрывается, за сколько и попадаем ли в сроки.</div>
+      <div>
+        <h1>Аналитика студии</h1>
+        <div class="sub">Пропускная способность и загрузка конвейера дубляжа за последние 30 дней.</div>
+      </div>
     </div>
-    <div class="bento" id="analytics-bento">
-      <div class="bcell kpi-cell" style="animation-delay:0ms;">
-        <h3>Завершено за 30 дней</h3>
-        <div class="kpi-row">
-          <span class="kpi-icon" style="background:color-mix(in srgb, var(--s-done) 20%, var(--surface-2)); color:var(--s-done);">✅</span>
-          <div class="big-num">${d.completed_30d}</div>
-          ${completedDelta !== null ? deltaPillHtml(completedDelta) : ""}
-        </div>
-        <div class="sub">против ${d.completed_prior_30d} за предыдущие 30 дней</div>
-      </div>
-      <div class="bcell kpi-cell" style="animation-delay:60ms;">
-        <h3>Среднее время выполнения</h3>
-        <div class="kpi-row">
-          <span class="kpi-icon" style="background:color-mix(in srgb, var(--fire) 20%, var(--surface-2)); color:var(--fire);">⏱</span>
-          <div class="big-num">${d.avg_turnaround_days !== null ? `${d.avg_turnaround_days}д` : "—"}</div>
-        </div>
-        <div class="sub">создан → завершён, по закрытым за 30 дней</div>
-      </div>
-      <div class="bcell kpi-cell" style="animation-delay:100ms;">
-        <h3>Просрочено сейчас</h3>
-        <div class="kpi-row">
-          <span class="kpi-icon" style="background:color-mix(in srgb, var(${d.overdue_now > 0 ? "--s-stop" : "--s-done"}) 20%, var(--surface-2)); color:var(${d.overdue_now > 0 ? "--s-stop" : "--s-done"});">⏰</span>
-          <div class="big-num ${d.overdue_now > 0 ? "danger" : ""}">${d.overdue_now}</div>
-        </div>
-        <div class="sub">не завершено, срок уже прошёл</div>
-      </div>
-      <div class="bcell kpi-cell" style="animation-delay:140ms;">
-        <h3>Вовремя</h3>
-        <div class="kpi-row">
-          <div class="big-num">${d.on_time_rate !== null && d.on_time_rate !== undefined ? `${d.on_time_rate}%` : "—"}</div>
-          ${onTimeFrac !== null ? `<div class="kpi-ring-wrap">${kpiRingHtml(onTimeFrac, { colorVar: d.on_time_rate >= 80 ? "--s-done" : d.on_time_rate >= 50 ? "--s-work" : "--s-stop" })}</div>` : ""}
-        </div>
-        <div class="sub">закрыто не позже дедлайна, из тех что имели срок</div>
-      </div>
-      <div class="bcell wide" style="animation-delay:180ms;">
+    <div class="an-metrics">${metricCards}</div>
+    <div class="an-bottom">
+      <div class="bcell" style="animation-delay:160ms;">
         <h3>Загрузка по колонкам доски</h3>
-        <div class="seg-badges">${segBadgesHtml(workload)}</div>
-        ${segmentedBarHtml(workload)}
-        <div class="seg-legend">${segLegendHtml(workload)}</div>
+        <div class="an-bars">${workloadBars || `<div class="no-assignee">Нет данных</div>`}</div>
       </div>
-      <div class="bcell wide" style="animation-delay:220ms;">
-        <h3>Топ исполнителей за 30 дней</h3>
-        <div class="mini-list">
-          ${performersRows || `<div class="no-assignee">Пока нет закрытых отчётов за этот период</div>`}
+      <div class="bcell" style="animation-delay:200ms;">
+        <h3 style="margin-bottom:2px;">Топ исполнителей</h3>
+        <div class="an-caption">завершённые отчёты за 30 дней</div>
+        <div class="an-perf-list">
+          ${performerRows || `<div class="no-assignee">Пока нет закрытых отчётов за этот период</div>`}
         </div>
       </div>
     </div>
@@ -106,6 +117,4 @@ export async function loadAnalytics() {
     return false;
   }
   root.innerHTML = analyticsHtml(d);
-  playSegBarIntro(root);
-  playRingIntro(root);
 }

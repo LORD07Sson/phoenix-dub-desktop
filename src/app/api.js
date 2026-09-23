@@ -81,7 +81,31 @@ export async function api(method, path, body) {
     throw new Error(String(detail));
   }
   const text = await resp.text();
-  return text ? JSON.parse(text) : {};
+  return text ? stripStatusEmoji(JSON.parse(text)) : {};
+}
+
+// Сервер отдаёт подписи статусов с эмодзи-кружком («🟡 В работе») — это
+// для чата и мини-аппа. Десктоп рисует рядом свою цветную точку, и
+// выходило две точки подряд. Снимаем ведущие эмодзи только у подписей
+// статусов (status_label и label объектов со статусом), остальной текст
+// ответа не трогаем.
+const LEADING_EMOJI_RE = /^(?:[\p{Extended_Pictographic}️‍]\s*)+/u;
+const STATUS_LABEL_KEYS = ["status_label", "new_status_label", "old_status_label"];
+function cleanLabel(value) {
+  const cleaned = value.replace(LEADING_EMOJI_RE, "");
+  return cleaned.trim() ? cleaned : value;
+}
+function stripStatusEmoji(node) {
+  if (Array.isArray(node)) { node.forEach(stripStatusEmoji); return node; }
+  if (!node || typeof node !== "object") return node;
+  for (const key of STATUS_LABEL_KEYS) {
+    if (typeof node[key] === "string") node[key] = cleanLabel(node[key]);
+  }
+  if (typeof node.label === "string" && typeof node.status === "string") node.label = cleanLabel(node.label);
+  for (const value of Object.values(node)) {
+    if (value && typeof value === "object") stripStatusEmoji(value);
+  }
+  return node;
 }
 
 export function apiGet(path, params) {

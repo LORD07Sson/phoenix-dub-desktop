@@ -32,7 +32,7 @@ function accessRowHtml(u) {
 }
 
 export async function openAdminPanel() {
-  const overlay = openSheet(`<h2>🔐 Админ-панель</h2>${dialogSkeletonHtml(6)}`, "wide");
+  const overlay = openSheet(`<h2>Админ-панель</h2>${dialogSkeletonHtml(6)}`, "wide");
   const sheet = overlay.querySelector(".sheet");
 
   async function refreshAccess() {
@@ -91,9 +91,9 @@ export async function openAdminPanel() {
       `;
       if (reqSlot) {
         reqSlot.innerHTML = `
-          <button class="btn" id="btn-open-tickets" style="width:100%; justify-content:center; margin-bottom:8px;">🎫 Открытые тикеты</button>
-          <button class="btn" id="btn-open-access-requests" style="width:100%; justify-content:center;">📋 Заявки на доступ${s.pending_access_requests ? ` · ${s.pending_access_requests}` : ""}</button>
-          ${s.is_owner ? `<button class="btn" id="btn-open-owner-requests" style="width:100%; justify-content:center; margin-top:8px;">🔐 На подтверждении${s.pending_owner_requests ? ` · ${s.pending_owner_requests}` : ""}</button>` : ""}
+          <button class="btn" id="btn-open-tickets" style="width:100%; justify-content:center; margin-bottom:8px;">Открытые тикеты</button>
+          <button class="btn" id="btn-open-access-requests" style="width:100%; justify-content:center;">Заявки на доступ${s.pending_access_requests ? ` · ${s.pending_access_requests}` : ""}</button>
+          ${s.is_owner ? `<button class="btn" id="btn-open-owner-requests" style="width:100%; justify-content:center; margin-top:8px;">На подтверждении${s.pending_owner_requests ? ` · ${s.pending_owner_requests}` : ""}</button>` : ""}
         `;
         reqSlot.querySelector("#btn-open-tickets").addEventListener("click", openTicketsSheet);
         reqSlot.querySelector("#btn-open-access-requests").addEventListener("click", openAccessRequestsSheet);
@@ -106,7 +106,7 @@ export async function openAdminPanel() {
   }
 
   sheet.innerHTML = `
-    <h2>🔐 Админ-панель</h2>
+    <h2>Админ-панель</h2>
     <div class="detail-section"><div id="admin-access-slot">${dialogSkeletonHtml(3)}</div></div>
     <div class="detail-section"><h3>Заявки</h3><div id="admin-requests-slot">${dialogSkeletonHtml(2)}</div></div>
     <div class="detail-section"><h3>Система</h3><div id="admin-system-slot">${dialogSkeletonHtml(4)}</div></div>
@@ -117,7 +117,7 @@ export async function openAdminPanel() {
 }
 
 async function openTicketsSheet() {
-  const overlay = openSheet(`<h2>🎫 Открытые тикеты</h2>${dialogSkeletonHtml(4)}`);
+  const overlay = openSheet(`<h2>Открытые тикеты</h2>${dialogSkeletonHtml(4)}`);
   const sheet = overlay.querySelector(".sheet");
   try {
     const d = await apiGet("/tickets");
@@ -128,19 +128,19 @@ async function openTicketsSheet() {
       </div>
     `).join("");
     sheet.innerHTML = `
-      <h2>🎫 Открытые тикеты</h2>
+      <h2>Открытые тикеты</h2>
       <div>${rows || `<div class="no-assignee">Открытых тикетов нет</div>`}</div>
       <p style="color:var(--ink-soft); font-size:12px;">Ответить можно в самом боте, в разделе поддержки.</p>
       <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
     `;
   } catch (e) {
-    sheet.innerHTML = `<h2>🎫 Открытые тикеты</h2><div class="no-assignee">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+    sheet.innerHTML = `<h2>Открытые тикеты</h2><div class="no-assignee">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
   }
   sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
 }
 
 async function openAccessRequestsSheet() {
-  const overlay = openSheet(`<h2>📋 Заявки на доступ</h2>${dialogSkeletonHtml(4)}`);
+  const overlay = openSheet(`<h2>Заявки на доступ</h2>${dialogSkeletonHtml(4)}`);
   const sheet = overlay.querySelector(".sheet");
 
   async function render() {
@@ -148,7 +148,7 @@ async function openAccessRequestsSheet() {
     try {
       d = await apiGet("/access-requests");
     } catch (e) {
-      sheet.innerHTML = `<h2>📋 Заявки на доступ</h2><div class="no-assignee">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+      sheet.innerHTML = `<h2>Заявки на доступ</h2><div class="no-assignee">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
       sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
       return;
     }
@@ -156,13 +156,13 @@ async function openAccessRequestsSheet() {
       <div class="note-item" data-req="${r.id}">
         <div class="meta">${esc(r.name)}${r.username ? ` · @${esc(r.username)}` : ""} · ID ${r.telegram_id}</div>
         <div class="sheet-actions" style="margin-top:6px;">
-          <button class="btn primary" data-approve="${r.id}">✅ Впустить</button>
-          <button class="btn ghost" data-deny="${r.id}">❌ Отклонить</button>
+          <button class="btn primary" data-approve="${r.id}">Впустить</button>
+          <button class="btn ghost" data-deny="${r.id}">Отклонить</button>
         </div>
       </div>
     `).join("");
     sheet.innerHTML = `
-      <h2>📋 Заявки на доступ</h2>
+      <h2>Заявки на доступ</h2>
       <div>${rows || `<div class="no-assignee">Нет ожидающих заявок</div>`}</div>
       <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
     `;
@@ -190,7 +190,7 @@ async function openAccessRequestsSheet() {
 const OWNER_REQ_ICONS = { delete_report: "🗑", approve_request: "✅", grant_access: "🔓", revoke_access: "⛔" };
 
 async function openOwnerRequestsSheet() {
-  const overlay = openSheet(`<h2>🔐 На подтверждении</h2>${dialogSkeletonHtml(4)}`);
+  const overlay = openSheet(`<h2>На подтверждении</h2>${dialogSkeletonHtml(4)}`);
   const sheet = overlay.querySelector(".sheet");
 
   async function render() {
@@ -198,7 +198,7 @@ async function openOwnerRequestsSheet() {
     try {
       d = await apiGet("/owner/requests");
     } catch (e) {
-      sheet.innerHTML = `<h2>🔐 На подтверждении</h2><div class="no-assignee">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
+      sheet.innerHTML = `<h2>На подтверждении</h2><div class="no-assignee">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
       sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
       return;
     }
@@ -207,13 +207,13 @@ async function openOwnerRequestsSheet() {
         <div class="meta">${OWNER_REQ_ICONS[r.action_type] || "❔"} ${esc(r.label)} · от ${esc(r.requested_by_name)}</div>
         <div>${esc(r.description || r.target || "")}</div>
         <div class="sheet-actions" style="margin-top:6px;">
-          <button class="btn primary" data-approve="${r.id}">✅ Разрешить</button>
-          <button class="btn ghost" data-deny="${r.id}">❌ Отклонить</button>
+          <button class="btn primary" data-approve="${r.id}">Разрешить</button>
+          <button class="btn ghost" data-deny="${r.id}">Отклонить</button>
         </div>
       </div>
     `).join("");
     sheet.innerHTML = `
-      <h2>🔐 На подтверждении</h2>
+      <h2>На подтверждении</h2>
       <p style="color:var(--ink-soft); font-size:12px; margin-top:-8px;">Действия, которые обычные админы просят подтвердить — только вы это видите.</p>
       <div>${rows || `<div class="no-assignee">Нет заявок от админов</div>`}</div>
       <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>

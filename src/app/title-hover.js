@@ -12,9 +12,11 @@ import { esc } from "./utils.js";
 
 const HOVER_DELAY_MS = 320;
 const HIDE_DELAY_MS = 120;
-// Детали тайтла не меняются за секунды — держим в памяти на сессию,
-// чтобы повторное наведение не било лишним запросом.
-const cache = new Map();
+// Детали тайтла (в т.ч. счётчик вышедших серий) держим 10 минут: повторное
+// наведение не бьёт лишним запросом, но и новая серия не прячется до
+// перезапуска приложения, как было при кэше «на всю сессию».
+const CACHE_TTL_MS = 10 * 60_000;
+const cache = new Map(); // id -> { at, data }
 
 let popoverEl = null;
 let showTimer = null;
@@ -39,7 +41,7 @@ function ensurePopover() {
 function scheduleHide() {
   clearTimeout(hideTimer);
   hideTimer = setTimeout(() => {
-    if (popoverEl) popoverEl.hidden = true;
+    if (popoverEl) popoverEl.classList.remove("shown");
     currentId = null;
   }, HIDE_DELAY_MS);
 }
@@ -65,23 +67,46 @@ function renderPopover(anchor, d) {
     </div>
   `;
   pop.hidden = false;
-  const rect = anchor.getBoundingClientRect();
+  pop.classList.remove("shown");
+  const rect = anchorBox(anchor);
   const popRect = pop.getBoundingClientRect();
-  let left = rect.right + 10;
-  if (left + popRect.width > window.innerWidth - 8) left = rect.left - popRect.width - 10;
-  if (left < 8) left = Math.max(8, window.innerWidth - popRect.width - 8);
-  let top = rect.top;
-  if (top + popRect.height > window.innerHeight - 8) top = window.innerHeight - popRect.height - 8;
+  // Справа от постера, если не помещается — слева; по вертикали по
+  // центру постера, но в пределах окна.
+  let left = rect.right + 12;
+  let side = "right";
+  if (left + popRect.width > window.innerWidth - 8) { left = rect.left - popRect.width - 12; side = "left"; }
+  if (left < 8) left = 8;
+  let top = rect.top + rect.height / 2 - popRect.height / 2;
+  top = Math.min(Math.max(8, top), window.innerHeight - popRect.height - 8);
   pop.style.left = `${left}px`;
-  pop.style.top = `${Math.max(8, top)}px`;
+  pop.style.top = `${top}px`;
+  pop.dataset.side = side;
+  requestAnimationFrame(() => pop.classList.add("shown"));
+}
+
+// Обёртка карточки (.vote-card-tap) — display:contents, собственного
+// прямоугольника у неё нет, getBoundingClientRect() отдаёт нули, и окно
+// улетало в левый верхний угол поверх боковой панели. Меряем то, что
+// реально нарисовано: постер внутри, иначе первого потомка с размером.
+function anchorBox(anchor) {
+  // В таблице — вся ячейка с постером и названием (иначе окно закрывало
+  // само название), на «Топе сезона» — постер.
+  const candidates = [anchor.querySelector(".tt-title, .vote-hero-poster"), anchor, ...anchor.children];
+  for (const el of candidates) {
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) return r;
+  }
+  return anchor.getBoundingClientRect();
 }
 
 async function loadAndShow(anchor, titleId) {
-  let data = cache.get(titleId);
+  const hit = cache.get(titleId);
+  let data = hit && Date.now() - hit.at < CACHE_TTL_MS ? hit.data : null;
   if (!data) {
     try {
       data = await apiGet(`/public/titles/${titleId}`);
-      cache.set(titleId, data);
+      cache.set(titleId, { at: Date.now(), data });
     } catch (_) {
       return; // необязательная подсказка — молча не показываем при ошибке сети
     }
@@ -91,9 +116,18 @@ async function loadAndShow(anchor, titleId) {
   renderPopover(anchor, data);
 }
 
+export function clearTitleHoverCache() {
+  cache.clear();
+}
+
 document.addEventListener("mouseover", e => {
   const el = e.target.closest("[data-open-title-detail]");
   if (!el) return;
+  // Карточка сезона и так показывает крупный постер, название и
+  // подробности — всплывающее окно там только дублировало её и
+  // перекрывало соседей. Оставлено для таблицы и «Топа сезона», где
+  // постер маленький.
+  if (el.closest(".vote-card")) return;
   const titleId = el.dataset.openTitleDetail;
   if (!titleId) return;
   clearTimeout(hideTimer);

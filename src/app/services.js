@@ -28,26 +28,26 @@ function formatUptime(seconds) {
   return `${minutes} м`;
 }
 
-function serviceCardHtml(s) {
+function serviceRowHtml(s) {
   const meta = STATUS_META[s.status] || STATUS_META.down;
   let detail;
   if (s.key === "database") {
-    detail = s.size_bytes != null ? `${(s.size_bytes / 1_000_000).toFixed(1)} МБ на диске` : "—";
+    detail = s.size_bytes != null ? `${(s.size_bytes / 1_000_000).toFixed(1)} МБ` : "—";
   } else if (s.key === "disk") {
     detail = s.used_pct != null ? `занято ${s.used_pct}%` : "—";
   } else {
     detail = `аптайм ${formatUptime(s.uptime_seconds)}`;
   }
-  const latency = s.latency_ms != null ? `${s.latency_ms} мс` : null;
   return `
-    <div class="svc-card">
-      <div class="svc-card-top">
-        <span class="svc-dot" style="background:var(${meta.colorVar}); box-shadow:0 0 0 4px color-mix(in srgb, var(${meta.colorVar}) 20%, transparent);"></span>
-        <span class="svc-pill" style="background:color-mix(in srgb, var(${meta.colorVar}) 18%, var(--surface-2)); color:var(${meta.colorVar});">${meta.label}</span>
+    <div class="svc-row">
+      <span class="svc-dot" style="background:var(${meta.colorVar}); box-shadow:0 0 0 3px color-mix(in srgb, var(${meta.colorVar}) 18%, transparent);"></span>
+      <div class="svc-row-main">
+        <div class="svc-row-name">${esc(s.name)}</div>
+        <div class="svc-row-desc">${esc(s.desc)}</div>
       </div>
-      <div class="svc-card-name">${esc(s.name)}</div>
-      <div class="svc-card-desc">${esc(s.desc)}</div>
-      <div class="svc-card-detail">${detail}${latency ? ` · ${latency}` : ""}</div>
+      <span class="svc-pill" style="background:color-mix(in srgb, var(${meta.colorVar}) 16%, var(--surface)); color:var(${meta.colorVar});">${meta.label}</span>
+      <div class="svc-row-latency">${s.latency_ms != null ? `${s.latency_ms} мс` : "—"}</div>
+      <div class="svc-row-detail">${detail}</div>
     </div>
   `;
 }
@@ -95,61 +95,48 @@ function servicesHtml(d) {
   const uptimes = services.map(s => s.uptime_seconds).filter(v => v != null);
   const avgUptime = uptimes.length ? Math.round(uptimes.reduce((a, b) => a + b, 0) / uptimes.length) : null;
 
-  const cards = services.map(serviceCardHtml).join("");
+  const rows = services.map(serviceRowHtml).join("");
   const incidents = d.incidents || [];
   const knownDays = (d.history || []).filter(x => x.status !== "no_data").length;
 
+  const problems = (counts.degraded || 0) + (counts.down || 0);
+  const stats = [
+    { label: "Работает", value: `${counts.operational || 0}/${services.length}`, sub: problems ? `${problems} с проблемами` : "все в строю", subVar: problems ? "--s-work" : "--s-done" },
+    { label: "Есть проблемы", value: problems, sub: "деградация или недоступность", subVar: problems ? "--s-stop" : "--ink-dim" },
+    { label: "Средний аптайм", value: avgUptime != null ? formatUptime(avgUptime) : "—", sub: "по процессам", subVar: "--ink-dim" },
+    { label: "Инцидентов за 30 дней", value: incidents.length, sub: incidents.some(i => i.ongoing) ? "есть активный" : "нет активных", subVar: incidents.some(i => i.ongoing) ? "--s-stop" : "--ink-dim" },
+  ];
+  const statCards = stats.map((st, i) => `
+    <div class="bcell kpi-cell" style="animation-delay:${i * 40}ms;">
+      <h3>${esc(st.label)}</h3>
+      <div class="svc-stat"><span class="big-num">${esc(String(st.value))}</span><span style="color:var(${st.subVar});">${esc(st.sub)}</span></div>
+    </div>
+  `).join("");
+
   return `
     <div class="page-header">
-      <h1>Сервисы</h1>
-      <div class="sub">Состояние серверных процессов, живой latency и настоящая история с момента включения мониторинга.</div>
+      <div>
+        <h1>Сервисы</h1>
+        <div class="sub">Состояние серверов, время отклика и стабильность.</div>
+      </div>
+      <span class="svc-overall" style="color:var(${overallMeta.colorVar});">
+        <span class="svc-dot" style="background:var(${overallMeta.colorVar}); box-shadow:0 0 0 3px color-mix(in srgb, var(${overallMeta.colorVar}) 18%, transparent);"></span>
+        ${d.overall === "operational" ? "Все системы работают" : esc(overallMeta.label)}
+      </span>
     </div>
-    <div class="bento">
-      <div class="bcell" style="animation-delay:0ms;">
-        <h3>Общий статус</h3>
-        <div class="kpi-row">
-          <span class="kpi-icon" style="background:color-mix(in srgb, var(${overallMeta.colorVar}) 20%, var(--surface-2)); color:var(${overallMeta.colorVar});">${overallMeta.dot}</span>
-          <div class="big-num" style="font-size:18px;">${overallMeta.label}</div>
-        </div>
-        <div class="sub">${services.length} процессов под наблюдением</div>
-      </div>
-      <div class="bcell" style="animation-delay:40ms;">
-        <h3>Работает</h3>
-        <div class="kpi-row">
-          <span class="kpi-icon" style="background:color-mix(in srgb, var(--s-done) 20%, var(--surface-2)); color:var(--s-done);">✅</span>
-          <div class="big-num">${counts.operational || 0}</div>
-        </div>
-        <div class="sub">из ${services.length}</div>
-      </div>
-      <div class="bcell" style="animation-delay:80ms;">
-        <h3>Есть проблемы</h3>
-        <div class="kpi-row">
-          <span class="kpi-icon" style="background:color-mix(in srgb, ${(counts.degraded || 0) + (counts.down || 0) > 0 ? "var(--s-work)" : "var(--s-done)"} 20%, var(--surface-2)); color:${(counts.degraded || 0) + (counts.down || 0) > 0 ? "var(--s-work)" : "var(--s-done)"};">⚠️</span>
-          <div class="big-num ${(counts.degraded || 0) + (counts.down || 0) > 0 ? "warn" : ""}">${(counts.degraded || 0) + (counts.down || 0)}</div>
-        </div>
-        <div class="sub">деградация или недоступность</div>
-      </div>
-      <div class="bcell" style="animation-delay:120ms;">
-        <h3>Средний аптайм</h3>
-        <div class="kpi-row">
-          <span class="kpi-icon" style="background:color-mix(in srgb, var(--fire) 20%, var(--surface-2)); color:var(--fire);">⏱</span>
-          <div class="big-num" style="font-size:18px;">${avgUptime != null ? formatUptime(avgUptime) : "—"}</div>
-        </div>
-        <div class="sub">по процессам с известным временем запуска</div>
-      </div>
-    </div>
+    <div class="an-metrics">${statCards}</div>
     <div class="svc-bottom-row">
-      <div class="bcell">
-        <h3>Процессы и инфраструктура</h3>
-        <div class="svc-grid">${cards || `<div class="bento-empty">Не удалось получить статус.</div>`}</div>
+      <div class="bcell svc-list-cell" style="animation-delay:160ms;">
+        <h3>Статус сервисов</h3>
+        <div class="svc-list">${rows || `<div class="bento-empty">Не удалось получить статус.</div>`}</div>
       </div>
       <div style="display:flex; flex-direction:column; gap:14px; min-height:0;">
-        <div class="bcell">
-          <h3>30-дневный аптайм</h3>
-          <div class="sub" style="margin:-4px 0 12px;">${knownDays ? `собрано ${knownDays} из 30 дней` : "мониторинг только что включён"}</div>
+        <div class="bcell" style="animation-delay:200ms;">
+          <h3 style="margin-bottom:4px;">Аптайм за 30 дней</h3>
+          <div class="an-caption">${knownDays ? `собрано ${knownDays} из 30 дней` : "мониторинг только что включён"}</div>
           ${historyStripHtml(d.history)}
         </div>
-        <div class="bcell" style="flex-grow:1;">
+        <div class="bcell" style="flex-grow:1; animation-delay:240ms;">
           <h3>Последние инциденты</h3>
           <div class="mini-list">
             ${incidents.map(incidentRowHtml).join("") || `<div class="no-assignee">За последние 30 дней ничего не было</div>`}
