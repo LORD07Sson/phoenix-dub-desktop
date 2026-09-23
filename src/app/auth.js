@@ -1,6 +1,8 @@
 // Экран входа по коду из бота + экран загрузки при старте (splash).
 
 import { invoke } from "./tauri.js";
+import oopsFallGif from "../assets/oops-fall.gif";
+import oopsFrierenGif from "../assets/friren.gif";
 import { state, resetSessionState } from "./state.js";
 import { api, apiGet, armSessionExpiry, ensureMediaToken } from "./api.js";
 import { $ } from "./utils.js";
@@ -150,9 +152,58 @@ async function submitCode() {
     await refreshAll();
   } catch (e) {
     errEl.textContent = e.message;
+    showOops(e.message);
   } finally {
     btn.disabled = false;
   }
+}
+
+// Окошко «упала» над карточкой, когда код не подошёл или истёк: сверху
+// падает персонаж с текстом ошибки, при новом вводе — уезжает. Картинок
+// может быть несколько — берётся случайная.
+const OOPS_MASCOTS = [
+  {
+    src: oopsFrierenGif,
+    title: "Упс, Фрирен крутится и мутится",
+    text: "…а код не подошёл, и это печально. Для эльфа тысяча лет — миг, а для кода и пара минут — вечность. Отправьте боту /desktop ещё раз.",
+  },
+  {
+    src: oopsFallGif,
+    title: "Упс, Бочи упала и не встаёт",
+    text: "Код истёк быстрее, чем её социальная батарейка. Отправьте боту /desktop — она попробует подняться. Наверное.",
+  },
+];
+let oopsTimer = null;
+let oopsLeaveTimer = null;
+
+function showOops(message) {
+  const box = $("#auth-oops");
+  if (!box) return;
+  const expired = /истек|устар|expired|не найден|неверн|invalid|401/i.test(message || "");
+  const mascot = OOPS_MASCOTS[Math.floor(Math.random() * OOPS_MASCOTS.length)];
+  // Код не подошёл — шутит персонаж; другая ошибка (нет связи и т.п.) —
+  // тот же персонаж, но с настоящим текстом ошибки, чтобы было понятно,
+  // что делать.
+  $("#auth-oops-title").textContent = expired ? mascot.title : "Упс, что-то пошло не так";
+  $("#auth-oops-text").textContent = expired ? mascot.text : (message || "Попробуйте ещё раз.");
+  $("#auth-oops-img").src = mascot.src;
+  // Отменяем отложенное скрытие прошлого окошка — иначе при быстром
+  // «стёр → ввёл новый неверный код» оно прятало уже новое.
+  window.clearTimeout(oopsLeaveTimer);
+  box.hidden = false;
+  box.classList.remove("leave", "drop");
+  void box.offsetWidth;
+  box.classList.add("drop");
+  window.clearTimeout(oopsTimer);
+  oopsTimer = window.setTimeout(hideOops, 9000);
+}
+
+function hideOops() {
+  const box = $("#auth-oops");
+  if (!box || box.hidden || box.classList.contains("leave")) return;
+  window.clearTimeout(oopsTimer);
+  box.classList.add("leave");
+  oopsLeaveTimer = window.setTimeout(() => { box.hidden = true; box.classList.remove("leave", "drop"); }, 320);
 }
 $("#submit-code").addEventListener("click", submitCode);
 $("#code-input").addEventListener("keydown", e => { if (e.key === "Enter") submitCode(); });
@@ -160,9 +211,14 @@ $("#code-input").addEventListener("keydown", e => { if (e.key === "Enter") submi
 // Шесть ячеек — только картинка поверх одного настоящего поля ввода:
 // вставка из буфера, автозаполнение и ввод работают как обычно, а
 // ячейки просто показывают цифры. Шестая цифра — сразу вход.
+const CODE_LEN = 6;
+
 function renderCodeCells() {
   const input = $("#code-input");
-  const digits = input.value.replace(/\D/g, "");
+  // Только цифры и не больше шести: раньше поле брало до 8 символов, и
+  // лишние цифры сидели невидимо за последней ячейкой — Backspace стирал
+  // сначала их, а на экране ничего не менялось.
+  const digits = input.value.replace(/\D/g, "").slice(0, CODE_LEN);
   if (digits !== input.value) input.value = digits;
   const cells = document.querySelectorAll(".code-cell");
   const focused = document.activeElement === input;
@@ -173,12 +229,41 @@ function renderCodeCells() {
   });
   return digits;
 }
-$("#code-input").addEventListener("input", () => {
+
+// Поле невидимое, поэтому курсор в нём держим всегда в конце: иначе клик
+// по ячейке ставил его в середину, и ввод/стирание шли не туда, куда
+// смотрит человек.
+function caretToEnd() {
+  const input = $("#code-input");
+  const n = input.value.length;
+  if (input.selectionStart !== n || input.selectionEnd !== n) input.setSelectionRange(n, n);
+}
+
+function codeChanged() {
   $("#auth-error").textContent = "";
+  hideOops();
   const digits = renderCodeCells();
-  if (digits.length === 6 && !$("#submit-code").disabled) submitCode();
+  caretToEnd();
+  if (digits.length === CODE_LEN && !$("#submit-code").disabled) submitCode();
+}
+
+$("#code-input").addEventListener("input", codeChanged);
+$("#code-input").addEventListener("keydown", e => {
+  const input = e.currentTarget;
+  if (e.key === "Backspace" || e.key === "Delete") {
+    // Всегда стираем последнюю видимую цифру (с Ctrl — все).
+    e.preventDefault();
+    input.value = e.ctrlKey ? "" : input.value.slice(0, -1);
+    codeChanged();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    input.value = "";
+    codeChanged();
+  } else if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End") {
+    e.preventDefault();
+  }
 });
-$("#code-input").addEventListener("focus", renderCodeCells);
+["focus", "click", "mouseup", "select"].forEach(ev => $("#code-input").addEventListener(ev, () => { renderCodeCells(); caretToEnd(); }));
 $("#code-input").addEventListener("blur", renderCodeCells);
 renderCodeCells();
 

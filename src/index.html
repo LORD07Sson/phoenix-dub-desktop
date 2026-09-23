@@ -92,6 +92,14 @@
       </ul>
     </section>
 
+    <section class="auth-card-wrap">
+    <div class="auth-oops" id="auth-oops" role="alert" hidden>
+      <img class="auth-oops-img" id="auth-oops-img" src="assets/oops-fall.gif" alt="">
+      <div class="auth-oops-body">
+        <b id="auth-oops-title">Упс</b>
+        <span id="auth-oops-text"></span>
+      </div>
+    </div>
     <section class="auth-card">
       <h1>Вход в студию</h1>
       <p class="auth-sub">Вход по одноразовому коду из Telegram — без паролей.</p>
@@ -101,7 +109,7 @@
         <li><b>3</b><span>Введите 6 цифр из ответа</span></li>
       </ol>
       <label class="code-boxes" for="code-input">
-        <input id="code-input" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="8" aria-label="Код из Telegram" autofocus>
+        <input id="code-input" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" aria-label="Код из Telegram" autofocus>
         <span class="code-cell"></span><span class="code-cell"></span><span class="code-cell"></span>
         <span class="code-gap"></span>
         <span class="code-cell"></span><span class="code-cell"></span><span class="code-cell"></span>
@@ -109,6 +117,7 @@
       <button id="submit-code" class="btn primary auth-go">Войти</button>
       <div id="auth-error" class="auth-error" role="alert"></div>
       <div class="auth-foot">Код живёт несколько минут и работает один раз. Можно вставить его целиком — Ctrl+V.</div>
+    </section>
     </section>
   </div>
 </div>

@@ -3994,3 +3994,31 @@ body.focus-mode .report-detail-overlay .sheet {
   .aw-part i { animation: none; opacity: 1; transform: none; filter: none; background-position: 50% 0; }
   .aw-embers { display: none; }
 }
+
+/* Окошко «упала» над карточкой входа, когда код не подошёл */
+.auth-card-wrap { position: relative; }
+.auth-oops {
+  position: absolute; left: 50%; bottom: calc(100% + 14px); width: 400px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 10px; border-radius: 16px; z-index: 3;
+  background: var(--glass-bg-strong); backdrop-filter: blur(12px);
+  border: 1px solid color-mix(in srgb, var(--s-stop) 45%, var(--line));
+  box-shadow: 0 18px 40px -16px rgba(0, 0, 0, .8), 0 0 0 1px rgba(255, 90, 60, .08);
+}
+.auth-oops[hidden] { display: none; }
+.auth-oops-img { width: 84px; height: 84px; object-fit: contain; flex: none; filter: drop-shadow(0 0 1px rgba(255, 230, 200, .35)) drop-shadow(0 4px 10px rgba(255, 120, 50, .25)); }
+.auth-oops-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.auth-oops-body b { font-size: 14px; color: var(--ink); }
+.auth-oops-body span { font-size: 12px; color: var(--ink-soft); line-height: 1.45; }
+.auth-oops.drop { animation: oops-drop .75s cubic-bezier(.3, 1.2, .4, 1) both; }
+.auth-oops.drop .auth-oops-img { animation: oops-tilt .9s ease-out both; }
+.auth-oops.leave { animation: oops-leave .3s ease-in both; }
+@keyframes oops-drop {
+  0% { opacity: 0; transform: translate(-50%, -140px) rotate(-8deg); }
+  45% { opacity: 1; transform: translate(-50%, 10px) rotate(3deg); }
+  65% { transform: translate(-50%, -8px) rotate(-1.5deg); }
+  82% { transform: translate(-50%, 3px) rotate(.5deg); }
+  100% { opacity: 1; transform: translate(-50%, 0) rotate(0); }
+}
+@keyframes oops-tilt { 0% { transform: rotate(-25deg) scale(.8); } 50% { transform: rotate(8deg) scale(1.05); } 100% { transform: none; } }
+@keyframes oops-leave { to { opacity: 0; transform: translate(-50%, -30px) scale(.96); } }
+@media (prefers-reduced-motion: reduce) { .auth-oops.drop, .auth-oops.drop .auth-oops-img, .auth-oops.leave { animation: none; } }
