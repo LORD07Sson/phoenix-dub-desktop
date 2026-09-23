@@ -8,6 +8,7 @@
 import { apiGet } from "./api.js";
 import { $, esc } from "./utils.js";
 import { avatarHtml, loadAvatars, openUserProfile } from "./profile.js";
+import { openRolesSheet } from "./roles.js";
 
 function teamCardHtml(u) {
   return `
@@ -34,6 +35,9 @@ function teamHtml(d) {
         <h1>Команда</h1>
         <div class="sub">Все, кто сейчас работает над сериями студии.</div>
       </div>
+      <div class="page-header-actions">
+        <button class="btn" id="team-roles-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M16 11l2 2 4-4"/></svg>Роли</button>
+      </div>
     </div>
     <div class="team-grid">${cards || `<div class="bento-empty">Пока никого нет.</div>`}</div>
   `;
@@ -51,6 +55,7 @@ export async function loadTeam() {
   }
   root.innerHTML = teamHtml(d);
   loadAvatars(root);
+  root.querySelector("#team-roles-btn").addEventListener("click", openRolesSheet);
   root.querySelectorAll("[data-open-user]").forEach(card => {
     const telegramId = parseInt(card.dataset.openUser, 10);
     card.addEventListener("click", () => openUserProfile(telegramId));

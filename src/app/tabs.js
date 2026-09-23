@@ -14,6 +14,7 @@ import { loadAnalytics } from "./analytics.js";
 import { loadServices } from "./services.js";
 import { loadTeam } from "./team.js";
 import { clearDirectoryCache } from "./titles-admin.js";
+import { refreshTeamNotice, clearTeamNotice } from "./team-notice.js";
 
 // Загрузчики возвращают false, если данные взять не удалось (сеть/сервер)
 // — см. loadActiveTab ниже.
@@ -85,6 +86,7 @@ export async function loadActiveTab(force) {
 // и state.activeTab, саму загрузку данных всё ещё делает
 // loadActiveTab()/refreshAll() ниже по цепочке вызовов в auth.js.
 export function restoreLastTab() {
+  refreshTeamNotice();
   let saved = null;
   try { saved = localStorage.getItem(LAST_TAB_KEY); } catch (_) { /* не критично */ }
   if (!saved || !LOADERS[saved]) return;
@@ -94,6 +96,7 @@ export function restoreLastTab() {
 }
 
 export function clearTabDom() {
+  clearTeamNotice();
   for (const sel of TAB_BODIES) {
     const el = $(sel);
     if (el) el.innerHTML = "";
@@ -130,6 +133,7 @@ export async function refreshAll() {
   label.textContent = "Обновляю…";
   try {
     clearDirectoryCache();
+    refreshTeamNotice();
     await loadUsers();
     await loadActiveTab(true);
   } finally {

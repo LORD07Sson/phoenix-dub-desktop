@@ -10,6 +10,12 @@
 // всё равно перепроверяет каждый вызов через _require_admin/_require_owner.
 
 import { apiGet, apiPost, apiDelete, openSheet, toast, dialogSkeletonHtml } from "./api.js";
+import { openNoticeEditor } from "./team-notice.js";
+import { openTicketsSheet } from "./tickets.js";
+import { openBirthdaysSheet } from "./birthdays.js";
+import { openRolesSheet } from "./roles.js";
+import { openAdminLogSheet } from "./admin-log.js";
+import { openChannelPostSheet } from "./channel-post.js";
 import { esc } from "./utils.js";
 import { avatarHtml, loadAvatars } from "./profile.js";
 
@@ -91,14 +97,17 @@ export async function openAdminPanel() {
       `;
       if (reqSlot) {
         reqSlot.innerHTML = `
-          <button class="btn" id="btn-open-tickets" style="width:100%; justify-content:center; margin-bottom:8px;">Открытые тикеты</button>
+          <button class="btn" id="btn-open-tickets" style="width:100%; justify-content:center; margin-bottom:8px;">Тикеты поддержки</button>
           <button class="btn" id="btn-open-access-requests" style="width:100%; justify-content:center;">Заявки на доступ${s.pending_access_requests ? ` · ${s.pending_access_requests}` : ""}</button>
           ${s.is_owner ? `<button class="btn" id="btn-open-owner-requests" style="width:100%; justify-content:center; margin-top:8px;">На подтверждении${s.pending_owner_requests ? ` · ${s.pending_owner_requests}` : ""}</button>` : ""}
+          ${s.is_owner ? `<button class="btn" id="btn-open-admin-log" style="width:100%; justify-content:center; margin-top:8px;">Журнал действий</button>` : ""}
         `;
-        reqSlot.querySelector("#btn-open-tickets").addEventListener("click", openTicketsSheet);
+        reqSlot.querySelector("#btn-open-tickets").addEventListener("click", () => openTicketsSheet());
         reqSlot.querySelector("#btn-open-access-requests").addEventListener("click", openAccessRequestsSheet);
         const ownerBtn = reqSlot.querySelector("#btn-open-owner-requests");
         if (ownerBtn) ownerBtn.addEventListener("click", openOwnerRequestsSheet);
+        const logBtn = reqSlot.querySelector("#btn-open-admin-log");
+        if (logBtn) logBtn.addEventListener("click", openAdminLogSheet);
       }
     } catch (e) {
       slot.innerHTML = `<div class="no-assignee">Не удалось загрузить: ${esc(e.message)}</div>`;
@@ -108,35 +117,32 @@ export async function openAdminPanel() {
   sheet.innerHTML = `
     <h2>Админ-панель</h2>
     <div class="detail-section"><div id="admin-access-slot">${dialogSkeletonHtml(3)}</div></div>
+    <div class="detail-section">
+      <h3>Объявление для команды</h3>
+      <div class="mini-row"><span class="name">Закреплённая строка для всех — в боте и над вкладками десктопа.</span><button class="btn" id="btn-open-notice">Объявление</button></div>
+    </div>
+    <div class="detail-section">
+      <h3>Пост в канал</h3>
+      <div class="mini-row"><span class="name">Конструктор поста: блоки с людьми, медиа, кнопки. Черновики общие с ботом.</span><button class="btn" id="btn-open-post">Пост в канал</button></div>
+    </div>
+    <div class="detail-section">
+      <h3>Роли</h3>
+      <div class="mini-row"><span class="name">Роль человека по умолчанию — из неё собираются пайплайны отчётов.</span><button class="btn" id="btn-open-roles">Роли</button></div>
+    </div>
+    <div class="detail-section">
+      <h3>Дни рождения</h3>
+      <div class="mini-row"><span class="name">Бот поздравляет команду сам; даты видны на «Обзоре» и в «Календаре».</span><button class="btn" id="btn-open-birthdays">Дни рождения</button></div>
+    </div>
     <div class="detail-section"><h3>Заявки</h3><div id="admin-requests-slot">${dialogSkeletonHtml(2)}</div></div>
     <div class="detail-section"><h3>Система</h3><div id="admin-system-slot">${dialogSkeletonHtml(4)}</div></div>
     <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
   `;
   sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
+  sheet.querySelector("#btn-open-notice").addEventListener("click", openNoticeEditor);
+  sheet.querySelector("#btn-open-birthdays").addEventListener("click", () => openBirthdaysSheet());
+  sheet.querySelector("#btn-open-roles").addEventListener("click", openRolesSheet);
+  sheet.querySelector("#btn-open-post").addEventListener("click", () => { overlay.remove(); openChannelPostSheet(); });
   await Promise.all([refreshAccess(), refreshSystem()]);
-}
-
-async function openTicketsSheet() {
-  const overlay = openSheet(`<h2>Открытые тикеты</h2>${dialogSkeletonHtml(4)}`);
-  const sheet = overlay.querySelector(".sheet");
-  try {
-    const d = await apiGet("/tickets");
-    const rows = (d.tickets || []).map(t => `
-      <div class="note-item">
-        <div class="meta">${esc(t.name)} · #${t.id}</div>
-        <div>${esc(t.last_message || "без сообщений")}</div>
-      </div>
-    `).join("");
-    sheet.innerHTML = `
-      <h2>Открытые тикеты</h2>
-      <div>${rows || `<div class="no-assignee">Открытых тикетов нет</div>`}</div>
-      <p style="color:var(--ink-soft); font-size:12px;">Ответить можно в самом боте, в разделе поддержки.</p>
-      <div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>
-    `;
-  } catch (e) {
-    sheet.innerHTML = `<h2>Открытые тикеты</h2><div class="no-assignee">Не удалось загрузить: ${esc(e.message)}</div><div class="sheet-actions"><button class="btn" data-close>Закрыть</button></div>`;
-  }
-  sheet.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
 }
 
 async function openAccessRequestsSheet() {

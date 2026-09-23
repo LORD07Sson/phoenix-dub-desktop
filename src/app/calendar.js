@@ -12,6 +12,7 @@ import { apiGet, dialogSkeletonHtml, mediaUrl } from "./api.js";
 import { $, esc, STATUS_COLOR_VAR } from "./utils.js";
 import { openReportDetail } from "./report-detail.js";
 import { switchTab } from "./tabs.js";
+import { openBirthdaysSheet } from "./birthdays.js";
 
 const HOUR_PX = 52;
 const DAY_MS = 86400000;
@@ -93,7 +94,10 @@ async function fetchDeadlines(from, to) {
   return out;
 }
 
+// Полный список (/birthdays); на старом сервере без него — 5 ближайших
+// из /overview.
 async function fetchBirthdays() {
+  try { return (await apiGet("/birthdays")).birthdays || []; } catch (_) { /* старый сервер */ }
   try { return (await apiGet("/overview")).birthdays || []; } catch (_) { return []; }
 }
 
@@ -188,7 +192,7 @@ function gridHtml(start, data) {
       <div class="cal-gutter-lbl">Весь день</div>
       ${allDay.map(items => `<div class="cal-allday-cell">${items.map(it => it.kind === "deadline"
         ? `<button type="button" class="cal-chip cal-chip-deadline" data-cal-report="${esc(it.r.public_id)}" style="--c: var(${STATUS_COLOR_VAR[it.r.status] || "--s-draft"})" title="${esc(it.r.title)}"><i></i><span>${esc(it.r.title)}</span></button>`
-        : `<div class="cal-chip cal-chip-bday" title="День рождения"><svg viewBox="0 0 24 24"><path d="M4 21h16M5 21v-7h14v7M12 14V9M9 5c0 1.7 1.3 3 3 3s3-1.3 3-3c0-1.2-3-3-3-3S9 3.8 9 5Z"/></svg><span>${esc(it.b.name)}</span></div>`).join("")}</div>`).join("")}
+        : `<div class="cal-chip cal-chip-bday" title="День рождения" role="button" tabindex="0" data-cal-bday><svg viewBox="0 0 24 24"><path d="M4 21h16M5 21v-7h14v7M12 14V9M9 5c0 1.7 1.3 3 3 3s3-1.3 3-3c0-1.2-3-3-3-3S9 3.8 9 5Z"/></svg><span>${esc(it.b.name)}</span></div>`).join("")}</div>`).join("")}
     </div>` : "";
 
   const hours = Array.from({ length: 24 }, (_, h) => `<div class="cal-hour"><span>${h ? `${String(h).padStart(2, "0")}:00` : ""}</span></div>`).join("");
@@ -265,6 +269,7 @@ async function renderWeek() {
   if (seq !== requestSeq || !body.isConnected) return;
   body.innerHTML = gridHtml(weekStart, cache);
   body.querySelectorAll("[data-cal-report]").forEach(b => b.addEventListener("click", () => openReportDetail(b.dataset.calReport)));
+  body.querySelectorAll("[data-cal-bday]").forEach(b => b.addEventListener("click", () => openBirthdaysSheet(() => { cache = null; renderWeek(); })));
   body.querySelectorAll("[data-cal-title]").forEach(b => b.addEventListener("click", () => {
     switchTab("titles");
   }));
