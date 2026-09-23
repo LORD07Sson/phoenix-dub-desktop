@@ -8,7 +8,7 @@ import { state } from "./state.js";
 import { fillRemindersCard } from "./reminders.js";
 import { fetchPerson, workSectionHtml, wireWorkSection, fillPauseCard } from "./people.js";
 import { apiGet, apiPost, apiDelete, openSheet, toast, dialogSkeletonHtml, mediaUrl } from "./api.js";
-import { $, esc, isOverdue, MONTHS_RU, STATUS_COLOR_VAR, BADGE_RARITY_ORDER, pluralColleagues, showContextMenu } from "./utils.js";
+import { $, esc, isOverdue, relTime, MONTHS_RU, STATUS_COLOR_VAR, BADGE_RARITY_ORDER, pluralColleagues, showContextMenu } from "./utils.js";
 import { setQuickFilter, loadReports } from "./reports.js";
 import { switchTab } from "./tabs.js";
 import { donutHtml, donutLegendHtml, playDonutIntro } from "./charts.js";
@@ -392,55 +392,43 @@ export async function loadProfile() {
     </div>
   `;
 
-  const header = profileHeaderHtml(me, true, true);
+  const kpi = (label, val, sub, empty) => `
+    <div class="pf-kpi${empty ? " empty" : ""}">
+      <span class="l">${label}</span>
+      <b>${empty ? "пока нет" : val}</b>
+      <span class="s">${sub}</span>
+    </div>`;
+
   root.innerHTML = `
-    <div class="page-header">
-      <div>
-        <h1>Мой профиль</h1>
-        <div class="sub">Ваша загрузка, результаты и достижения в студии.</div>
+    <div class="pf">
+      ${myHeroHtml(me)}
+      <div class="pf-kpis">
+        ${kpi("Сейчас на мне", me.assigned ?? 0, me.overdue ? `<span class="warn">${me.overdue} просрочено</span>` : "всё в сроках")}
+        ${kpi("Закрыто", me.completed_total ?? 0, `${me.completed_week ?? 0} за неделю · ${me.completed_month ?? 0} за месяц`)}
+        ${kpi("Вовремя", `${me.on_time_pct}%`, me.on_time_pct != null ? "закрыто не позже срока" : "появится после первого отчёта со сроком", me.on_time_pct == null)}
+        ${kpi("Средний срок", `${me.avg_days != null ? me.avg_days.toFixed(1) : ""} дн.`, me.avg_days != null ? "на один отчёт" : "появится после первой закрытой серии", me.avg_days == null)}
       </div>
-    </div>
-    <div class="profile-head-grid">
-      <div class="profile-head-left">${header.left}</div>
-      <div class="profile-head-right">
-        <div class="an-metrics">
-          <div class="bcell kpi-cell" style="animation-delay:0ms;">
-            <h3>Сейчас на мне</h3>
-            <div class="big-num">${me.assigned ?? 0}</div>
-            <div class="sub">${me.overdue ? `<span style="color:var(--s-stop);">${me.overdue} просрочено</span>` : "всё в сроках"}</div>
-          </div>
-          <div class="bcell kpi-cell" style="animation-delay:40ms;">
-            <h3>Закрыто</h3>
-            <div class="big-num">${me.completed_total ?? 0}</div>
-            <div class="sub">${me.completed_week ?? 0} за неделю · ${me.completed_month ?? 0} за месяц</div>
-          </div>
-          <div class="bcell kpi-cell" style="animation-delay:80ms;">
-            <h3>Вовремя</h3>
-            <div class="big-num">${me.on_time_pct != null ? me.on_time_pct + "%" : "—"}</div>
-            <div class="sub">${me.on_time_pct != null ? "закрыто не позже срока" : "нет отчётов со сроком"}</div>
-          </div>
-          <div class="bcell kpi-cell" style="animation-delay:120ms;">
-            <h3>Средний срок</h3>
-            <div class="big-num">${me.avg_days != null ? `${me.avg_days.toFixed(1)}д` : "—"}</div>
-            <div class="sub">на один отчёт</div>
-          </div>
+      <div class="pf-grid">
+        <div class="pf-main">
+          ${myWorkHtml(me)}
+          ${myBadgesHtml(me)}
+          <section class="pf-card" id="activity-card">
+            <div class="pf-card-head"><h3>Последние действия</h3><button class="pf-link" id="activity-all">вся активность →</button></div>
+            <div class="pf-acts" id="activity-list"><div class="pf-quiet">загружаю…</div></div>
+          </section>
         </div>
-        ${header.right}
-        <div class="bento">
+        <aside class="pf-side">
           ${goalCardHtml}
-          ${badgesBentoHtml(me, 140)}
-          <div class="bcell wide" id="activity-card" style="animation-delay:180ms; cursor:pointer;">
-            <div class="dash-cell-head" style="margin-bottom:4px;">
-              <span class="dash-cell-title">Моя активность</span>
-              <span class="dash-link">открыть</span>
-            </div>
-            <div class="sub">последние действия по отчётам</div>
-          </div>
-          <div class="bcell wide" id="reminders-card" style="animation-delay:190ms; cursor:pointer;" role="button" tabindex="0"></div>
-          <div class="bcell wide" id="pause-card" style="animation-delay:200ms; cursor:pointer;" role="button" tabindex="0"></div>
-        </div>
-        ${devModeActive() ? devPanelHtml(me) : ""}
+          <section class="pf-card pf-tenure">${tenureProgressHtml(me.member_since_days) || `<div class="pf-quiet">стаж появится позже</div>`}</section>
+          <section class="pf-card pf-notif">
+            <h3>Уведомления</h3>
+            <div class="pf-notif-row" id="reminders-card" role="button" tabindex="0"></div>
+            <div class="pf-notif-row" id="pause-card" role="button" tabindex="0"></div>
+          </section>
+          ${teamTeaserHtml(me)}
+        </aside>
       </div>
+      ${devModeActive() ? devPanelHtml(me) : ""}
     </div>
   `;
   wireProfileCommon(root, me.telegram_id, () => loadProfile());
@@ -450,13 +438,145 @@ export async function loadProfile() {
   if (state.isAdmin) fillIdleSlot(root);
   fillPauseCard(root, me.telegram_id);
   fillRemindersCard(root);
+  fillRecentActivity(root);
   let suggested = null;
   if (!goalSet) suggestGoal(root).then(v => { suggested = v; });
   root.querySelector("#goal-card").addEventListener("click", () => monthlyGoalDialog(me.monthly_goal || suggested));
   root.querySelector("#btn-edit-profile").addEventListener("click", () => editProfileDialog(me));
-  root.querySelector("#activity-card").addEventListener("click", () => openMyActivitySheet());
+  root.querySelector("#activity-all").addEventListener("click", () => openMyActivitySheet());
+  root.querySelectorAll("[data-open-report]").forEach(row => {
+    row.addEventListener("click", () => openReportDetail(row.dataset.openReport));
+  });
   if (devModeActive()) wireDevPanel(root, me.telegram_id, () => loadProfile(), me.role);
   notifyGoalReachedIfNeeded(me, goalSet, goalOver, goalDone);
+}
+
+// Шапка своей «Я»: баннер во всю ширину, аватар, имя и о себе одним
+// блоком — раньше статус и био жили отдельными полосами под KPI.
+function myHeroHtml(d) {
+  const tier = tenureTier(d.member_since_days);
+  const rMeta = roleMeta(d.role);
+  let joined = "";
+  if (d.created_at) {
+    const jd = new Date(d.created_at.replace(" ", "T") + "Z");
+    if (!isNaN(jd.getTime())) joined = `в команде с ${jd.getUTCDate()} ${MONTHS_RU[jd.getUTCMonth() + 1]}. ${jd.getUTCFullYear()}`;
+  }
+  const meta = [
+    d.username ? `@${esc(d.username)}` : "",
+    d.internal_id != null ? `<span class="id-chip">#${d.internal_id}</span>` : "",
+    joined,
+    d.is_online ? `<span class="on">в сети</span>` : "",
+  ].filter(Boolean).join(`<i class="dot"></i>`);
+  const about = d.status_text || d.bio ? `
+    <div class="pf-about">
+      ${d.status_text ? `<div class="st">${esc(d.status_text)}</div>` : ""}
+      ${d.bio ? `<div class="bio">${esc(d.bio)}</div>` : ""}
+    </div>` : `<div class="pf-about empty">Статус и пара слов о себе — их видят коллеги в карточке профиля.</div>`;
+  return `
+    <section class="pf-hero">
+      <div class="pf-banner" data-role="profile-banner"></div>
+      <div class="pf-hero-body">
+        <span class="avatar-ring${tier ? " tier-" + tier : ""}">${avatarHtml(d.telegram_id, d.display_name || d.name, "xl")}</span>
+        <div class="pf-who">
+          <div class="nm-row">
+            <span class="nm">${esc(d.display_name || d.name)}</span>
+            ${d.is_developer || d.is_owner ? `<span class="dev-pill">DEV</span>` : ""}
+            ${rankTagHtml(d.studio_rank)}
+            <span class="role-tag" style="--tag-c:${rMeta.c}">${rMeta.ic} ${d.role ? esc(d.role) : "Участник PHOENIX"}</span>
+          </div>
+          <div class="pf-meta">${meta}</div>
+          ${about}
+        </div>
+        <button class="btn pf-edit" id="btn-edit-profile"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="M13.5 6.5l4 4"/></svg>Изменить</button>
+      </div>
+    </section>`;
+}
+
+// «Моя работа» — вместо огромного доната на одно значение: тонкая
+// полоска по статусам и сам список того, что на руках.
+function myWorkHtml(me) {
+  const reports = me.reports || [];
+  if (!reports.length) {
+    return `
+      <section class="pf-card">
+        <div class="pf-card-head"><h3>Моя работа</h3></div>
+        <div class="idle-card" id="idle-slot">
+          <img class="idle-mascot" src="${mascotUrl}" alt="">
+          <div class="idle-text"><div class="t">На руках пусто</div><div class="d">${state.isAdmin ? "смотрю, есть ли свободные серии…" : "когда назначат серию, она появится здесь"}</div></div>
+        </div>
+      </section>`;
+  }
+  const counts = {};
+  for (const r of reports) counts[r.status] = (counts[r.status] || 0) + 1;
+  const label = st => state.statusOptions.find(([v]) => v === st)?.[1] || st;
+  const segs = Object.entries(STATUS_COLOR_VAR).filter(([st]) => counts[st]);
+  const bar = segs.map(([st, c]) => `<i style="flex:${counts[st]}; background:var(${c});" title="${esc(label(st))}: ${counts[st]}"></i>`).join("");
+  const legend = segs.map(([st, c]) => `<span><i style="background:var(${c});"></i>${esc(label(st))} <b>${counts[st]}</b></span>`).join("");
+  const rows = reports.slice(0, 6).map(r => {
+    const late = isOverdue(r);
+    const c = STATUS_COLOR_VAR[r.status] || "--ink-dim";
+    return `
+      <button class="pf-rep" data-open-report="${esc(r.public_id)}">
+        <i class="pf-rep-dot" style="background:var(${c});"></i>
+        <span class="t">${esc(r.title || r.public_id)}</span>
+        <span class="id">${esc(r.public_id)}</span>
+        <span class="st" style="--c:var(${c});">${esc(r.status_label || label(r.status))}</span>
+        <span class="dl${late ? " late" : ""}">${r.deadline ? `${late ? "просрочено · " : "до "}${esc(r.deadline.slice(8, 10))}.${esc(r.deadline.slice(5, 7))}` : "без срока"}</span>
+      </button>`;
+  }).join("");
+  const roles = (me.role_breakdown || []).map(rb => `<span class="pf-role">${esc(rb.role)} <b>${rb.pct}%</b></span>`).join("");
+  return `
+    <section class="pf-card">
+      <div class="pf-card-head"><h3>Моя работа <span class="n">${reports.length}</span></h3></div>
+      <div class="pf-bar">${bar}</div>
+      <div class="pf-legend">${legend}</div>
+      <div class="pf-reps">${rows}</div>
+      ${reports.length > 6 ? `<div class="pf-quiet">и ещё ${reports.length - 6} — во вкладке «Список»</div>` : ""}
+      ${roles ? `<div class="pf-roles"><span class="l">Роли в пайплайне</span>${roles}</div>` : ""}
+    </section>`;
+}
+
+// Достижения плитками: полученные цветные, остальные приглушены
+// с прогрессом — вся сетка видна сразу, без пустых строк «нет данных».
+function myBadgesHtml(d) {
+  const all = (d.badges || []).slice().sort((a, b) => (b.unlocked ? 1 : 0) - (a.unlocked ? 1 : 0) || (BADGE_RARITY_ORDER[a.rarity] ?? 9) - (BADGE_RARITY_ORDER[b.rarity] ?? 9));
+  if (!all.length) return "";
+  const won = all.filter(b => b.unlocked).length;
+  const tiles = all.map(b => {
+    const has = b.target ? Math.max(0, Math.min(b.target, b.current || 0)) : null;
+    const pct = b.target ? Math.round((has / b.target) * 100) : 0;
+    return `
+      <div class="pf-badge${b.unlocked ? " won" : ""} r-${esc(b.rarity || "common")}" title="${esc(b.label)}">
+        <span class="ic">${esc(b.icon)}</span>
+        <span class="lb">${esc(b.label)}</span>
+        ${b.unlocked ? `<span class="pr">получено</span>` : `<span class="pr">${b.target ? `${has} / ${b.target}` : "нет данных"}</span><span class="tr"><i style="width:${pct}%;"></i></span>`}
+        ${b.unlocked && b.custom && devModeActive() ? `<button class="icon-btn badge-revoke" data-revoke-badge="${b.id}" title="Отозвать награду">✕</button>` : ""}
+      </div>`;
+  }).join("");
+  return `
+    <section class="pf-card">
+      <div class="pf-card-head"><h3>Достижения <span class="n">${won} из ${all.length}</span></h3></div>
+      <div class="pf-badges">${tiles}</div>
+    </section>`;
+}
+
+async function fillRecentActivity(root) {
+  const box = root.querySelector("#activity-list");
+  if (!box) return;
+  let d;
+  try { d = await apiGet("/me/activity"); } catch (_) { d = null; }
+  if (!box.isConnected) return;
+  const evs = ((d && d.events) || []).slice(0, 5);
+  if (!evs.length) { box.innerHTML = `<div class="pf-quiet">пока тихо — действия по отчётам появятся здесь</div>`; return; }
+  box.innerHTML = evs.map(ev => `
+    <div class="pf-act"${ev.public_id ? ` data-open-report="${esc(ev.public_id)}"` : ""}>
+      <i></i>
+      <div><div class="a">${esc(ev.action || "")}${ev.detail ? ` <span>· ${esc(ev.detail)}</span>` : ""}</div>
+      <div class="m">${ev.public_id ? `${esc(ev.public_id)} ${esc(ev.title || "")} · ` : ""}${esc(relTime(ev.created_at))}</div></div>
+    </div>`).join("");
+  box.querySelectorAll("[data-open-report]").forEach(row => {
+    row.addEventListener("click", () => openReportDetail(row.dataset.openReport));
+  });
 }
 
 // Свободные серии для пустого профиля — тот же быстрый фильтр

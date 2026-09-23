@@ -7,7 +7,7 @@ import { state } from "./state.js";
 import { invoke, pickOutputFile, pickInputFile, revealInFolder, pinReportWindow } from "./tauri.js";
 import { esc, initials, STATUS_DOT_CLASS, STATUS_COLOR_VAR, isOverdue, parseNoteTime, secondsFromTimeInput, noteTimePrefix, formatRange } from "./utils.js";
 import { runQcAnalysis, QC_EXTENSIONS } from "./qc.js";
-import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports, listNeighbors } from "./reports.js";
+import { changeStatusDialog, assignDialog, priorityDialog, deadlineDialog, loadReports, listNeighbors, seriesParts, priorityFlagHtml, deadlineCellHtml, posterSrc } from "./reports.js";
 import { loadSidebarStatusCounts } from "./tabs.js";
 import { loadRoles, loadAssignable, userOptionsHtml } from "./titles-admin.js";
 import { setDropTarget } from "./file-drop.js";
@@ -128,95 +128,149 @@ export async function openReportDetail(publicId) {
         })
       : notes.notes;
 
+    const t = seriesParts(detail);
+    const poster = posterSrc(detail.poster_url);
+    const authorName = (detail.author && (detail.author.first_name || detail.author.username)) || "?";
+    const hasPipe = detail.pipeline && detail.pipeline.length;
+    const doneItems = checklist.items.filter(i => i.done).length;
+    const steps = STATUS_PATH.map(([st, lbl], i) => {
+      const curIdx = STATUS_PATH.findIndex(([s]) => s === detail.status);
+      const cls = st === detail.status ? " cur" : curIdx > i ? " done" : "";
+      return `<button class="rd-step${cls}" data-set-status="${st}" style="--c:var(${STATUS_COLOR_VAR[st]});"><i></i>${lbl}</button>`;
+    }).join("");
+    const side = detail.status === "revision" || detail.status === "cancelled" ? detail.status : "";
+
     overlay.querySelector(".sheet").innerHTML = `
-      <div class="detail-head">
-        <h2>${esc(detail.title)}</h2>
-        <div class="detail-head-actions">
-          ${nav ? `
-            <button class="icon-btn" data-nav="prev" title="Предыдущий в списке (Alt+←)" aria-label="Предыдущий отчёт" ${nav.prev ? "" : "disabled"}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
-            <button class="icon-btn" data-nav="next" title="Следующий в списке (Alt+→)" aria-label="Следующий отчёт" ${nav.next ? "" : "disabled"}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>` : ""}
-          <button class="icon-btn" id="btn-focus-toggle" data-focus-toggle style="flex:none;"></button>
-          <button class="icon-btn" data-close style="flex:none;" title="Закрыть" aria-label="Закрыть"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="rd-hero">
+        <div class="rd-hero-bg"${poster ? ` style="background-image:url('${esc(poster)}')"` : ""}></div>
+        <div class="rd-hero-in">
+          <span class="rd-poster"${poster ? ` style="background-image:url('${esc(poster)}')"` : ""}>${poster ? "" : esc(initials(t.name))}</span>
+          <div class="rd-titles">
+            <h2>${esc(t.name)}${t.ep ? `<span class="ls-ep">${esc(t.ep)}</span>` : ""}${priorityFlagHtml(detail.priority)}</h2>
+            <div class="rd-sub">${esc(detail.public_id)}${t.sub ? ` · ${esc(t.sub)}` : ""} · создал ${esc(authorName)} · ${esc(String(detail.created_at || "").slice(0, 16))}</div>
+          </div>
+          <div class="detail-head-actions">
+            ${nav ? `
+              <button class="icon-btn" data-nav="prev" title="Предыдущий в списке (Alt+←)" aria-label="Предыдущий отчёт" ${nav.prev ? "" : "disabled"}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+              <button class="icon-btn" data-nav="next" title="Следующий в списке (Alt+→)" aria-label="Следующий отчёт" ${nav.next ? "" : "disabled"}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>` : ""}
+            <button class="icon-btn" id="btn-focus-toggle" data-focus-toggle style="flex:none;"></button>
+            <button class="icon-btn" data-close style="flex:none;" title="Закрыть" aria-label="Закрыть"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </div>
         </div>
-      </div>
-      <div class="detail-id">${esc(detail.public_id)} · от ${esc((detail.author && (detail.author.first_name || detail.author.username)) || "?")} · ${esc(detail.created_at || "")}</div>
-
-      <div class="detail-chips">
-        <span class="chip status-chip" id="chip-status" style="--chip-accent: var(${STATUS_COLOR_VAR[detail.status] || "--s-draft"})"><span class="dot ${dotClass}"></span>${esc(detail.status_label)}</span>
-        <span class="chip priority-chip ${esc(detail.priority)}" id="chip-priority"><span class="dot"></span>${esc(detail.priority_label)}</span>
-        <span class="chip ${overdue ? "overdue" : ""}" id="chip-deadline">${overdue ? "⏰ " : "📅 "}${esc(detail.deadline || "без срока")}</span>
-        <span class="chip" id="chip-assign">👤 Назначить</span>
-      </div>
-
-      <div class="detail-section">
-        <h3>Исполнители</h3>
-        ${(detail.assignees && detail.assignees.length)
-          ? detail.assignees.map(a => `<div class="assignee-row" data-assignee="${a.telegram_id}">
-              <span class="avatar-bubble" data-avatar-for="${a.telegram_id}">${esc(initials(a.first_name || a.username))}</span>
-              <span style="flex:1;">${esc(a.first_name || a.username || `ID ${a.telegram_id}`)}</span>
-              <button class="icon-btn" data-unassign="${a.telegram_id}" title="Снять">✕</button>
-            </div>`).join("")
-          : `<div class="no-assignee">Никто не назначен</div>`}
-      </div>
-
-      <div class="detail-section">
-        <h3>Чек-лист ${checklist.items.length ? `(${checklist.items.filter(i => i.done).length}/${checklist.items.length})` : ""}</h3>
-        <div id="checklist-list">${checklist.items.map(checklistItemHtml).join("") || `<div class="no-assignee">Пусто</div>`}</div>
-        <div class="add-row">
-          <input id="checklist-new" placeholder="Новый пункт…">
-          <button class="btn" id="checklist-add">+</button>
+        <div class="rd-steps">
+          ${steps}
+          <button class="rd-step-side${side === "revision" ? " on" : ""}" data-set-status="revision" style="--c:var(--s-fix);">↺ На исправление</button>
+          ${side === "cancelled" ? `<span class="rd-step-side on" style="--c:var(--s-stop);">Отменено</span>` : ""}
         </div>
       </div>
 
-      <div class="detail-section">
-        <h3>Заметки ${notes.notes.length ? `(${notes.notes.length})` : ""}
-          ${timedCount >= 2 ? `<button class="btn ghost notes-sort" id="notes-sort">${notesByTime ? "По времени добавления" : "По тайм-коду"}</button>` : ""}
-        </h3>
-        <div id="notes-list">${orderedNotes.map(noteHtml).join("") || `<div class="no-assignee">Пока нет заметок</div>`}</div>
-        <div class="add-row note-add-row">
-          <input id="note-time" class="note-time-input" placeholder="04:12" maxlength="8" inputmode="numeric" title="Время на дорожке — необязательно">
-          <textarea id="note-new" rows="2" placeholder="Написать заметку… (Ctrl+Enter — отправить)"></textarea>
-          <button class="btn" id="note-add">Добавить</button>
-        </div>
+      <div class="rd-tabs">
+        <button class="rd-tab on" data-rd-tab="main">Обзор</button>
+        <button class="rd-tab" data-rd-tab="history">История</button>
+        <button class="rd-tab" data-rd-tab="activity">Активность</button>
+        <button class="rd-tab" id="btn-qc-track" title="Проверить звук дорожки">QC дорожки</button>
       </div>
 
-      ${files.files.length ? `
-      <div class="detail-section">
-        <h3>Файлы (${files.files.length})</h3>
-        <div id="files-list">${files.files.map(fileHtml).join("")}</div>
-      </div>` : ""}
+      <div class="rd-body">
+        <div class="rd-main">
+          <div class="rd-panel" data-rd-panel="main">
+            <div class="rd-sec">
+              <h3>Пайплайн ${hasPipe ? `<span class="n">${detail.pipeline.filter(s => s.done).length} из ${detail.pipeline.length}</span>` : ""}
+                <button class="pf-link rd-h-act" id="pipe-edit-toggle">${hasPipe ? "изменить" : ""}</button></h3>
+              ${hasPipe ? pipelineTimelineHtml(detail.pipeline) + pipelineAdvanceHtml(detail.pipeline, assignable) : `<button class="rd-add" id="pipe-add-open">+ Собрать пайплайн: перевод → тайминг → озвучка…</button>`}
+              <div id="pipe-editor" hidden>
+                <div id="pipeline-draft-list"></div>
+                <div class="add-row">
+                  <select id="pipeline-role-pick" class="field-input"><option value="">+ роль…</option>${roles.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("")}</select>
+                  <select id="pipeline-user-pick" class="field-input">${userOptionsHtml(assignable, null)}</select>
+                  <button class="btn" id="pipeline-add-step">+</button>
+                </div>
+                <div class="sheet-actions" style="margin-top:8px;">
+                  <button class="btn primary" id="btn-pipeline-save">Сохранить пайплайн</button>
+                  ${hasPipe ? `<button class="btn danger" id="btn-pipeline-clear">Снять</button>` : ""}
+                </div>
+              </div>
+            </div>
 
-      <div class="detail-section">
-        <h3>Пайплайн ${detail.pipeline && detail.pipeline.length ? `<span class="pipeline-summary">${detail.pipeline.map(s => esc(s.role)).join(" → ")}</span>` : ""}</h3>
-        ${pipelineChainHtml(detail.pipeline, assignable)}
-        <div id="pipeline-draft-list"></div>
-        <div class="add-row">
-          <select id="pipeline-role-pick" class="field-input"><option value="">+ роль…</option>${roles.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("")}</select>
-          <select id="pipeline-user-pick" class="field-input">${userOptionsHtml(assignable, null)}</select>
-          <button class="btn" id="pipeline-add-step">+</button>
-        </div>
-        <div class="sheet-actions" style="margin-top:8px;">
-          <button class="btn primary" id="btn-pipeline-save">Сохранить пайплайн</button>
-          ${detail.pipeline && detail.pipeline.length ? `<button class="btn danger" id="btn-pipeline-clear">Снять</button>` : ""}
-        </div>
-      </div>
+            <div class="rd-sec">
+              <h3>Чек-лист ${checklist.items.length ? `<span class="n">${doneItems} из ${checklist.items.length}</span>` : ""}</h3>
+              <div id="checklist-list">${checklist.items.map(checklistItemHtml).join("")}</div>
+              <div class="add-row">
+                <input id="checklist-new" placeholder="${checklist.items.length ? "Ещё пункт…" : "+ Добавить пункт: например, «сверить имена»"}">
+                <button class="btn" id="checklist-add">+</button>
+              </div>
+            </div>
 
-      <div class="detail-section">
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button class="btn ghost" id="btn-qc-track" style="flex:1;">QC дорожки</button>
-          <button class="btn ghost" id="btn-history" style="flex:1;">История</button>
-          <button class="btn ghost" id="btn-activity" style="flex:1;">Активность</button>
-          <button class="btn ghost" id="btn-pin-window" style="flex:1;">Открепить в окне</button>
-        </div>
-      </div>
+            <div class="rd-sec">
+              <h3>Заметки ${notes.notes.length ? `<span class="n">${notes.notes.length}</span>` : ""}
+                ${timedCount >= 2 ? `<button class="btn ghost notes-sort rd-h-act" id="notes-sort">${notesByTime ? "По времени добавления" : "По тайм-коду"}</button>` : ""}
+              </h3>
+              <div id="notes-list">${orderedNotes.map(noteHtml).join("")}</div>
+              <div class="add-row note-add-row">
+                <input id="note-time" class="note-time-input" placeholder="04:12" maxlength="8" inputmode="numeric" title="Время на дорожке — необязательно">
+                <textarea id="note-new" rows="2" placeholder="Правка или комментарий… (Ctrl+Enter — отправить)"></textarea>
+                <button class="btn" id="note-add">Добавить</button>
+              </div>
+            </div>
 
-      <div class="sheet-actions">
-        <button class="btn danger" id="btn-delete-report" style="margin-right:auto;">Удалить отчёт</button>
-        <button class="btn" data-close>Закрыть</button>
+            ${files.files.length ? `
+            <div class="rd-sec">
+              <h3>Файлы <span class="n">${files.files.length}</span></h3>
+              <div id="files-list">${files.files.map(fileHtml).join("")}</div>
+            </div>` : ""}
+          </div>
+          <div class="rd-panel" data-rd-panel="history" hidden></div>
+          <div class="rd-panel" data-rd-panel="activity" hidden></div>
+        </div>
+
+        <aside class="rd-side">
+          <div class="rd-meta">
+            <div class="rd-meta-row"><span>Исполнители</span>
+              ${(detail.assignees || []).map(a => `<div class="rd-person" data-assignee="${a.telegram_id}">
+                <span class="avatar-bubble" data-avatar-for="${a.telegram_id}">${esc(initials(a.first_name || a.username))}</span>
+                <span>${esc(a.first_name || a.username || `ID ${a.telegram_id}`)}</span>
+                <button class="icon-btn" data-unassign="${a.telegram_id}" title="Снять">✕</button>
+              </div>`).join("")}
+              <button class="rd-add" id="chip-assign">+ ${detail.assignees && detail.assignees.length ? "ещё исполнитель" : "назначить"}</button>
+            </div>
+            <div class="rd-meta-row"><span>Срок</span>
+              <button class="rd-meta-btn" id="chip-deadline">${detail.deadline ? deadlineCellHtml(detail, overdue) : `<span class="ls-dl-none">без срока — поставить</span>`}</button></div>
+            <div class="rd-meta-row"><span>Приоритет</span>
+              <button class="rd-meta-btn" id="chip-priority"><span class="priority-chip ${esc(detail.priority)}"><span class="dot"></span>${esc(detail.priority_label)}</span></button></div>
+            <div class="rd-meta-row"><span>Статус</span>
+              <button class="rd-meta-btn" id="chip-status"><span class="chip status-chip" style="--chip-accent: var(${STATUS_COLOR_VAR[detail.status] || "--s-draft"})"><span class="dot ${dotClass}"></span>${esc(detail.status_label)}</span></button></div>
+          </div>
+          <div class="rd-side-foot">
+            <button class="btn ghost" id="btn-pin-window">Открепить в окне</button>
+            <button class="btn danger" id="btn-delete-report">Удалить отчёт</button>
+          </div>
+        </aside>
       </div>
     `;
 
     const sheet = overlay.querySelector(".sheet");
+    sheet.querySelectorAll("[data-set-status]").forEach(b => b.addEventListener("click", async () => {
+      const status = b.dataset.setStatus;
+      if (status === detail.status) return;
+      try {
+        await apiPost(`/report/${publicId}/status`, { status, comment: "" });
+        toast("Статус обновлён.", "success");
+        loadReports();
+        loadSidebarStatusCounts();
+        await render();
+      } catch (e) { toast(`Не удалось сменить статус: ${e.message}`, "error"); }
+    }));
+    sheet.querySelectorAll("[data-rd-tab]").forEach(b => b.addEventListener("click", () => {
+      const tab = b.dataset.rdTab;
+      sheet.querySelectorAll("[data-rd-tab]").forEach(x => x.classList.toggle("on", x === b));
+      sheet.querySelectorAll("[data-rd-panel]").forEach(p => { p.hidden = p.dataset.rdPanel !== tab; });
+      if (tab !== "main") fillLogPanel(sheet.querySelector(`[data-rd-panel="${tab}"]`), publicId, tab);
+    }));
+    const pipeEditor = sheet.querySelector("#pipe-editor");
+    const openPipeEditor = () => { pipeEditor.hidden = !pipeEditor.hidden; };
+    sheet.querySelector("#pipe-add-open")?.addEventListener("click", e => { e.currentTarget.remove(); pipeEditor.hidden = false; });
+    const pipeToggle = sheet.querySelector("#pipe-edit-toggle");
+    if (hasPipe) pipeToggle.addEventListener("click", openPipeEditor); else pipeToggle.remove();
     sheet.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => overlay.remove()));
     loadAvatars(sheet);
     sheet.querySelectorAll("[data-nav]").forEach(b => b.addEventListener("click", () => {
@@ -290,8 +344,6 @@ export async function openReportDetail(publicId) {
         btn.textContent = "Удалить отчёт";
       }
     });
-    sheet.querySelector("#btn-history").addEventListener("click", () => openReportLogSheet(publicId, "history"));
-    sheet.querySelector("#btn-activity").addEventListener("click", () => openReportLogSheet(publicId, "activity"));
 
     function renderPipelineDraft() {
       const host = sheet.querySelector("#pipeline-draft-list");
@@ -475,20 +527,54 @@ function noteHtml(n) {
 // Текущая цепочка пайплайна (только чтение) + «передать дальше», если
 // есть следующий этап — отдельно от черновика-билдера ниже (тот
 // пересобирает цепочку целиком, этот просто двигает текущий указатель).
-function pipelineChainHtml(pipeline, assignable) {
+function pipelineAdvanceHtml(pipeline, assignable) {
   if (!pipeline || !pipeline.length) return "";
   const curIdx = pipeline.findIndex(s => s.current);
   const hasNext = curIdx !== -1 && curIdx < pipeline.length - 1;
-  const chain = `<div class="chip-row pipeline-chain">${pipeline.map(s =>
-    `<span class="chip pipeline-step${s.done ? " done" : ""}${s.current ? " current" : ""}">${esc(s.role)}${s.user_name ? ` — ${esc(s.user_name)}` : ""}</span>`
-  ).join("")}</div>`;
   const advanceRow = hasNext
     ? `<div class="add-row" style="margin-bottom:8px;">
         <select id="pipeline-next-user" class="field-input">${userOptionsHtml(assignable, null)}</select>
         <button class="btn" id="btn-pipeline-advance">Передать дальше</button>
       </div>`
     : "";
-  return chain + advanceRow;
+  return advanceRow;
+}
+
+// Основной путь статусов для шапки карточки; «на исправление» и
+// «отменено» — боковые, рисуются отдельно.
+const STATUS_PATH = [["draft", "Черновик"], ["working", "В работе"], ["review", "На проверке"], ["completed", "Готово"]];
+
+// Пайплайн таймлайном: кто на каком этапе, пройденное отмечено.
+function pipelineTimelineHtml(pipeline) {
+  return `<div class="rd-timeline">${pipeline.map((s, i) => `
+    <div class="rd-tl${s.done ? " done" : ""}${s.current ? " cur" : ""}">
+      <span class="rd-tl-dot">${s.done ? "✓" : i + 1}</span>
+      <div><div class="rd-tl-t">${esc(s.role)}</div><div class="rd-tl-p">${s.user_name ? esc(s.user_name) : "исполнитель не выбран"}</div></div>
+    </div>`).join("")}</div>`;
+}
+
+// История и активность — прямо во вкладке карточки: первые 20 событий,
+// дальше — прежняя отдельная шторка с «Показать ещё».
+async function fillLogPanel(panel, publicId, kind) {
+  if (panel.dataset.loaded) return;
+  panel.dataset.loaded = "1";
+  panel.innerHTML = dialogSkeletonHtml(4);
+  let res;
+  try {
+    res = await apiGet(`/report/${publicId}/${kind}`, { offset: 0, page_size: 20 });
+  } catch (e) {
+    panel.innerHTML = `<div class="no-assignee">Не удалось загрузить: ${esc(e.message)}</div>`;
+    delete panel.dataset.loaded;
+    return;
+  }
+  const evs = res.events || [];
+  panel.innerHTML = `<div class="pf-acts">${evs.map(ev => `
+    <div class="pf-act"><i></i><div>
+      <div class="a">${kind === "history" ? esc(ev.new_status_label || "") + (ev.comment ? ` <span>· ${esc(ev.comment)}</span>` : "") : esc(ev.action || "") + (ev.detail ? ` <span>· ${esc(ev.detail)}</span>` : "")}</div>
+      <div class="m">${esc(ev.actor || "")} · ${esc(String(ev.created_at || "").slice(0, 16))}</div>
+    </div></div>`).join("") || `<div class="pf-quiet">Пока пусто</div>`}</div>
+    ${res.has_more ? `<button class="pf-link" data-log-more style="margin-top:10px;">показать всё →</button>` : ""}`;
+  panel.querySelector("[data-log-more]")?.addEventListener("click", () => openReportLogSheet(publicId, kind));
 }
 
 // Скачивание — кнопка, а не <a href>. Ссылка с target="_blank" внутри
