@@ -11,6 +11,7 @@ import { resetAssignmentsBaseline } from "./notifications.js";
 import { resetFeedBadge } from "./feed-badge.js";
 import { pingPresence } from "./presence.js";
 import { loadTitlebarTeam } from "./profile.js";
+import { refreshInbox, resetInbox } from "./inbox.js";
 
 // Экран загрузки при старте — тот же маскот/прогресс-бар, что и в
 // мини-аппе (см. #splash в miniapp/static/index.html). Держим минимум
@@ -116,6 +117,7 @@ export function showAuth(err) {
   // decorations, см. window-chrome.js), поэтому кнопки приложения в ней
   // прячем отдельно — до входа «Обновить» и «Выйти» бессмысленны.
   $("#titlebar-apps").hidden = true;
+  resetInbox();
   // Всегда перезаписываем, а не только при наличии err: иначе после
   // «Сессия истекла: …» и обычного выхода старое сообщение продолжало
   // висеть над формой входа.
@@ -134,6 +136,7 @@ export function showApp() {
   pingPresence();
   loadTitlebarTeam();
   loadSidebarStatusCounts();
+  refreshInbox();
 }
 
 async function submitCode() {
