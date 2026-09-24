@@ -12,7 +12,7 @@
 //
 // API: /chats (общий, личные, channels), /chats/{id}/messages,
 // POST /chats/{id}/messages {text}, …/messages/{mid}/delete,
-// POST /chats/{id}/read, POST /chats/dm, /channels*, /topics/{id}/delete.
+// POST /chats/{id}/read, POST /chats/{id}/clear {both}, POST /chats/dm, /channels*, /topics/{id}/delete.
 // Ключ беседы: "general", "dm:<a>:<b>", "t:<topic_id>". Обновление — опрос.
 
 import { state } from "./state.js";
@@ -244,6 +244,8 @@ function threadHeadHtml(c) {
       <div class="ms-head-text"><b>${title}</b><span>${sub}</span></div>
       ${c.kind === "general" ? `<div class="ms-people">${c.participants.slice(0, 6).map(p => `<span class="avatar-bubble" data-avatar-for="${p.telegram_id}" title="${esc(p.name)}">${initial(p.name)}</span>`).join("")}${c.participants.length > 6 ? `<span class="ms-people-more">+${c.participants.length - 6}</span>` : ""}</div>` : ""}
       ${c.kind === "dm" && c.peer ? `<button type="button" class="btn" data-open-profile="${c.peer.telegram_id}">${OPEN_ICON}Профиль</button>` : ""}
+      ${c.kind === "dm" ? `<button type="button" class="btn" data-clear-dm title="Переписка пропадёт только у вас, у собеседника останется">${TRASH_ICON}Очистить</button>` : ""}
+      ${c.kind === "dm" && canModerate ? `<button type="button" class="btn danger" data-clear-dm-both title="Удалить переписку целиком — у вас и у собеседника">${TRASH_ICON}У обоих</button>` : ""}
       ${c.kind === "topic" && canModerate ? `
         <button type="button" class="btn" data-del-topic="${c.topic_id}" title="Удалить тему со всей перепиской">${TRASH_ICON}Тему</button>
         <button type="button" class="btn danger" data-del-channel="${c.channel_id}" title="Удалить канал со всеми темами">${TRASH_ICON}Канал</button>` : ""}
@@ -285,6 +287,25 @@ function wireThread(el, c) {
   const input = el.querySelector("#ms-input");
   const suggest = el.querySelector("#ms-suggest");
   el.querySelector("[data-open-profile]")?.addEventListener("click", e => openUserProfile(Number(e.currentTarget.dataset.openProfile)));
+  // Личная переписка: «Очистить» — только у себя (у собеседника всё
+  // остаётся, новое сообщение снова покажет беседу); «У обоих» — владелец
+  // удаляет её целиком с обеих сторон.
+  const clearDm = async both => {
+    const who = c.peer ? c.peer.name : "собеседником";
+    const q = both
+      ? `Удалить всю переписку с ${who} у вас обоих? Вернуть нельзя.`
+      : `Очистить переписку с ${who}? Она пропадёт только у вас, у собеседника останется.`;
+    if (!confirm(q)) return;
+    try {
+      await apiPost(`/chats/${encodeURIComponent(c.id)}/clear`, { both });
+      toast(both ? "Переписка удалена у обоих" : "Переписка очищена", "success");
+      activeId = "general";
+      await refreshLists();
+      await openChat(activeId);
+    } catch (e) { toast(e.message, "error"); }
+  };
+  el.querySelector("[data-clear-dm]")?.addEventListener("click", () => clearDm(false));
+  el.querySelector("[data-clear-dm-both]")?.addEventListener("click", () => clearDm(true));
   el.querySelector("[data-del-topic]")?.addEventListener("click", async () => {
     if (!confirm(`Удалить тему «${c.title}» со всей перепиской? Вернуть нельзя.`)) return;
     try {
