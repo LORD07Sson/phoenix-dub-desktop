@@ -390,6 +390,14 @@ export function openDmWith(telegramId) {
   else pendingDm = telegramId;
 }
 
+// Открыть конкретную беседу по ключу (general, dm:…, t:…) — из центра
+// уведомлений. Тот же приём: вкладка может быть ещё не загружена.
+let pendingKey = null;
+export function openChatKey(key) {
+  if ($("#ms-list") && chats.length && findChat(key)) openChat(key);
+  else pendingKey = key;
+}
+
 async function startDm(telegramId) {
   $("#ms-picker").hidden = true;
   try {
@@ -561,6 +569,7 @@ export async function loadMessages() {
   }
   if (!activeId || !findChat(activeId)) activeId = chats[0] ? chats[0].id : null;
   if (pendingDm) { const tid = pendingDm; pendingDm = null; await startDm(tid); }
+  else if (pendingKey && findChat(pendingKey)) { const k = pendingKey; pendingKey = null; await openChat(k); }
   else if (activeId) await openChat(activeId); else renderThread();
   window.clearInterval(pollTimer);
   pollTimer = window.setInterval(poll, POLL_MS);

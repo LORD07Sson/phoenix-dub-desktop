@@ -14,6 +14,7 @@ import { setDropTarget } from "./file-drop.js";
 import { recordRecentReport } from "./recent-reports.js";
 import { toggleFocusMode, syncFocusButton } from "./focus-mode.js";
 import { loadAvatars } from "./profile.js";
+import { createPlayer, isAudioFile } from "./player.js";
 
 // Ключи "kind" — ровно те, что отдаёт серверный audio_qc.py (miniapp/audio_qc.py):
 // "clip"/"noise"/"silence"/"silence_long"/"no_speech". Раньше здесь жил набор
@@ -52,6 +53,8 @@ export async function openReportDetail(publicId) {
   // вызывается на каждое действие, и сбрасывать выбор на каждом было бы
   // неприятно.
   let notesByTime = false;
+  // Плеер дорожки переживает перерисовки карточки (см. player.js).
+  let player = null;
 
   // Переход к соседнему отчёту выборки «Списка», не закрывая карточку
   // (как стрелки в шторке мини-аппа). Соседи считаются заново на каждый
@@ -75,6 +78,7 @@ export async function openReportDetail(publicId) {
   new MutationObserver((_muts, obs) => {
     if (!overlay.isConnected) {
       obs.disconnect();
+      if (player) { player.destroy(); player = null; }
       setDropTarget(null);
       document.removeEventListener("report-file-uploaded", onFileUploaded);
       document.removeEventListener("report-notes-added", onFileUploaded);
@@ -174,6 +178,7 @@ export async function openReportDetail(publicId) {
       <div class="rd-body">
         <div class="rd-main">
           <div class="rd-panel" data-rd-panel="main">
+            <div id="rd-player-host"></div>
             <div class="rd-sec">
               <h3>Пайплайн ${hasPipe ? `<span class="n">${detail.pipeline.filter(s => s.done).length} из ${detail.pipeline.length}</span>` : ""}
                 <button class="pf-link rd-h-act" id="pipe-edit-toggle">${hasPipe ? "изменить" : ""}</button></h3>
@@ -474,6 +479,35 @@ export async function openReportDetail(publicId) {
         }
       });
     });
+    // Плеер: создаётся по первому «▶ Слушать» и дальше просто
+    // переставляется в новую разметку после каждой перерисовки.
+    const audioFiles = files.files.filter(isAudioFile);
+    const playerHost = sheet.querySelector("#rd-player-host");
+    if (player && playerHost) {
+      playerHost.appendChild(player.el);
+      player.setFiles(audioFiles);
+      player.setNotes(notes.notes);
+      player.refresh();
+    }
+    sheet.querySelectorAll("[data-play-file]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        if (!player) {
+          player = createPlayer({
+            publicId,
+            onAddNote: async (seconds, text) => {
+              await apiPost(`/report/${publicId}/notes`, { text: noteTimePrefix(seconds) + text });
+              await render();
+            },
+            onClose: () => { player = null; },
+          });
+        }
+        playerHost.appendChild(player.el);
+        player.setFiles(audioFiles);
+        player.setNotes(notes.notes);
+        player.open(Number(btn.dataset.playFile));
+        player.el.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
     sheet.querySelectorAll("[data-qc-file]").forEach(btn => {
       btn.addEventListener("click", async () => {
         const fileId = btn.dataset.qcFile;
@@ -591,6 +625,7 @@ function fileHtml(f) {
   const isAudio = audioRe.test(f.file_type || "") || audioRe.test(f.file_name || "");
   return `<div class="file-item">
     <div>${esc(FILE_ICONS[f.file_type] || "📎")} ${esc(f.file_name || f.file_type)} <span class="meta">${esc(f.file_size_label || "")}</span></div>
+    ${isAudio ? `<button class="btn primary" style="padding:4px 10px; font-size:12px;" data-play-file="${f.id}">▶ Слушать</button>` : ""}
     ${isAudio ? `<button class="btn" style="padding:4px 10px; font-size:12px;" data-qc-file="${f.id}">AI-проверка</button>` : ""}
     <button class="icon-btn" data-download-file="${f.id}" data-file-name="${esc(f.file_name || "")}" title="Скачать">⬇️</button>
     <div id="qc-result-${f.id}" style="width:100%;"></div>

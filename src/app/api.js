@@ -112,6 +112,44 @@ function stripStatusEmoji(node) {
   return node;
 }
 
+// Файл целиком в память — для плеера дорожки: <audio> по blob-ссылке
+// умеет перематываться куда угодно, а токен уходит заголовком, не в
+// адресе. onProgress(загружено, всего) — всего бывает 0, если сервер не
+// назвал размер.
+export async function apiBlob(path, onProgress) {
+  const headers = {};
+  if (state.token) headers["X-Init-Data"] = state.token;
+  netStart();
+  try {
+    let resp;
+    try {
+      resp = await fetch(`${API_BASE}${path}`, { headers });
+    } catch (e) {
+      throw new Error(`Нет связи с сервером: ${e.message}`);
+    }
+    if (!resp.ok) {
+      let detail = resp.status;
+      try { detail = (await resp.json()).detail ?? detail; } catch (_) {}
+      throw new Error(typeof detail === "string" ? detail : `Ошибка ${detail}`);
+    }
+    const total = Number(resp.headers.get("Content-Length")) || 0;
+    if (!resp.body || !onProgress) return await resp.blob();
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      got += value.length;
+      onProgress(got, total);
+    }
+    return new Blob(chunks);
+  } finally {
+    netEnd();
+  }
+}
+
 export function apiGet(path, params) {
   const qs = params ? "?" + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== "" && v != null)) : "";
   return api("GET", path + qs);
