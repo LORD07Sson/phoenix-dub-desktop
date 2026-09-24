@@ -315,14 +315,20 @@ async function castVote(titleId, choice, btn) {
     // счётчиком — числа там показывают отдельные .td-stat-pill.
     setCount(likeBtn.querySelector("span"), r.likes);
     setCount(dislikeBtn.querySelector("span"), r.dislikes);
-    const row = btn.closest("[data-title-row]");
-    if (row) {
-      const t = currentTitles.find(x => x.id === titleId);
-      if (t) {
-        t.likes = r.likes; t.dislikes = r.dislikes; t.my_vote = r.my_vote;
-        row.querySelector(".tt-approval-cell").innerHTML = approvalCellHtml(t);
-      }
-    }
+    // Модель обновляем всегда, а не только из строки таблицы: баннер
+    // перерисовывает слайд из этих объектов, и после «Нравится» →
+    // другой тайтл → обратно там всплывал старый счётчик.
+    const t = currentTitles.find(x => x.id === titleId);
+    if (t) { t.likes = r.likes; t.dislikes = r.dislikes; t.my_vote = r.my_vote; }
+    // Та же пара кнопок есть и в баннере, и в таблице/сетке — синхронизируем.
+    document.querySelectorAll(`[data-vote-title="${titleId}"]`).forEach(b => {
+      if (b === likeBtn || b === dislikeBtn) return;
+      const like = b.dataset.voteChoice === "1";
+      b.classList.toggle(like ? "on-like" : "on-dislike", r.my_vote === (like ? 1 : -1));
+      setCount(b.querySelector("span"), like ? r.likes : r.dislikes);
+    });
+    const row = document.querySelector(`[data-title-row="${titleId}"]`);
+    if (row && t) row.querySelector(".tt-approval-cell").innerHTML = approvalCellHtml(t);
     const sheet = btn.closest(".sheet");
     if (sheet) {
       setCount(sheet.querySelector(".td-stat-pill.like"), `👍 ${r.likes}`);
