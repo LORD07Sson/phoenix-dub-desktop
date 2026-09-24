@@ -188,6 +188,14 @@ function heroTitles(titles) {
   return titles.slice().sort(TABLE_SORTS.rank).slice(0, HERO_COUNT);
 }
 
+// «№2 в сезоне» читалось как «2-й сезон», поэтому место — «Топ-2».
+// Без единого голоса место в топе ничего не значит.
+function heroRankLabel(t, rank, leader) {
+  if (leader) return "Лидер голосования";
+  if (!voteActivity(t)) return "Ждёт голосов";
+  return `Топ-${rank}`;
+}
+
 function heroBodyHtml(t, rank, seasonName) {
   const det = detailsCache.get(t.id);
   const posterSrc = imgProxy(t.poster_url);
@@ -199,7 +207,7 @@ function heroBodyHtml(t, rank, seasonName) {
     <div class="tl-hero-bg"${posterSrc ? ` style="background-image:url('${posterSrc}')"` : ""}></div>
     ${posterSrc ? `<img class="tl-hero-poster" src="${posterSrc}" alt="" data-open-title-detail="${t.id}">` : ""}
     <div class="tl-hero-body">
-      <span class="tl-hero-eyebrow">${leader ? "Лидер голосования" : `№${rank} в сезоне`}</span>
+      <span class="tl-hero-eyebrow">${heroRankLabel(t, rank, leader)}</span>
       <h2 class="tl-hero-name">${esc(t.name)}</h2>
       ${meta.length ? `<div class="tl-hero-meta">${meta.map(esc).join("<i></i>")}</div>` : ""}
       ${det && det.description ? `<p class="tl-hero-desc">${esc(det.description)}</p>` : (det === undefined ? `<p class="tl-hero-desc"><span class="tt-loading"></span></p>` : "")}
