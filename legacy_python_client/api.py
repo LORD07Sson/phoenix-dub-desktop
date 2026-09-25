@@ -10,7 +10,7 @@ import requests
 
 from config import API_BASE, REQUEST_TIMEOUT
 
-logger = logging.getLogger("phoenix_desktop")
+logger = logging.getLogger("project_desktop")
 
 
 class ApiError(Exception):

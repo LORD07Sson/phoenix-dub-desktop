@@ -201,7 +201,7 @@ jobs:
             --packVersion "${{ env.PKG_VERSION }}" \
             --packDir pack_dir \
             --mainExe phoenix-dub-desktop.exe \
-            --packTitle "PHOENIX DUB Desktop" \
+            --packTitle "Project Desktop" \
             --icon src-tauri/icons/icon.ico \
             --releaseNotes release_notes.md \
             --outputDir release_output
@@ -216,7 +216,7 @@ jobs:
             --token "${{ secrets.GITHUB_TOKEN }}" \
             --publish \
             --tag "v${{ env.PKG_VERSION }}" \
-            --releaseName "PHOENIX DUB v${{ env.PKG_VERSION }}"
+            --releaseName "Project v${{ env.PKG_VERSION }}"
 
       # Та же страховка, что и в build-alpha.yml: vpk умеет выйти с кодом
       # 0, оставив релиз черновиком — сборка зелёная, а обновления никто

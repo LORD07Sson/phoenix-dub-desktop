@@ -1,4 +1,4 @@
-// PHOENIX DUB Desktop — точка входа. В основном vanilla JS с ES-модулями
+// Project Desktop — точка входа. В основном vanilla JS с ES-модулями
 // (Overview.jsx — первый компонент на SolidJS, см. историю миграции на
 // Vite) — ходит напрямую в тот же REST API, что и мини-апп, через fetch().
 //
@@ -13,6 +13,7 @@
 // импортируется ни одним из уже переходимых отсюда — добавьте import
 // сюда тоже, иначе его код просто никогда не выполнится.
 
+import "./migrate-keys.js"; // первым: переносит старые ключи localStorage
 import { installFileLogging } from "./applog.js";
 import { appWindow } from "./tauri.js";
 import { installWindowChrome } from "./window-chrome.js";

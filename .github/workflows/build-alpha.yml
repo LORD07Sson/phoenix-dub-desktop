@@ -164,7 +164,7 @@ jobs:
             --packVersion "${{ env.PKG_VERSION }}" \
             --packDir pack_dir \
             --mainExe phoenix-dub-desktop.exe \
-            --packTitle "PHOENIX DUB Desktop" \
+            --packTitle "Project Desktop" \
             --icon src-tauri/icons/icon.ico \
             --releaseNotes release_notes.md \
             --channel alpha \
@@ -217,7 +217,7 @@ jobs:
               --publish \
               --pre \
               --tag alpha-latest \
-              --releaseName "PHOENIX DUB alpha (${{ env.SHORT_SHA }})"
+              --releaseName "Project alpha (${{ env.SHORT_SHA }})"
           }
 
           for i in 1 2 3; do

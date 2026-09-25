@@ -1,4 +1,4 @@
-/* PHOENIX DUB Desktop — те же цветовые токены, что и в мини-аппе
+/* Project Desktop — те же цветовые токены, что и в мини-аппе
    (miniapp/static/index.html), плюс светлая тема и более "десктопная"
    плотная раскладка (таблица, боковые панели), которой у мини-аппа нет. */
 
@@ -28,7 +28,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
      поля в интерфейсе не было. Переопределяется ниже в
      :root[data-theme="light"] — тема переключаема (theme-toggle). */
   color-scheme: dark;
-  /* Цвета логотипа PHOENIX DUB: почти чёрный тёплый фон, огненное
+  /* Цвета логотипа Project: почти чёрный тёплый фон, огненное
      свечение снизу, акцент — перо от оранжевого к золотому. */
   --bg: #070403;
   --bg-2: #0d0806;
@@ -2374,7 +2374,7 @@ kbd {
   padding: 2px 9px; border-radius: 999px; white-space: nowrap;
 }
 
-/* Строки сервисов (вкладка «Сервисы») — список как в макете Phoenix:
+/* Строки сервисов (вкладка «Сервисы») — список как в макете Project:
    точка, имя/описание, статус-пилюля, latency, аптайм справа. */
 .svc-list-cell { padding: 8px 4px 4px; }
 .svc-list-cell > h3 { padding: 8px 14px 0; }
@@ -2838,7 +2838,7 @@ body.focus-mode .report-detail-overlay .sheet {
 }
 .sheet .detail-section .icon-btn:hover { background: var(--surface-2); border-color: var(--line); color: var(--ink); }
 
-/* ================= QC звука и инструменты ffmpeg — вёрстка Phoenix =================
+/* ================= QC звука и инструменты ffmpeg — вёрстка Project =================
    Перекрывает ранние правила этих модалок: плоские карточки var(--bg-2)
    внутри модалки, мелкие заглавные подписи, SVG-иконки вместо эмодзи. */
 
@@ -3054,7 +3054,7 @@ body.focus-mode .report-detail-overlay .sheet {
 @media (max-width: 1100px) { .tt-studio, .tt-table thead th:nth-child(5) { display: none; } }
 @media (prefers-reduced-motion: reduce) { .tt-loading { animation: none; } }
 
-/* ---------- Логотип Phoenix: прорисовка при запуске, поворот и блик при наведении ---------- */
+/* ---------- Логотип Project: прорисовка при запуске, поворот и блик при наведении ---------- */
 .brand-logo {
   position: relative; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
@@ -3945,7 +3945,7 @@ body.focus-mode .report-detail-overlay .sheet {
 @media (max-width: 860px) { .auth-split { grid-template-columns: 1fr; gap: 28px; width: min(420px, 92vw); } .auth-points, .auth-beam { display: none; } .auth-brand { align-items: center; } }
 @media (prefers-reduced-motion: reduce) { .auth-logo, .auth-beam, .auth-points li, .code-cell.filled { animation: none; } }
 
-/* ---------- Анимация надписи PHOENIX DUB на экране входа ----------
+/* ---------- Анимация надписи Project на экране входа ----------
    1) буквы влетают по одной снизу с размытием;
    2) по надписи раз в несколько секунд пробегает огненный блик;
    3) из-под «DUB» поднимаются искры. */

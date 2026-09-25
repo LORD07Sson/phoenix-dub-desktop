@@ -25,7 +25,7 @@ class LoginDialog(QDialog):
         self.api = api
         self.session: dict | None = None
 
-        self.setWindowTitle("Вход — PHOENIX DUB Desktop")
+        self.setWindowTitle("Вход — Project Desktop")
         self.setFixedWidth(360)
 
         layout = QVBoxLayout(self)

@@ -48,7 +48,7 @@ const ME = {
   role_breakdown: [],
   team: { count: 17, preview: [{ telegram_id: 2, name: "ALUCARD" }] },
   badges: [
-    { id: 1, icon: "🔥", label: "Феникс недели", rarity: "epic", unlocked: true },
+    { id: 1, icon: "🔥", label: "Лучший за неделю", rarity: "epic", unlocked: true },
     { id: 2, icon: "🌱", label: "Первый отчёт", rarity: "common", unlocked: true },
     { id: 3, icon: "🏆", label: "50+ закрыто", rarity: "legendary", unlocked: false, current: 1, target: 50 },
     { id: 4, icon: "⏱", label: "90%+ вовремя", rarity: "rare", unlocked: false },
@@ -126,7 +126,7 @@ const fill = profile.querySelector(".tenure-track i");
 check("полоска стажа — 60% между 30 и 180", fill && fill.style.width === "60%", fill ? fill.style.width : "нет полоски");
 
 const chips = Array.from(profile.querySelectorAll(".pf-badge.won")).map(el => el.textContent.replace(/\s+/g, " ").trim());
-check("полученные награды — золотыми плитками", chips.length === 2 && chips.some(t => t.includes("Феникс недели")), chips.join(" | "));
+check("полученные награды — золотыми плитками", chips.length === 2 && chips.some(t => t.includes("Лучший за неделю")), chips.join(" | "));
 
 const todos = Array.from(profile.querySelectorAll(".pf-badge:not(.won)")).map(el => el.textContent.replace(/\s+/g, " ").trim());
 check("неполученная награда с прогрессом", todos.some(t => t.includes("50+ закрыто") && t.includes("1 / 50")), todos.join(" | "));

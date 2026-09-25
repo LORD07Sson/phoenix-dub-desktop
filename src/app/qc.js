@@ -276,7 +276,7 @@ async function notifyBatchDoneIfHidden(total, bad, broken) {
     const body = bad || broken
       ? `${bad} с замечаниями${broken ? `, ${broken} не прочитано` : ""} из ${total}`
       : `Замечаний нет ни в одном из ${total}`;
-    sendNotification({ title: "PHOENIX DUB — QC завершён", body });
+    sendNotification({ title: "Project — QC завершён", body });
   } catch {
     // нет доступа к состоянию окна/уведомлениям — молча пропускаем
   }

@@ -11,7 +11,7 @@
 // (admin.js, profile.js, titles-admin.js — те же ".sheet-wide") прятать
 // чужую шапку смысла нет, там сам диалог и есть вся суть экрана.
 
-const PREF_KEY = "phoenix-focus-mode-pref";
+const PREF_KEY = "project-focus-mode-pref";
 
 export function focusModePreferred() {
   try { return localStorage.getItem(PREF_KEY) === "1"; } catch (_) { return false; }

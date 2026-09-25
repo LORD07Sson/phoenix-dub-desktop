@@ -43,7 +43,7 @@ const TAB_BODIES = ["#overview-body", "#board-body", "#titles-body", "#calendar-
 // целыми днями держит одну и ту же вкладку (обычно «Доску»), и
 // открывать заново «Обзор» после каждого закрытия окна — лишний клик,
 // который набегает десятки раз в день.
-const LAST_TAB_KEY = "phoenix-last-tab";
+const LAST_TAB_KEY = "project-last-tab";
 
 // Вкладки, которые видит рядовой участник студии.
 export const MEMBER_TABS = new Set(["titles", "messages", "team", "profile"]);

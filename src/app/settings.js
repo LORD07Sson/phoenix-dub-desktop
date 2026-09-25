@@ -119,7 +119,7 @@ async function openSettings() {
           <h3>Обновления</h3>
           <div class="st-version">
             <div class="st-version-logo">${ic('<path d="M5 5L19 19M19 5L5 19"/>')}</div>
-            <div class="st-text"><b>PHOENIX DUB Desktop</b><span>версия ${esc(APP_VERSION)}</span></div>
+            <div class="st-text"><b>Project Desktop</b><span>версия ${esc(APP_VERSION)}</span></div>
             <button class="btn primary" id="s-check-update">Проверить обновления</button>
           </div>
           <div class="st-row">
@@ -290,7 +290,7 @@ $("#open-settings").addEventListener("click", openSettings);
 // пользователя должен сходить на сервер всегда, даже если автопроверка
 // была недавно.
 const AUTO_CHECK_THROTTLE_MS = 4 * 60 * 60 * 1000; // 4 часа
-const AUTO_CHECK_STORAGE_KEY = "phoenix_last_update_check_at";
+const AUTO_CHECK_STORAGE_KEY = "project_last_update_check_at";
 
 export function maybeAutoCheckUpdates() {
   let last = 0;

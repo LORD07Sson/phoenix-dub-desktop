@@ -47,7 +47,7 @@ function voteActivity(t) { return t.likes + t.dislikes; }
 
 // Вид вкладки: карточки (постеры) или таблица с подробностями — как
 // переключатель table/cards в мини-аппе. Личная настройка.
-function viewKey() { return `phoenix_titles_view_${state.telegramId || "anon"}`; }
+function viewKey() { return `project_titles_view_${state.telegramId || "anon"}`; }
 function getView() {
   try { return localStorage.getItem(viewKey()) === "table" ? "table" : "cards"; } catch (_) { return "cards"; }
 }

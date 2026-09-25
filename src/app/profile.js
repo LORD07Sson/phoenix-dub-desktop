@@ -249,7 +249,7 @@ function loadStructureHtml(me) {
 function profileHeaderHtml(d, isSelf, asParts) {
   const tier = tenureTier(d.member_since_days);
   const rMeta = roleMeta(d.role);
-  const roleLabel = d.role ? esc(d.role) : "Участник PHOENIX";
+  const roleLabel = d.role ? esc(d.role) : "Участник Project";
 
   let joinedLine = "";
   if (d.created_at) {
@@ -482,7 +482,7 @@ function myHeroHtml(d) {
             <span class="nm">${esc(d.display_name || d.name)}</span>
             ${d.is_developer || d.is_owner ? `<span class="dev-pill">DEV</span>` : ""}
             ${rankTagHtml(d.studio_rank)}
-            <span class="role-tag" style="--tag-c:${rMeta.c}">${rMeta.ic} ${d.role ? esc(d.role) : "Участник PHOENIX"}</span>
+            <span class="role-tag" style="--tag-c:${rMeta.c}">${rMeta.ic} ${d.role ? esc(d.role) : "Участник Project"}</span>
           </div>
           <div class="pf-meta">${meta}</div>
           ${about}
@@ -648,13 +648,13 @@ async function suggestGoal(root) {
 function notifyGoalReachedIfNeeded(me, goalSet, goalOver, goalDone) {
   if (!goalSet || !goalOver) return;
   const monthKey = new Date().toISOString().slice(0, 7);
-  const flagKey = `phoenix_goal_notified_${me.telegram_id}_${monthKey}`;
+  const flagKey = `project_goal_notified_${me.telegram_id}_${monthKey}`;
   try {
     if (localStorage.getItem(flagKey)) return;
     localStorage.setItem(flagKey, "1");
   } catch (_) { return; } // приватный режим/запрет хранилища — не критично, просто без уведомления
   sendNotification({
-    title: "PHOENIX DUB",
+    title: "Project",
     body: `Цель месяца выполнена — ${goalDone} из ${me.monthly_goal} отчётов закрыто. 🎯`,
   });
 }
@@ -791,7 +791,7 @@ export async function openTeamSheet() {
 }
 
 // Открыть личный чат в Telegram — во внешнем приложении/браузере
-// (plugin:shell|open), а не внутри окна PHOENIX DUB: это desktop-клиент
+// (plugin:shell|open), а не внутри окна Project: это desktop-клиент
 // студии, не браузер, встраивать чужой веб-клиент Telegram сюда незачем.
 async function openTelegramProfile(username) {
   try {

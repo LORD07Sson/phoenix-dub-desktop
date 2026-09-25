@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "PHOENIX DUB Desktop",
+  "productName": "Project Desktop",
   "version": "0.6.0",
   "identifier": "com.phoenixdub.desktop",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "PHOENIX DUB Desktop",
+        "title": "Project Desktop",
         "width": 1180,
         "height": 760,
         "minWidth": 760,
@@ -41,7 +41,7 @@
       "icons/icon.ico"
     ],
     "category": "Utility",
-    "shortDescription": "Клиент студии дубляжа PHOENIX DUB",
+    "shortDescription": "Клиент студии дубляжа Project",
     "longDescription": "Десктоп-клиент студии: список отчётов, массовые операции, локальный QC звука, трей с уведомлениями."
   }
 }

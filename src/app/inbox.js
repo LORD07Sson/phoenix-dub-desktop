@@ -20,7 +20,7 @@ let items = [];
 let filter = "all";
 let lastUnread = 0;
 
-function key() { return `phoenix_inbox_${state.telegramId || "anon"}`; }
+function key() { return `project_inbox_${state.telegramId || "anon"}`; }
 function readState() {
   try { return JSON.parse(localStorage.getItem(key()) || "{}") || {}; } catch (_) { return {}; }
 }

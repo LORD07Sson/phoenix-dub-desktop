@@ -563,8 +563,8 @@ mod tests {
             return;
         }
         let dir = std::env::temp_dir();
-        let src = dir.join("phoenix_test_source.wav");
-        let out = dir.join("phoenix_test_clip.wav");
+        let src = dir.join("project_test_source.wav");
+        let out = dir.join("project_test_clip.wav");
 
         // 5-секундный тон 440Гц как исходник.
         let gen = Command::new("ffmpeg")

@@ -1,6 +1,6 @@
 // Вкладка «Аналитика» — оборачиваемость студии за 30 дней (сколько
 // закрывается, за сколько в среднем, попадаем ли в сроки) плюс
-// загрузка по колонкам доски и топ исполнителей. Тот же /api/analytics/phoenix,
+// загрузка по колонкам доски и топ исполнителей. Тот же /api/analytics/project,
 // что и клетка «Загрузка по статусам»/«Топ исполнителей» — один запрос
 // на весь экран, без похода за board/team по отдельности.
 
@@ -9,7 +9,7 @@ import { $, esc } from "./utils.js";
 
 const WORKLOAD_COLOR_VAR = { draft: "--s-draft", working: "--s-work", review: "--s-review", completed: "--s-done" };
 // Сервер отдаёт подписи колонок по-английски (Pending/In Progress/...,
-// см. _PHOENIX_BOARD_GROUPS в server.py) — тот же смысл, что и у
+// см. _PROJECT_BOARD_GROUPS в server.py) — тот же смысл, что и у
 // референса, но остальной интерфейс студии целиком на русском (та же
 // подмена, что уже сделана для превью-канбана на Обзоре).
 const WORKLOAD_LABELS = { draft: "Черновики", working: "В работе", review: "На проверке", completed: "Завершено" };
@@ -111,7 +111,7 @@ export async function loadAnalytics() {
   root.innerHTML = `<div class="skeleton-wrap"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>`;
   let d;
   try {
-    d = await apiGet("/analytics/phoenix");
+    d = await apiGet("/analytics/project");
   } catch (e) {
     root.innerHTML = `<div class="bento-empty">Не удалось загрузить аналитику: ${esc(e.message)}</div>`;
     return false;

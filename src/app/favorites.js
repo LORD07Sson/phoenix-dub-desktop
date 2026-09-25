@@ -9,7 +9,7 @@
 import { state } from "./state.js";
 
 function storageKey() {
-  return `phoenix_favorites_${state.telegramId || "anon"}`;
+  return `project_favorites_${state.telegramId || "anon"}`;
 }
 
 function readSet() {

@@ -22,7 +22,7 @@ const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн"
 // Цвета блоков серий: тайтл получает один и тот же оттенок всю неделю.
 const TITLE_HUES = ["#3b5bdb", "#9c36b5", "#c2255c", "#e8590c", "#2b8a3e", "#1098ad", "#5f3dc4", "#d9480f"];
 
-const FILTER_KEY = () => `phoenix_calendar_filters_${state.telegramId || "anon"}`;
+const FILTER_KEY = () => `project_calendar_filters_${state.telegramId || "anon"}`;
 const LAYERS = { episodes: "Серии", deadlines: "Дедлайны", birthdays: "Дни рождения", reminders: "Мои напоминания" };
 
 let weekStart = startOfWeek(new Date());

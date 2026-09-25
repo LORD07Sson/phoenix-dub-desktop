@@ -12,7 +12,7 @@ import os
 
 from config import APP_NAME, ORG_NAME
 
-logger = logging.getLogger("phoenix_desktop")
+logger = logging.getLogger("project_desktop")
 
 _KEYRING_SERVICE = f"{ORG_NAME}.{APP_NAME}"
 _KEYRING_USERNAME = "session"

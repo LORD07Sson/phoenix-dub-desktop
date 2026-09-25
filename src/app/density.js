@@ -4,7 +4,7 @@
 // компактный режим имеет смысл — в мини-аппе с тач-целями такой режим
 // был бы просто неудобен, там его нет и не должно быть.
 
-const KEY = "phoenix-density";
+const KEY = "project-density";
 
 export function applyDensity(density) {
   document.documentElement.dataset.density = density;

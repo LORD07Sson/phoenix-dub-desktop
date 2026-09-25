@@ -234,7 +234,7 @@ mod tests {
     use super::*;
 
     fn tmp() -> PathBuf {
-        let d = std::env::temp_dir().join(format!("phoenix_scope_{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("project_scope_{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }

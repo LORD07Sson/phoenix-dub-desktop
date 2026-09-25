@@ -28,7 +28,7 @@ class TrayManager:
         self.main_window = main_window
 
         self.tray_icon = QSystemTrayIcon(icon, app)
-        self.tray_icon.setToolTip("PHOENIX DUB Desktop")
+        self.tray_icon.setToolTip("Project Desktop")
 
         menu = QMenu()
         menu.addAction("Открыть", self.show_window)

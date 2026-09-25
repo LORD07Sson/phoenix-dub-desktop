@@ -8,7 +8,7 @@ import { state } from "./state.js";
 import { apiGet, apiPost, toast } from "./api.js";
 import { esc } from "./utils.js";
 
-const DEV_MODE_KEY = "phoenix-dev-mode";
+const DEV_MODE_KEY = "project-dev-mode";
 
 export function isDevModeOn() {
   try { return localStorage.getItem(DEV_MODE_KEY) === "1"; } catch (_) { return false; }

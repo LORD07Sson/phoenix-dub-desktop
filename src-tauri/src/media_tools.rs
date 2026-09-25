@@ -548,7 +548,7 @@ fn cut_segment_by_keyframe(
 /// Рабочий файл во временном каталоге: список для concat-демуксера,
 /// палитра для GIF, промежуточный кусок для точной резки. Раньше такой
 /// файл писался в общий temp с предсказуемым именем
-/// (`phoenix_concat_<pid>.txt`) — на машине с несколькими
+/// (`project_concat_<pid>.txt`) — на машине с несколькими
 /// пользователями это классический путь для symlink-подставы, а два
 /// параллельных запуска затирали список друг другу. Теперь — свой
 /// каталог со случайным именем, и он же убирается за собой в Drop, даже
@@ -580,7 +580,7 @@ impl TempWork {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0)
         );
-        let dir = std::env::temp_dir().join(format!("phoenix_mt_{unique}"));
+        let dir = std::env::temp_dir().join(format!("project_mt_{unique}"));
         std::fs::create_dir(&dir)
             .map_err(|e| format!("Не удалось подготовить временный каталог: {e}"))?;
         Ok(dir)
@@ -1999,7 +1999,7 @@ mod tests {
         let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
-        let src = make_test_video(&dir, "phoenix_mt_probe.mp4", 3);
+        let src = make_test_video(&dir, "project_mt_probe.mp4", 3);
         let info = probe_media(&src).expect("probe_media не должен падать на валидном файле");
         assert!((info.duration - 3.0).abs() < 0.2, "duration ~3s, получили {}", info.duration);
         assert_eq!(info.video.as_ref().unwrap().width, Some(320));
@@ -2012,7 +2012,7 @@ mod tests {
         let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
-        let src = make_test_video(&dir, "phoenix_mt_kf.mp4", 3);
+        let src = make_test_video(&dir, "project_mt_kf.mp4", 3);
         let kf = probe_keyframes(&src).expect("probe_keyframes не должен падать");
         // Не проверяем конкретное значение первой метки — оно зависит от
         // container/muxer edit-list деталей (может быть не 0.0 даже для
@@ -2037,7 +2037,7 @@ mod tests {
         let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
-        let src = make_test_video(&dir, "phoenix_mt_cut.mp4", 6);
+        let src = make_test_video(&dir, "project_mt_cut.mp4", 6);
         let segments = vec![
             CutSegment { start: 0.0, end: 2.0 },
             CutSegment { start: 3.0, end: 5.0 },
@@ -2065,7 +2065,7 @@ mod tests {
         let dir = std::env::temp_dir();
         // GOP=50 при 25 fps — опорный кадр раз в две секунды. Просим
         // отрезок [3.0, 7.0]: его начало заведомо НЕ на опорном кадре.
-        let out = dir.join("phoenix_mt_precise_src.mp4");
+        let out = dir.join("project_mt_precise_src.mp4");
         let gen = Command::new("ffmpeg")
             .args([
                 "-v", "error", "-y",
@@ -2081,8 +2081,8 @@ mod tests {
         let src = out.to_string_lossy().into_owned();
         let segments = vec![CutSegment { start: 3.0, end: 7.0 }];
 
-        let rough_dir = dir.join("phoenix_precise_rough");
-        let exact_dir = dir.join("phoenix_precise_exact");
+        let rough_dir = dir.join("project_precise_rough");
+        let exact_dir = dir.join("project_precise_exact");
         std::fs::create_dir_all(&rough_dir).unwrap();
         std::fs::create_dir_all(&exact_dir).unwrap();
 
@@ -2116,7 +2116,7 @@ mod tests {
         let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
-        let src = make_test_video(&dir, "phoenix_mt_cut_mergeonly.mp4", 4);
+        let src = make_test_video(&dir, "project_mt_cut_mergeonly.mp4", 4);
         let segments = vec![CutSegment { start: 0.0, end: 1.0 }, CutSegment { start: 2.0, end: 3.0 }];
         let result = cut_media(&Progress::silent(), &src, &segments, &dir.to_string_lossy(), false, true, false)
             .expect("cut_media не должен падать");
@@ -2133,8 +2133,8 @@ mod tests {
         let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
-        let src = make_test_video(&dir, "phoenix_mt_audio.mp4", 2);
-        let out = dir.join("phoenix_mt_audio_out.aac").to_string_lossy().into_owned();
+        let src = make_test_video(&dir, "project_mt_audio.mp4", 2);
+        let out = dir.join("project_mt_audio_out.aac").to_string_lossy().into_owned();
         let opts = ExtractAudioOpts { codec: "aac".into(), bitrate: Some("128k".into()), normalize: false };
         extract_audio(&Progress::silent(), &src, &out, &opts).expect("extract_audio не должен падать");
         let info = probe_media(&out).expect("результат должен читаться probe_media");
@@ -2154,9 +2154,9 @@ mod tests {
         let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
-        let a = make_test_video(&dir, "phoenix_mt_concat_a.mp4", 2);
-        let b = make_test_video(&dir, "phoenix_mt_concat_b.mp4", 2);
-        let out = dir.join("phoenix_mt_concat_out.mp4").to_string_lossy().into_owned();
+        let a = make_test_video(&dir, "project_mt_concat_a.mp4", 2);
+        let b = make_test_video(&dir, "project_mt_concat_b.mp4", 2);
+        let out = dir.join("project_mt_concat_out.mp4").to_string_lossy().into_owned();
         let mode = concat_media(&Progress::silent(), &[a.clone(), b.clone()], &out).expect("concat_media не должен падать");
         assert_eq!(mode, "copy", "одинаковые кодеки/разрешение — должен пойти быстрый путь");
         let info = probe_media(&out).expect("результат должен читаться");
@@ -2171,8 +2171,8 @@ mod tests {
         let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
-        let src = make_test_video(&dir, "phoenix_mt_cancel_src.mp4", 30);
-        let out = dir.join("phoenix_mt_cancel_out.mp4");
+        let src = make_test_video(&dir, "project_mt_cancel_src.mp4", 30);
+        let out = dir.join("project_mt_cancel_out.mp4");
         let _ = std::fs::remove_file(&out);
 
         // Отмену шлём из другого потока, как это делает кнопка в
@@ -2250,10 +2250,10 @@ mod tests {
         let _guard = ffmpeg_test_lock();
         if !ffmpeg_available() { eprintln!("ffmpeg недоступен — пропускаем"); return; }
         let dir = std::env::temp_dir();
-        let video = make_test_video(&dir, "phoenix_mt_mux_video.mp4", 2);
-        let audio_ru = make_test_audio(&dir, "phoenix_mt_mux_audio_ru.aac", 2);
-        let audio_en = make_test_audio(&dir, "phoenix_mt_mux_audio_en.aac", 2);
-        let out = dir.join("phoenix_mt_mux_out.mkv").to_string_lossy().into_owned();
+        let video = make_test_video(&dir, "project_mt_mux_video.mp4", 2);
+        let audio_ru = make_test_audio(&dir, "project_mt_mux_audio_ru.aac", 2);
+        let audio_en = make_test_audio(&dir, "project_mt_mux_audio_en.aac", 2);
+        let out = dir.join("project_mt_mux_out.mkv").to_string_lossy().into_owned();
 
         let tracks = vec![
             MuxTrack { path: video.clone(), kind: "video".into(), language: None, title: None, is_default: true },

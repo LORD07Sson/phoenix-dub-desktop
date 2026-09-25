@@ -38,7 +38,7 @@ import { loadAvatars } from "./profile.js";
 // предпочтение раскладки (у API нет и не должно быть такого поля) —
 // живёт в localStorage на пользователя, тем же приёмом, что избранное
 // в списке (см. favorites.js).
-function collapsedKey() { return `phoenix_board_collapsed_${state.telegramId || "anon"}`; }
+function collapsedKey() { return `project_board_collapsed_${state.telegramId || "anon"}`; }
 function readCollapsed() {
   try { return new Set(JSON.parse(localStorage.getItem(collapsedKey()) || "[]")); } catch (_) { return new Set(); }
 }
@@ -83,7 +83,7 @@ const SORTS = [
 const WIP_LIMITS = { working: 8, review: 6, revision: 6 };
 const STALE_AFTER_DAYS = 7;
 
-function sortKey() { return `phoenix_board_sort_${state.telegramId || "anon"}`; }
+function sortKey() { return `project_board_sort_${state.telegramId || "anon"}`; }
 function readSort() {
   try { return localStorage.getItem(sortKey()) || "smart"; } catch (_) { return "smart"; }
 }
@@ -501,7 +501,7 @@ function columnHtml(col, collapsed) {
 // Ряд stat-карточек и «Производительность» над доской — перенос
 // референса пользователя (Dribbble: Xentra Digital Marketing
 // Dashboard) один в один по вёрстке, но на реальных данных: те же 4
-// группы, что уже использует /api/dashboard/phoenix (draft→Черновики,
+// группы, что уже использует /api/dashboard/project (draft→Черновики,
 // working→В работе, review+revision→На проверке, completed→
 // Завершено), посчитанные здесь же из layout.columns — уже
 // загруженных для самой доски, без второго похода на сервер. Без
