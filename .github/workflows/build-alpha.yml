@@ -37,7 +37,11 @@ jobs:
     # публикации хуже, чем выстроиться в очередь и подождать; см. тот же
     # приём в MHSanaei/3x-ui release.yml.
     concurrency:
-      group: velopack-publish
+      # Своя очередь: общая с стабильной вытесняла ожидающий запуск —
+      # GitHub держит в группе только один pending. Релизы и фиды разные
+      # (vX.Y.Z/releases.win.json и alpha-latest/releases.alpha.json),
+      # так что параллельно они друг другу не мешают.
+      group: velopack-alpha
       cancel-in-progress: false
 
     steps:

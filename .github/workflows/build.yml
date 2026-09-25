@@ -28,7 +28,11 @@ jobs:
     # параллели; не отменяем уже идущую публикацию — оборваться на
     # середине заливки хуже, чем подождать.
     concurrency:
-      group: velopack-publish
+      # Своя очередь: общая с альфой вытесняла ожидающий запуск —
+      # GitHub держит в группе только один pending. Релизы и фиды разные
+      # (vX.Y.Z/releases.win.json и alpha-latest/releases.alpha.json),
+      # так что параллельно они друг другу не мешают.
+      group: velopack-stable
       cancel-in-progress: false
 
     steps:
