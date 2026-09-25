@@ -6,6 +6,7 @@
 // эффектов верхнего уровня почти в каждом модуле main.js), этому — одна
 // карточка. См. app/tauri.js::pinReportWindow — как это окно создаётся.
 
+import "./migrate-keys.js"; // первым: переносит старые ключи localStorage
 import { invoke, listen, getCurrentWindow, PIN_REPORT_EVENT } from "./tauri.js";
 import { state } from "./state.js";
 import { apiGet } from "./api.js";
@@ -16,7 +17,7 @@ import { esc, STATUS_DOT_CLASS, STATUS_COLOR_VAR, isOverdue, parseNoteTime } fro
 // SECURITY.md/README про происхождение). Полный theme.js сюда не тянем
 // специально: он вешает обработчик клика на #theme-toggle, которого в
 // этом окне просто нет — импорт уронил бы модуль в рантайме.
-try { document.documentElement.dataset.theme = localStorage.getItem("phoenix-theme") || "dark"; } catch (_) {}
+try { document.documentElement.dataset.theme = localStorage.getItem("project-theme") || "dark"; } catch (_) {}
 
 const root = document.getElementById("pin-root");
 const appWindow = getCurrentWindow();
@@ -117,7 +118,7 @@ async function boot() {
     state.token = await invoke("token_load");
   } catch (_) { state.token = null; }
   if (!state.token) {
-    renderError("Не выполнен вход — откройте основное окно PHOENIX DUB и войдите.");
+    renderError("Не выполнен вход — откройте основное окно Project и войдите.");
     return;
   }
   await load();

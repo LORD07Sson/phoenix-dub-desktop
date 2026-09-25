@@ -12,7 +12,7 @@ const POLL_INTERVAL_MS = 60_000;
 // видел в профиле (badge-me в мини-аппе). В отличие от системного тоста
 // выше, переживает перезапуск: «видел» — это открыл вкладку «Я», а не
 // «приложение было запущено, пока назначали».
-function seenKey() { return `phoenix_me_seen_reports_${state.telegramId || "anon"}`; }
+function seenKey() { return `project_me_seen_reports_${state.telegramId || "anon"}`; }
 function getSeen() {
   try {
     const raw = localStorage.getItem(seenKey());
@@ -70,7 +70,7 @@ async function pollAssignments() {
       const fresh = [...ids].filter(id => !knownAssigned.has(id));
       if (fresh.length) {
         sendNotification({
-          title: "PHOENIX DUB",
+          title: "Project",
           body: fresh.length === 1
             ? `Вам назначен отчёт ${fresh[0]}`
             : `Вам назначено ${fresh.length} новых отчётов`,

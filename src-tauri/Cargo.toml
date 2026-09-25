@@ -1,7 +1,7 @@
 [package]
 name = "phoenix-dub-desktop"
 version = "0.6.0"
-description = "PHOENIX DUB Desktop — клиент студии дубляжа"
+description = "Project Desktop — клиент студии дубляжа"
 edition = "2021"
 # `[T]::as_chunks` в audio_qc.rs стабилизирован в 1.88 — на более
 # старом тулчейне сборка падает с невнятной ошибкой про нестабильную фичу.

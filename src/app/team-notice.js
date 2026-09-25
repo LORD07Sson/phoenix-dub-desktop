@@ -15,7 +15,7 @@ const POLL_INTERVAL_MS = 120_000;
 let current = null;
 let maxLength = 500;
 
-function hiddenKey() { return `phoenix_notice_hidden_${state.telegramId || "anon"}`; }
+function hiddenKey() { return `project_notice_hidden_${state.telegramId || "anon"}`; }
 function noticeSig(n) { return n ? `${n.created_at}|${n.text}` : ""; }
 function isHidden(n) {
   try { return localStorage.getItem(hiddenKey()) === noticeSig(n); } catch (_) { return false; }

@@ -9,7 +9,7 @@ import { state } from "./state.js";
 const MAX_RECENT = 8;
 
 function storageKey() {
-  return `phoenix_recent_reports_${state.telegramId || "anon"}`;
+  return `project_recent_reports_${state.telegramId || "anon"}`;
 }
 
 function readList() {

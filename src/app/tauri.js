@@ -89,7 +89,7 @@ export async function pinReportWindow(publicId) {
   }
   return new WebviewWindow(PIN_WINDOW_LABEL, {
     url: `pin.html?id=${encodeURIComponent(publicId)}`,
-    title: `📌 ${publicId} — PHOENIX DUB`,
+    title: `📌 ${publicId} — Project`,
     width: 360,
     height: 520,
     minWidth: 300,

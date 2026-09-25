@@ -188,7 +188,7 @@ export async function openChannelPostSheet() {
     return `
       <section class="cp-sec">
         <label class="cp-label" for="cp-title">Заголовок</label>
-        <textarea id="cp-title" rows="2" placeholder="Например: Фрирен 2 — 7 серия в озвучке PHOENIX DUB">${esc(d.title)}</textarea>
+        <textarea id="cp-title" rows="2" placeholder="Например: Фрирен 2 — 7 серия в озвучке Project">${esc(d.title)}</textarea>
         <div class="cp-hint">Жирным выделится сам. Внутри можно &lt;i&gt;, &lt;u&gt;, &lt;tg-spoiler&gt;, &lt;a href="…"&gt;.</div>
       </section>
 

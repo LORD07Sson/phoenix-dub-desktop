@@ -1,4 +1,4 @@
-// PHOENIX DUB Desktop — Tauri-бэкенд.
+// Project Desktop — Tauri-бэкенд.
 //
 // Фронтенд (dist/) — обычный HTML/CSS/JS, ходит напрямую в тот же REST API,
 // что и мини-апп (`miniapp/server.py`), через fetch(). Rust-часть отвечает
@@ -1221,7 +1221,7 @@ fn main() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::LogDir { file_name: Some("phoenix-dub".into()) },
+                    tauri_plugin_log::TargetKind::LogDir { file_name: Some("project-dub".into()) },
                 ))
                 .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout))
                 .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview))
@@ -1310,7 +1310,7 @@ fn main() {
             // считать всё остальное при разборе присланного лога (версия
             // сборки — иначе непонятно, к какому коммиту относится баг-
             // репорт присланного файла).
-            log::info!("PHOENIX DUB Desktop {} запускается", app.package_info().version);
+            log::info!("Project Desktop {} запускается", app.package_info().version);
 
             // Глобальная горячая клавиша — свернуть/показать окно из любого
             // места (Ctrl+Shift+P). Не через `?`: если комбинацию уже занял

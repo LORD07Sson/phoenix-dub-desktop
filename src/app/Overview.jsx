@@ -39,7 +39,7 @@ import { boardCardHtml } from "./board.js";
 import { timelineHtml, playTimelineIntro } from "./charts.js";
 import { switchTab } from "./tabs.js";
 
-// Русские подписи колонок для превью-канбана — у /api/dashboard/phoenix
+// Русские подписи колонок для превью-канбана — у /api/dashboard/project
 // они приходят по-английски (Pending/In Progress/...), тем же смыслом,
 // что и у референса, но остальной интерфейс студии целиком на русском
 // (см. PRIORITY_LABELS/STATUS_DOT_CLASS в utils.js) — переопределяем
@@ -55,7 +55,7 @@ function todayStr() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// Превращает отчёт из /api/dashboard/phoenix в форму, которую ждёт
+// Превращает отчёт из /api/dashboard/project в форму, которую ждёт
 // boardCardHtml (та же карточка, что рисует настоящая «Доска» —
 // board.js). daysLeft/overdue считаем тут же, как их считал бы
 // board_layout на стороне Rust: без выдуманных полей, только
@@ -203,7 +203,7 @@ function Overview(props) {
   const maxAssigned = Math.max(1, ...d.performers.map(x => x.assigned));
 
   // «Требует внимания» — отчёты со статусом stuck (3+ дня без смены
-  // статуса, см. _attach_stuck на сервере) из /api/dashboard/phoenix.
+  // статуса, см. _attach_stuck на сервере) из /api/dashboard/project.
   const stuckReports = (props.dash?.board?.columns || [])
     .flatMap(c => c.reports || [])
     .filter(r => r.stuck)
@@ -405,7 +405,7 @@ export async function loadOverview() {
       apiGet("/trend").catch(() => null),
       // Не критично для остального Обзора — если недоступно, просто не
       // покажем «Требует внимания», а не завалим всю вкладку.
-      apiGet("/dashboard/phoenix").catch(() => null),
+      apiGet("/dashboard/project").catch(() => null),
       apiGet("/feed", { offset: 0, page_size: 4 }).catch(() => null),
     ]);
   } catch (e) {

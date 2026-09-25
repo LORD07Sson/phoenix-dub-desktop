@@ -2,22 +2,22 @@
 
 export function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  try { localStorage.setItem("phoenix-theme", theme); } catch (_) {}
+  try { localStorage.setItem("project-theme", theme); } catch (_) {}
 }
 
 // Стиль тёмной темы: "glow" (золотое свечение) или "fire" (огонь).
 export function applyLook(look) {
   document.documentElement.dataset.look = look;
-  try { localStorage.setItem("phoenix-look", look); } catch (_) {}
+  try { localStorage.setItem("project-look", look); } catch (_) {}
 }
 
 (function initTheme() {
   let saved = null;
-  try { saved = localStorage.getItem("phoenix-theme"); } catch (_) {}
+  try { saved = localStorage.getItem("project-theme"); } catch (_) {}
   applyTheme(saved || "dark");
   // Вариант оформления тёмной темы: "glow" (по умолчанию) или "fire".
   let look = null;
-  try { look = localStorage.getItem("phoenix-look"); } catch (_) {}
+  try { look = localStorage.getItem("project-look"); } catch (_) {}
   document.documentElement.dataset.look = look || "glow";
 })();
 

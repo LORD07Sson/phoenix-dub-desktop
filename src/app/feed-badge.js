@@ -16,7 +16,7 @@ const POLL_INTERVAL_MS = 60_000;
 // и точка отсечения предыдущего вошедшего не имеет отношения к
 // следующему.
 function lastSeenKey() {
-  return `phoenix_feed_last_seen_${state.telegramId || "anon"}`;
+  return `project_feed_last_seen_${state.telegramId || "anon"}`;
 }
 function getLastSeen() {
   try { return localStorage.getItem(lastSeenKey()) || ""; } catch (_) { return ""; }

@@ -4,7 +4,7 @@
 
 API_BASE = "https://minitg.shitstudent.com:8443/api"
 
-APP_NAME = "PHOENIX DUB Desktop"
+APP_NAME = "Project Desktop"
 ORG_NAME = "PhoenixDub"  # для QSettings/keyring — просто namespace, не показывается пользователю
 
 # Таймаут одного HTTP-запроса — сервер за секунды отвечает на всё, что

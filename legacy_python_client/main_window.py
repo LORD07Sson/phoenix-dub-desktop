@@ -46,7 +46,7 @@ class MainWindow(QMainWindow):
     def __init__(self, api: ApiClient, user_name: str):
         super().__init__()
         self.api = api
-        self.setWindowTitle(f"PHOENIX DUB Desktop — {user_name}")
+        self.setWindowTitle(f"Project Desktop — {user_name}")
         self.resize(980, 640)
 
         self.status_labels = dict(STATUS_LABELS)

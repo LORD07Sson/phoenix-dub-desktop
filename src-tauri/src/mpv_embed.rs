@@ -110,7 +110,7 @@ where
 
 // ---------- child-окно ----------
 
-const CLASS_NAME: windows::core::PCWSTR = w!("PhoenixMpvHost");
+const CLASS_NAME: windows::core::PCWSTR = w!("ProjectMpvHost");
 
 // Сама mpv рисует в это окно через --wid — нашему WndProc реально нечего
 // обрабатывать, кроме отдачи управления системе по умолчанию.
@@ -444,7 +444,7 @@ pub async fn mpv_create(app: &tauri::AppHandle, bounds: MpvBounds) -> Result<(),
     // Имя пайпа уникально не только по процессу, но и по поколению:
     // при пересоздании плеера старый mpv может ещё держать прежний пайп
     // пару миллисекунд, и новый клиент подключился бы к трупу.
-    let pipe_name = format!(r"\\.\pipe\phoenix-mpv-{}-{generation}", std::process::id());
+    let pipe_name = format!(r"\\.\pipe\project-mpv-{}-{generation}", std::process::id());
     let mpv = resolve_mpv();
     log::info!(
         "spawn {mpv} --wid={hwnd_raw} bounds={}x{}+{},{} gen={generation}",

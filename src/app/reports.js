@@ -92,7 +92,7 @@ async function fillTitleFilter(seasonId, selectedTitleId = "") {
 // Именованный снимок всех фильтров списка — как «⭐ пресеты» в мини-аппе.
 // Личная настройка, поэтому localStorage на пользователя.
 
-function presetsKey() { return `phoenix_list_presets_${state.telegramId || "anon"}`; }
+function presetsKey() { return `project_list_presets_${state.telegramId || "anon"}`; }
 function loadPresets() {
   try { return JSON.parse(localStorage.getItem(presetsKey()) || "[]"); } catch (_) { return []; }
 }
