@@ -230,7 +230,7 @@ export async function openReportDetail(publicId) {
 
         <aside class="rd-side">
           <div class="rd-meta">
-            <div class="rd-meta-row"><span>Исполнители</span>
+            <div class="rd-meta-row"><span>Исполнители / кого уведомить</span>
               ${(detail.assignees || []).map(a => `<div class="rd-person" data-assignee="${a.telegram_id}">
                 <span class="avatar-bubble" data-avatar-for="${a.telegram_id}">${esc(initials(a.first_name || a.username))}</span>
                 <span>${esc(a.first_name || a.username || `ID ${a.telegram_id}`)}</span>

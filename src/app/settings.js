@@ -8,6 +8,7 @@ import { applyTheme, applyLook } from "./theme.js";
 import { applyDensity, currentDensity } from "./density.js";
 import { focusModePreferred, setFocusModePreferred } from "./focus-mode.js";
 import { isDevModeOn, setDevModeOn } from "./devmode.js";
+import { desktopNotifyEnabled, setDesktopNotifyEnabled } from "./desktop-notify.js";
 import { openAdminPanel } from "./admin.js";
 import { tagLogger } from "./applog.js";
 
@@ -52,6 +53,7 @@ async function openSettings() {
     studio: '<path d="M4 20V9l8-5 8 5v11M9 20v-6h6v6"/>',
     diag: '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
     power: '<path d="M12 3v8M6.3 7.3a8 8 0 1 0 11.4 0"/>',
+    bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0"/>',
     focus: '<path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/><circle cx="12" cy="12" r="2.5"/>',
     dev: '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>',
     density: '<path d="M4 6h16M4 10h16M4 14h16M4 18h16"/>',
@@ -111,6 +113,7 @@ async function openSettings() {
         <section class="st-sec" id="st-behave">
           <h3>Поведение</h3>
           <div class="st-row">${ic(ICONS.power)}<div class="st-text"><b>Запускать при старте системы</b><span>Окно сразу уходит в трей и следит за назначениями</span></div>${sw("s-autostart", autostartOn)}</div>
+          <div class="st-row">${ic(ICONS.bell)}<div class="st-text"><b>Уведомления на рабочий стол</b><span>Личные, упоминания, назначения и действия по вашим отчётам — когда окно свёрнуто или в трее</span></div>${sw("s-desktop-notify", desktopNotifyEnabled())}</div>
           <div class="st-row">${ic(ICONS.focus)}<div class="st-text"><b>Фокус-режим при открытии отчёта</b><span>Карточка отчёта на весь экран, остальное прячется</span></div>${sw("s-focus-mode", focusModePreferred())}</div>
           ${state.isDeveloper ? `<div class="st-row dev-pill-toggle">${ic(ICONS.dev)}<div class="st-text"><b>Режим разработчика</b><span>Правка чужих ролей, профиля, даты вступления и наград — на карточке коллеги</span></div>${sw("s-dev-mode", isDevModeOn())}</div>` : ""}
         </section>
@@ -169,6 +172,7 @@ async function openSettings() {
   overlay.querySelector("#s-density").value = currentDensity();
   overlay.querySelector("#s-density").addEventListener("change", e => applyDensity(e.target.value));
   overlay.querySelector("#s-focus-mode").addEventListener("change", e => setFocusModePreferred(e.target.checked));
+  overlay.querySelector("#s-desktop-notify").addEventListener("change", e => setDesktopNotifyEnabled(e.target.checked));
   overlay.querySelector("#s-autostart").addEventListener("change", async e => {
     try {
       await invoke("set_autostart", { enabled: e.target.checked });

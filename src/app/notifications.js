@@ -1,7 +1,7 @@
 // Уведомления о новых назначениях — диф-опрос раз в минуту, сравниваем
 // с прошлым срезом и шлём системный тост только на реально новые id.
 
-import { sendNotification } from "./tauri.js";
+import { notifyDesktop } from "./desktop-notify.js";
 import { state } from "./state.js";
 import { apiGet } from "./api.js";
 
@@ -69,12 +69,9 @@ async function pollAssignments() {
     if (knownAssigned !== null) {
       const fresh = [...ids].filter(id => !knownAssigned.has(id));
       if (fresh.length) {
-        sendNotification({
-          title: "Project",
-          body: fresh.length === 1
-            ? `Вам назначен отчёт ${fresh[0]}`
-            : `Вам назначено ${fresh.length} новых отчётов`,
-        });
+        notifyDesktop("Project", fresh.length === 1
+          ? `Вам назначен отчёт ${fresh[0]}`
+          : `Вам назначено ${fresh.length} новых отчётов`);
       }
     }
     knownAssigned = ids;
