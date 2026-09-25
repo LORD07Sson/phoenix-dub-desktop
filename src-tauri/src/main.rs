@@ -28,13 +28,13 @@ use tauri_plugin_store::StoreExt;
 
 // Репозиторий публичный — GithubSource читает releases напрямую через
 // GitHub API, прокси на своём сервере не нужен.
-const UPDATE_REPO_URL: &str = "https://github.com/LORD07Sson/phoenix-dub-desktop";
+const UPDATE_REPO_URL: &str = "https://github.com/LORD07Sson/project-desktop";
 
 // Токен поднимает лимит запросов к GitHub API с 60/час (без токена, на
 // IP — см. friendly_update_error/check_for_update_cached ниже, этого не
 // хватало) до 5000/час. Зашивается на этапе СБОРКИ из переменной
 // окружения CI (см. .github/workflows/build.yml/build-alpha.yml,
-// секрет PHOENIX_UPDATE_TOKEN) — option_env! читает её во время
+// секрет PROJECT_UPDATE_TOKEN) — option_env! читает её во время
 // компиляции, а не во время работы приложения у пользователя, так что
 // сам токен пользователю не виден иначе как разбором бинарника.
 // Ожидаемый токен — fine-grained PAT с доступом ТОЛЬКО "Public
@@ -44,7 +44,7 @@ const UPDATE_REPO_URL: &str = "https://github.com/LORD07Sson/phoenix-dub-desktop
 // публичных данных. Локальная сборка без секрета (`cargo build` у
 // разработчика) — токена просто нет, GithubSource откатывается на
 // анонимный доступ, как было всегда; ничего не ломается.
-const GITHUB_UPDATE_TOKEN: Option<&str> = option_env!("PHOENIX_UPDATE_TOKEN");
+const GITHUB_UPDATE_TOKEN: Option<&str> = option_env!("PROJECT_UPDATE_TOKEN");
 
 // Канал обновлений — та же настройка Velopack, что описана в
 // docs.velopack.io/packaging/channels: сборки альфа-канала публикует

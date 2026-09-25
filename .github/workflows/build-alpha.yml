@@ -144,7 +144,7 @@ jobs:
       - name: cargo build --release
         shell: bash
         env:
-          PHOENIX_UPDATE_TOKEN: ${{ secrets.PHOENIX_UPDATE_TOKEN }}
+          PROJECT_UPDATE_TOKEN: ${{ secrets.PROJECT_UPDATE_TOKEN }}
         run: cargo build --release --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
       - name: Собрать альфа-канал через vpk
