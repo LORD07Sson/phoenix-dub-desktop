@@ -172,8 +172,7 @@ jobs:
       - name: cargo build --release
         shell: bash
         env:
-          # старый секрет — запасной, пока в настройках не появится PROJECT_UPDATE_TOKEN
-          PROJECT_UPDATE_TOKEN: ${{ secrets.PROJECT_UPDATE_TOKEN || secrets.PHOENIX_UPDATE_TOKEN }}
+          PROJECT_UPDATE_TOKEN: ${{ secrets.PROJECT_UPDATE_TOKEN }}
         run: cargo build --release --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
       # Velopack вместо tauri-action+NSIS: GithubSource на клиенте читает
