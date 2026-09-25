@@ -161,7 +161,7 @@ jobs:
           test -s src-tauri/binaries/mpv.exe || { echo "::error::mpv.exe не найден в архиве"; exit 1; }
           test -s src-tauri/binaries/d3dcompiler_43.dll || { echo "::error::d3dcompiler_43.dll не найден в архиве"; exit 1; }
 
-      # PHOENIX_UPDATE_TOKEN — fine-grained PAT с доступом только "Public
+      # PROJECT_UPDATE_TOKEN — fine-grained PAT с доступом только "Public
       # Repositories (read-only)" (см. main.rs: GITHUB_UPDATE_TOKEN,
       # option_env! читает её прямо здесь, во время сборки). Поднимает
       # лимит проверки обновлений с 60/час на IP до 5000/час — секрет
@@ -172,7 +172,8 @@ jobs:
       - name: cargo build --release
         shell: bash
         env:
-          PHOENIX_UPDATE_TOKEN: ${{ secrets.PHOENIX_UPDATE_TOKEN }}
+          # старый секрет — запасной, пока в настройках не появится PROJECT_UPDATE_TOKEN
+          PROJECT_UPDATE_TOKEN: ${{ secrets.PROJECT_UPDATE_TOKEN || secrets.PHOENIX_UPDATE_TOKEN }}
         run: cargo build --release --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
       # Velopack вместо tauri-action+NSIS: GithubSource на клиенте читает
