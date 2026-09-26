@@ -14,9 +14,9 @@ export const state = {
   selected: new Set(), // public_id
   statusOptions: [
     ["draft", "Черновик"],
+    ["review", "Озвучка"],
+    ["revision", "Перезапись/дозапись"],
     ["working", "В работе"],
-    ["review", "На проверке"],
-    ["revision", "Требует исправления"],
     ["completed", "Завершено"],
     ["cancelled", "Отменено"],
   ],
