@@ -615,9 +615,12 @@ function statusOptionsHtml(selected) {
     `<option value="${v}" ${v === selected ? "selected" : ""}>${esc(label)}</option>`).join("");
 }
 
-function usersOptionsHtml() {
-  if (!state.users.length) return `<option value="">Нет доступных исполнителей</option>`;
-  return state.users.map(u => `<option value="${u.telegram_id}">${esc(u.name)}${esc(pauseSuffix(u))}</option>`).join("");
+// Галочки, а не <select>: назначить можно сразу нескольких. Сервер
+// назначение добавляет, а не заменяет («+ ещё исполнитель» в карточке),
+// поэтому каждый отмеченный — отдельный запрос.
+function usersChecksHtml() {
+  if (!state.users.length) return `<div class="no-assignee">Нет доступных исполнителей</div>`;
+  return state.users.map(u => `<label class="assign-pick"><input type="checkbox" value="${u.telegram_id}"><span>${esc(u.name)}${esc(pauseSuffix(u))}</span></label>`).join("");
 }
 
 export function changeStatusDialog(publicIds, onDone, currentStatus) {
@@ -652,30 +655,47 @@ export function changeStatusDialog(publicIds, onDone, currentStatus) {
 
 export function assignDialog(publicIds, onDone) {
   const overlay = openSheet(`
-    <h2>Назначить исполнителя — ${publicIds.length > 1 ? publicIds.length + " отчётов" : publicIds[0]}</h2>
-    <div class="row"><select id="dlg-user">${usersOptionsHtml()}</select></div>
+    <h2>Исполнители / кого уведомить — ${publicIds.length > 1 ? publicIds.length + " отчётов" : publicIds[0]}</h2>
+    <input type="search" class="field-input assign-q" id="dlg-user-q" placeholder="Найти человека…" aria-label="Найти человека">
+    <div class="assign-list" id="dlg-users">${usersChecksHtml()}</div>
     <div class="sheet-actions">
       <button class="btn ghost" data-close>Отмена</button>
-      <button class="btn primary" id="dlg-apply">Назначить</button>
+      <button class="btn primary" id="dlg-apply" disabled>Назначить</button>
     </div>
   `);
+  const apply = overlay.querySelector("#dlg-apply");
+  const picked = () => [...overlay.querySelectorAll("#dlg-users input:checked")].map(i => Number(i.value));
+  overlay.querySelector("#dlg-users").addEventListener("change", () => {
+    const n = picked().length;
+    apply.disabled = !n;
+    apply.textContent = n > 1 ? `Назначить (${n})` : "Назначить";
+  });
+  overlay.querySelector("#dlg-user-q").addEventListener("input", e => {
+    const q = e.target.value.trim().toLowerCase();
+    overlay.querySelectorAll(".assign-pick").forEach(l => { l.hidden = !!q && !l.textContent.toLowerCase().includes(q); });
+  });
   overlay.querySelector("[data-close]").addEventListener("click", () => overlay.remove());
-  overlay.querySelector("#dlg-apply").addEventListener("click", async () => {
-    const telegramId = Number(overlay.querySelector("#dlg-user").value);
-    if (!telegramId) return;
+  apply.addEventListener("click", async () => {
+    const ids = picked();
+    if (!ids.length) return;
+    apply.disabled = true;
     try {
-      if (publicIds.length === 1) {
-        await apiPost(`/report/${publicIds[0]}/assign`, { telegram_id: telegramId });
-      } else {
-        await apiPost("/reports/bulk/assign", { public_ids: publicIds, telegram_id: telegramId });
+      for (const telegramId of ids) {
+        if (publicIds.length === 1) {
+          await apiPost(`/report/${publicIds[0]}/assign`, { telegram_id: telegramId });
+        } else {
+          await apiPost("/reports/bulk/assign", { public_ids: publicIds, telegram_id: telegramId });
+        }
       }
-      toast("Исполнитель назначен.", "success");
+      toast(ids.length > 1 ? `Назначено исполнителей: ${ids.length}.` : "Исполнитель назначен.", "success");
       overlay.remove();
       state.selected.clear();
       await loadReports();
       if (onDone) await onDone();
     } catch (e) {
       toast(`Не удалось назначить: ${e.message}`, "error");
+      apply.disabled = false;
+      await loadReports(); // часть могла успеть назначиться
     }
   });
 }

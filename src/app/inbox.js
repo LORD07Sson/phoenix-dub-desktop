@@ -10,15 +10,18 @@ import { $, esc, relTime } from "./utils.js";
 import { switchTab } from "./tabs.js";
 import { openReportDetail } from "./report-detail.js";
 import { openChatKey } from "./messages.js";
+import { notifyDesktop } from "./desktop-notify.js";
 
 const POLL_MS = 60_000;
 const FILTERS = [["all", "Все"], ["at", "Упоминания"], ["due", "Сроки"], ["work", "Работа"], ["chat", "Личные"]];
 const ICON = { work: "▶", due: "⏰", at: "@", chat: "✉", team: "🎂" };
+const TITLE = { work: "по вашему отчёту", due: "срок", at: "упоминание", chat: "личное сообщение", team: "день рождения" };
 const COLOR = { work: "var(--fire)", due: "var(--s-stop)", at: "var(--gold)", chat: "var(--s-review)", team: "var(--s-done)" };
 
 let items = [];
 let filter = "all";
 let lastUnread = 0;
+let notified = null; // Set id, о которых уже была всплывашка; null — первого опроса ещё не было
 
 function key() { return `project_inbox_${state.telegramId || "anon"}`; }
 function readState() {
@@ -61,6 +64,32 @@ function textOf(it) {
   if (it.kind === "chat") return `<b>${it.count}</b> ${it.count === 1 ? "новое сообщение" : "новых сообщения"} от <b>${esc(it.actor)}</b>`;
   if (it.kind === "team") return `День рождения у <b>${esc(it.actor)}</b> ${it.days === 0 ? "сегодня 🎉" : `через ${it.days} дн.`}`;
   return "";
+}
+
+// То же, что textOf, но простым текстом — для системной всплывашки.
+function plainOf(it) {
+  const rep = it.report ? `${it.report} «${it.title || ""}»` : "";
+  if (it.kind === "work") return `${it.actor}: ${it.action}${it.detail && !/^U-\d+$/.test(it.detail) ? ` — ${it.detail}` : ""} · ${rep}`;
+  if (it.kind === "due") return `${rep} — ${it.days < 0 ? `просрочен на ${-it.days} дн.` : it.days === 0 ? "срок сегодня" : "срок завтра"}`;
+  if (it.kind === "at") return `${it.actor} упомянул(а) вас · ${it.where}: ${it.text}`;
+  if (it.kind === "chat") return `${it.actor}: ${it.count === 1 ? "новое сообщение" : `новых сообщений — ${it.count}`}`;
+  if (it.kind === "team") return `День рождения у ${it.actor} ${it.days === 0 ? "сегодня 🎉" : `через ${it.days} дн.`}`;
+  return "";
+}
+
+// Всплывашка на рабочий стол — только о том, что появилось после
+// запуска: первый опрос лишь запоминает текущий список, иначе при каждом
+// входе вываливалась бы вся накопленная лента. Назначения админу уже
+// сообщает notifications.js — их тут не дублируем.
+function notifyFresh() {
+  const st = readState();
+  const fresh = items.filter(it => !isRead(it, st) && !(notified && notified.has(it.id))
+    && !(state.isAdmin && it.kind === "work" && /назнач/i.test(it.action || "")));
+  const first = notified === null;
+  notified = new Set([...(notified || []), ...items.map(it => it.id)]);
+  if (first || !fresh.length) return;
+  if (fresh.length === 1) notifyDesktop(`Project — ${TITLE[fresh[0].kind] || "уведомление"}`, plainOf(fresh[0]));
+  else notifyDesktop("Project", `Новых уведомлений: ${fresh.length}. ${plainOf(fresh[0])}`);
 }
 
 function paint() {
@@ -122,11 +151,13 @@ export async function refreshInbox() {
     const d = await apiGet("/me/inbox");
     items = d.items || [];
     paint();
+    notifyFresh();
   } catch (_) { /* старый сервер или нет связи — колокольчик просто молчит */ }
 }
 
 export function resetInbox() {
   items = [];
+  notified = null;
   lastUnread = -1;
   paint();
 }

@@ -4522,3 +4522,11 @@ body.focus-mode .report-detail-overlay .sheet {
 .ib-it.unread::after { content: ""; position: absolute; right: 10px; top: 16px; width: 8px; height: 8px; border-radius: 50%; background: var(--fire); box-shadow: 0 0 8px var(--fire); }
 .ib-empty { padding: 34px 12px; text-align: center; font-size: 13px; color: var(--ink-dim); }
 @media (prefers-reduced-motion: reduce) { .ib-bell.ring svg, .ib-panel { animation: none; } }
+
+/* Диалог «Исполнители / кого уведомить» — несколько галочек сразу */
+.assign-q { width: 100%; margin-bottom: 8px; }
+.assign-list { display: grid; gap: 2px; max-height: 320px; overflow-y: auto; margin-bottom: 4px; }
+.assign-pick { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+.assign-pick:hover { background: var(--glass-hi); }
+.assign-pick[hidden] { display: none; }
+.assign-pick input { accent-color: var(--fire); }
