@@ -12,7 +12,7 @@ const WORKLOAD_COLOR_VAR = { draft: "--s-draft", working: "--s-work", review: "-
 // см. _PROJECT_BOARD_GROUPS в server.py) — тот же смысл, что и у
 // референса, но остальной интерфейс студии целиком на русском (та же
 // подмена, что уже сделана для превью-канбана на Обзоре).
-const WORKLOAD_LABELS = { draft: "Черновики", working: "В работе", review: "На проверке", completed: "Завершено" };
+const WORKLOAD_LABELS = { draft: "Черновики", working: "В работе", review: "Озвучка", completed: "Завершено" };
 
 function periodDeltaPct(current, prior) {
   if (!prior) return current > 0 ? null : 0;

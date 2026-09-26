@@ -502,15 +502,15 @@ function columnHtml(col, collapsed) {
 // референса пользователя (Dribbble: Xentra Digital Marketing
 // Dashboard) один в один по вёрстке, но на реальных данных: те же 4
 // группы, что уже использует /api/dashboard/project (draft→Черновики,
-// working→В работе, review+revision→На проверке, completed→
+// review+revision→Озвучка, working→В работе, completed→
 // Завершено), посчитанные здесь же из layout.columns — уже
 // загруженных для самой доски, без второго похода на сервер. Без
 // дельты «+N% от прошлого месяца»: сравнивать не с чем, выдумывать
 // процент — нет.
 const BOARD_STAT_GROUPS = [
   { key: "draft", label: "Черновики", statuses: ["draft"], icon: "📁" },
+  { key: "review", label: "Озвучка", statuses: ["review", "revision"], icon: "🎙" },
   { key: "working", label: "В работе", statuses: ["working"], icon: "⏳" },
-  { key: "review", label: "На проверке", statuses: ["review", "revision"], icon: "🔍" },
   { key: "completed", label: "Завершено", statuses: ["completed"], icon: "✅" },
 ];
 

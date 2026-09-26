@@ -163,7 +163,7 @@ export async function openReportDetail(publicId) {
         </div>
         <div class="rd-steps">
           ${steps}
-          <button class="rd-step-side${side === "revision" ? " on" : ""}" data-set-status="revision" style="--c:var(--s-fix);">↺ На исправление</button>
+          <button class="rd-step-side${side === "revision" ? " on" : ""}" data-set-status="revision" style="--c:var(--s-fix);">↺ На перезапись</button>
           ${side === "cancelled" ? `<span class="rd-step-side on" style="--c:var(--s-stop);">Отменено</span>` : ""}
         </div>
       </div>
@@ -574,9 +574,9 @@ function pipelineAdvanceHtml(pipeline, assignable) {
   return advanceRow;
 }
 
-// Основной путь статусов для шапки карточки; «на исправление» и
-// «отменено» — боковые, рисуются отдельно.
-const STATUS_PATH = [["draft", "Черновик"], ["working", "В работе"], ["review", "На проверке"], ["completed", "Готово"]];
+// Основной путь статусов («ветки» отчёта) для шапки карточки;
+// «перезапись/дозапись» и «отменено» — боковые, рисуются отдельно.
+const STATUS_PATH = [["draft", "Черновик"], ["review", "Озвучка"], ["working", "В работе"], ["completed", "Готово"]];
 
 // Пайплайн таймлайном: кто на каком этапе, пройденное отмечено.
 function pipelineTimelineHtml(pipeline) {

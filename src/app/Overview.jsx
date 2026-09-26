@@ -45,7 +45,7 @@ import { switchTab } from "./tabs.js";
 // (см. PRIORITY_LABELS/STATUS_DOT_CLASS в utils.js) — переопределяем
 // только подпись, сама группировка (draft/working/review+revision/
 // completed) остаётся серверной.
-const PREVIEW_COLUMN_LABELS = { draft: "Черновики", working: "В работе", review: "На проверке", completed: "Завершено" };
+const PREVIEW_COLUMN_LABELS = { draft: "Черновики", working: "В работе", review: "Озвучка", completed: "Завершено" };
 const PREVIEW_CARDS_PER_COLUMN = 2;
 const PREVIEW_TIMELINE_MAX_ROWS = 6;
 
@@ -226,7 +226,7 @@ function Overview(props) {
         <StatCard delay={0} label="Активные серии" value={activeTotal} sub={`из ${d.reports.total} всего`}
           pill={activeDelta !== null ? `${activeDelta >= 0 ? "+" : ""}${activeDelta}%` : null}
           pillVar={activeDelta !== null && activeDelta < 0 ? "--s-stop" : "--s-done"} />
-        <StatCard delay={40} label="В работе" value={count("working")} sub={`${count("review") + count("revision")} на проверке и правках`} />
+        <StatCard delay={40} label="В работе" value={count("working")} sub={`${count("review") + count("revision")} в озвучке и на перезаписи`} />
         <StatCard delay={80} label="Завершено" value={count("completed")} sub="за всё время" />
         <StatCard delay={120} label="Просрочено" value={d.reports.overdue} tone={d.reports.overdue > 0 ? "danger" : ""}
           sub={`${d.reports.important} важных (высокий/срочный)`} />
